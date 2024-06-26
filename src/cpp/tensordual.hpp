@@ -1283,7 +1283,9 @@ public:
      * Note this is more limited than the torch.einsum function
      * as it only supports two arguments
      */
-    static TensorMatDual einsum(const std::string& arg, const TensorMatDual& first, const TensorDual& second) {
+    static TensorDual einsum(const std::string& arg, 
+                             const TensorMatDual& first, 
+                             const TensorDual& second) {
 
         auto r = torch::einsum(arg, {first.r, second.r});
 
@@ -1299,7 +1301,7 @@ public:
         auto darg2 = arg1+","+arg2+"z->"+arg3+"z";
         auto d2 = torch::einsum(darg2, {first.r, second.d});
 
-        return TensorMatDual(std::move(r), std::move(d1 + d2));
+        return TensorDual(std::move(r), std::move(d1 + d2));
     }
 
 
