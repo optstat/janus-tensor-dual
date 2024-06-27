@@ -891,9 +891,9 @@ public:
     
     TensorDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
         auto r = this->r.index(indices);
-        r.dim() == 1 ? r = r.unsqueeze(-1) : r;
+        r.dim() == 1 ? r = r.unsqueeze(1) : r;
         auto d = this->d.index(indices);
-        d.dim() == 2 ? d = d.unsqueeze(-1) : d;
+        d.dim() == 2 ? d = d.unsqueeze(1) : d;
         return TensorDual(r, d);
     }
 
@@ -1251,9 +1251,10 @@ public:
 
     TensorMatDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
         auto r = this->r.index(indices);
-        r.dim() == 2 ? r = r.unsqueeze(-1) : r;
+        //Add a column if it is missing
+        r.dim() == 2 ? r = r.unsqueeze(2) : r;
         auto d = this->d.index(indices);
-        d.dim() == 3 ? d = d.unsqueeze(-1) : d;
+        d.dim() == 3 ? d = d.unsqueeze(2) : d;
         return TensorMatDual(r, d);
     }
 
