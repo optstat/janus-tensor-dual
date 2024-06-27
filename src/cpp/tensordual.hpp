@@ -891,7 +891,9 @@ public:
     
     TensorDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
         auto r = this->r.index(indices);
+        r.dim() == 1 ? r = r.unsqueeze(-1) : r;
         auto d = this->d.index(indices);
+        d.dim() == 2 ? d = d.unsqueeze(-1) : d;
         return TensorDual(r, d);
     }
 
@@ -915,11 +917,6 @@ public:
         return TensorDual(real, dual);
     }
 
-    TensorDual index(const std::vector<TensorIndex>& index) {
-        auto real = r.index(index);
-        auto dual = d.index(index);
-        return TensorDual(real, dual);
-    }
 
 
     void index_put_(const torch::Tensor& mask, const TensorDual& value) {
@@ -1254,7 +1251,9 @@ public:
 
     TensorMatDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
         auto r = this->r.index(indices);
+        r.dim() == 2 ? r = r.unsqueeze(-1) : r;
         auto d = this->d.index(indices);
+        d.dim() == 3 ? d = d.unsqueeze(-1) : d;
         return TensorMatDual(r, d);
     }
 
@@ -1272,12 +1271,6 @@ public:
         return TensorMatDual(real, dual);
     }
 
-    TensorMatDual index(const TensorIndex& index) {
-        auto real = r.index(index);
-        auto dual = d.index(index);
-
-        return TensorMatDual(real, dual);
-    }
 
     TensorMatDual index(const std::vector<TensorIndex>& index) {
         auto real = r.index(index);
