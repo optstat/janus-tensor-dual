@@ -886,6 +886,15 @@ public:
         auto d = torch::imag(this->d);
         return TensorDual(r, d);
     }
+    
+
+    
+    TensorDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
+        auto r = this->r.index(indices);
+        auto d = this->d.index(indices);
+        return TensorDual(r, d);
+    }
+
 
 
     TensorDual index(int index) {
@@ -1242,6 +1251,13 @@ public:
         auto dual = this->d/other.unsqueeze(-1);
         return TensorMatDual(real, dual);
     }
+
+    TensorMatDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
+        auto r = this->r.index(indices);
+        auto d = this->d.index(indices);
+        return TensorMatDual(r, d);
+    }
+
 
     TensorMatDual index(int index) {
         auto real = this->r.index({index});
