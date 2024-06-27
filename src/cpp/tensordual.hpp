@@ -6,7 +6,7 @@
 #include <vector>
 using TensorIndex = torch::indexing::TensorIndex;
 using Slice = torch::indexing::Slice;
-
+namespace janus {
 
 class TensorMatDual;
 
@@ -1675,7 +1675,7 @@ TensorMatDual ger(const TensorDual& x, const TensorDual& y) {
 
 TensorDual defaultTensorDual = TensorDual::createZero(std::move(torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kFloat64))), 1);
 
-
+}
 
 
 

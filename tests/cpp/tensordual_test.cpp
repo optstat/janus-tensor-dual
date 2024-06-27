@@ -4,6 +4,7 @@
 #include "../../src/cpp/tensordual.hpp"
 #include "../../src/cpp/janus_util.hpp"
 
+using namespace janus;
 // Test case for zeros method
 /**
  *  g++ -g -std=c++17 tensordual_test.cpp -o dualtest   -I /home/panos/Applications/libtorch/include/torch/csrc/api/include/   -I /home/panos/Applications/libtorch/include/torch/csrc/api/include/torch/   -I /home/panos/Applications/libtorch/include/   -I /usr/local/include/gtest  -L /usr/local/lib   -lgtest  -lgtest_main -L /home/panos/Applications/libtorch/lib/ -ltorch   -ltorch_cpu   -ltorch_cuda   -lc10 -lpthread -Wl,-rpath,/home/panos/Applications/libtorch/lib
@@ -1458,13 +1459,13 @@ TEST (TensorMatDualTest, einsumTest2)
 {
     auto r1 = torch::randn({2, 2, 3});
     auto d1 = torch::randn({2, 2, 3, 4});
-    auto r2 = torch::randn({2, 2});
-    auto d2 = torch::randn({2, 2, 4});
+    auto r2 = torch::randn({2, 3});
+    auto d2 = torch::randn({2, 3, 4});
     TensorMatDual td1(r1, d1);
     TensorDual td2(r2, d2);
-    TensorMatDual result = TensorMatDual::einsum("mij,mi->mij", td1, td2);
-    auto r = torch::einsum("mij,mi->mij", {r1, r2});
-    auto d = torch::einsum("mij,mik->mijk", {r1, d2}) + torch::einsum("mi,mijk->mijk", {r2, d1});
+    TensorDual result = TensorMatDual::einsum("mij,mj->mi", td1, td2);
+    auto r = torch::einsum("mij,mj->mi", {r1, r2});
+    auto d = torch::einsum("mij,mjk->mik", {r1, d2}) + torch::einsum("mijk,mj->mik", {d1, r2});
     EXPECT_TRUE(result.r.equal(r));
     EXPECT_TRUE(result.d.equal(d));
 }

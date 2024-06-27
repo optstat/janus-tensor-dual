@@ -6,7 +6,7 @@
 #include "tensorhyperdual.hpp"
 #include <iostream>
 
-
+using namespace janus;
 
 // Define the primary template for the tensor
 template <typename T>

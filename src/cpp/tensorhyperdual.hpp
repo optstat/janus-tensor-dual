@@ -8,7 +8,7 @@
 #include <type_traits> // For std::is_scalar
 
 using TensorIndex = torch::indexing::TensorIndex;
-
+namespace janus {
 class TensorHyperDual {
 
 public:
@@ -1202,6 +1202,6 @@ TensorMatHyperDual ger(const TensorHyperDual& x, const TensorHyperDual& y) {
 }
 
 
-
+}
 
 #endif
