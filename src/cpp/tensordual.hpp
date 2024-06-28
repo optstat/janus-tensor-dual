@@ -74,6 +74,11 @@ public:
         d.requires_grad_(req_grad);
     }
 
+    void backward() {
+        r.backward();
+        d.backward();
+    }
+
 
     /**
      * Calculates the gradient of the TensorDual object
@@ -1287,6 +1292,11 @@ public:
     void requires_grad_(bool req_grad) {
         r.requires_grad_(req_grad);
         d.requires_grad_(req_grad);
+    }
+
+    void backward() {
+        r.backward();
+        d.backward();
     }
 
 
