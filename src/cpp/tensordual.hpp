@@ -69,6 +69,11 @@ public:
         d.set_requires_grad(req_grad);
     }
 
+    void requires_grad_(bool req_grad) {
+        r.requires_grad_(req_grad);
+        d.requires_grad_(req_grad);
+    }
+
 
     /**
      * Calculates the gradient of the TensorDual object
@@ -1279,12 +1284,21 @@ public:
         return TensorMatDual(real, dual);
     }
 
+    void requires_grad_(bool req_grad) {
+        r.requires_grad_(req_grad);
+        d.requires_grad_(req_grad);
+    }
+
+
+
     TensorMatDual abs() const {
         auto abs_r = torch::abs(r); // Compute the absolute value of the real part
         auto sign_r = torch::is_complex(r) ? torch::sign(torch::real(r)) : torch::sign(r); // Compute the sign of the real part
         auto abs_d = sign_r.unsqueeze(-1) * d; // The dual part multiplies by the sign of the real part
         return TensorMatDual(abs_r, abs_d);
     }
+
+
 
 
 
