@@ -992,6 +992,58 @@ TEST(TensorDualTest, TensorDualLog)
 }
 
 
+
+TEST(TensorDualTest, TensorDualSoftSign)
+{
+    auto r1 = torch::rand({2, 2}).to(torch::kFloat64).abs().requires_grad_(false); //This is only correct for x>=1
+    auto d1 = torch::rand({2, 2, 2}).to(torch::kFloat64).requires_grad_(false);
+
+    //Set the dual parts to 1.0 so there is exactly one per element
+
+    TensorDual td1(r1.clone(), d1.clone());
+
+    
+    TensorDual result = td1.softsign();
+    //calculate the result using back propagation
+    torch::Tensor r3 = r1.clone().requires_grad_(true);
+    auto J1 = torch::nn::functional::softsign(r3);
+    //The output is on the row side and the input on the column side
+    auto jac1 = janus::compute_batch_jacobian(J1, r3);
+    auto jac = torch::bmm(jac1,d1); //Use the chain rule
+    //std::cerr << torch::einsum("mij, mjk->mik",{jac, d1}) << std::endl;
+    //std::cerr << result.d << std::endl;
+    EXPECT_TRUE(torch::allclose(result.d, jac));
+}
+
+// Define the inverse softsign function
+torch::Tensor inverse_softsign(const torch::Tensor& y) {
+    return y / (1 - y.abs());
+}
+
+TEST(TensorDualTest, TensorDualSoftSignInv)
+{
+    auto r1 = torch::rand({2, 2}).to(torch::kFloat64).abs().requires_grad_(false); //This is only correct for x>=1
+    auto d1 = torch::rand({2, 2, 2}).to(torch::kFloat64).requires_grad_(false);
+
+    //Set the dual parts to 1.0 so there is exactly one per element
+
+    TensorDual td1(r1.clone(), d1.clone());
+
+    
+    TensorDual result = td1.softsigninv();
+    //calculate the result using back propagation
+    torch::Tensor r3 = r1.clone().requires_grad_(true);
+    auto J1 = inverse_softsign(r3);
+    //The output is on the row side and the input on the column side
+    auto jac1 = janus::compute_batch_jacobian(J1, r3);
+    auto jac = torch::bmm(jac1,d1); //Use the chain rule
+    //std::cerr << torch::einsum("mij, mjk->mik",{jac, d1}) << std::endl;
+    //std::cerr << result.d << std::endl;
+    EXPECT_TRUE(torch::allclose(result.d, jac));
+}
+
+
+
 TEST(TensorDualTest, TensorDualSqrt)
 {
     auto r1 = torch::rand({2, 2}).to(torch::kFloat64).abs().requires_grad_(false); //This is only correct for x>=1

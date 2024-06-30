@@ -847,6 +847,18 @@ public:
       return TensorDual(r, d); 
     }
 
+    TensorDual softsign() const {
+      auto r = this->r / (1.0 + torch::abs(this->r)); // Compute the softsign of the real part
+      auto d = (1.0 + torch::abs(this->r)).pow(-2).unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
+      return TensorDual(r, d); 
+    }
+
+    TensorDual softsigninv() const {
+      auto r = this->r / (1.0 - torch::abs(this->r)); // Compute the softsigninv of the real part
+      auto d = (1.0 - torch::abs(this->r)).pow(-2).unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
+      return TensorDual(r, d); 
+    }
+
     TensorDual max() {
      // max_values, max_indices = torch.max(self.r, dim=1, keepdim=True)
      auto max_result = torch::max(this->r, /*dim=*/1, /*keepdim=*/true);    
@@ -1299,6 +1311,7 @@ public:
         d.backward();
     }
 
+ 
 
 
     TensorMatDual abs() const {
