@@ -1206,6 +1206,12 @@ public:
         return TensorMatDual(r, d);
     }
 
+    static TensorMatDual cat(const TensorMatDual& t1, const TensorMatDual &t2, int dim)
+    {
+        auto r = torch::cat({t1.r, t2.r}, dim);
+        auto d = torch::cat({t1.d, t2.d}, dim);
+        return TensorMatDual(r, d);
+    }
 
     static TensorMatDual cat(const TensorMatDual& t1, const TensorDual &t2)
     {
