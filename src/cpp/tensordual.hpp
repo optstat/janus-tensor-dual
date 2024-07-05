@@ -1199,6 +1199,9 @@ public:
     }
     
     
+    /**
+     * Defaults to dimension 2 for concatenation
+     */
     static TensorMatDual cat(const TensorMatDual& t1, const TensorMatDual &t2)
     {
         auto r = torch::cat({t1.r, t2.r}, 2);
