@@ -1237,6 +1237,11 @@ public:
         return TensorMatDual(this->r + other.r, this->d + other.d);
     }
 
+    //overload the + operator
+    TensorMatDual operator+(const TensorDual& other) const {
+        return TensorMatDual(this->r + other.r, this->d + other.d);
+    }
+
 
     //overload the - operator
     TensorMatDual operator-(const TensorMatDual& other) const {
