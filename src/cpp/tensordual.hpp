@@ -1669,7 +1669,8 @@ TensorDual max(const TensorDual& lhs, const torch::Tensor& rhs) {
     auto resr = torch::zeros_like(lhs.r);
     auto resd = torch::zeros_like(lhs.d);    
     resr.index_put_({mask}, lhs.r.index({mask}));
-    resr.index_put_({~mask}, rhs.index({~mask}));
+    rhs.dim() == lhs.r.dim() ? resr.index_put_({~mask}, rhs.index({~mask})) : 
+                               resr.index_put_({~mask}, rhs);
     resd.index_put_({mask}, lhs.d.index({mask}));
     return TensorDual(resr, resd);
 }
