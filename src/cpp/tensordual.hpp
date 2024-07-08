@@ -632,8 +632,9 @@ public:
     }
 
     TensorDual operator/(const torch::Tensor& other) const {
-        auto r = this->r / other;
-        auto d = this->d / other.unsqueeze(-1);
+        auto othere = other.dim() != this->r.dim() ? other.unsqueeze(1) : other;
+        auto r = this->r / othere;
+        auto d = this->d / othere.unsqueeze(-1);
         return TensorDual(r, d);
     }
 
