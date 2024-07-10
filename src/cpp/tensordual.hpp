@@ -1249,6 +1249,12 @@ public:
         return TensorMatDual(this->r - other.r, this->d - other.d);
     }
 
+    //overload the - operator
+    TensorMatDual operator-(const double& other) const {
+        return TensorMatDual(this->r - other, this->d);
+    }
+
+
 
     // Overload the equals operator for TensorDual == TensorDual
     torch::Tensor operator==(const TensorMatDual& other) const {
