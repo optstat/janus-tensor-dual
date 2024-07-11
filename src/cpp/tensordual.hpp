@@ -1122,7 +1122,7 @@ public:
  
     TensorMatDual eye() {
         auto r = torch::eye(this->r.size(1), this->r.options()).repeat({this->r.size(0), 1, 1});
-        auto d = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(2), this->d.size(2)}, this->d.options());
+        auto d = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(2), this->d.size(3)}, this->d.options());
         return TensorMatDual(r, d);
     }
 
