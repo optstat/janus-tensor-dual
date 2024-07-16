@@ -1556,6 +1556,11 @@ TensorDual operator*(const torch::Tensor& tensor, const TensorDual& td) {
     return TensorDual(std::move(real), std::move(dual));
 }
 
+// Non-member overload for torch::Tensor / TensorDual
+TensorDual operator/(const torch::Tensor& tensor, const TensorDual& td) {
+    auto tdr = td.reciprocal();
+    return tensor * tdr;
+}
 
 
 // Non-member overload for torch::Tensor + TensorDual
