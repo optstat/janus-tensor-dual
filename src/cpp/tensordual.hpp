@@ -1243,6 +1243,11 @@ public:
         return TensorMatDual(this->r + other.r, this->d + other.d);
     }
 
+    //overload the + operator for a double
+    TensorMatDual operator+(const double& other) const {
+        return TensorMatDual(this->r + other, this->d);
+    }
+
 
     //overload the - operator
     TensorMatDual operator-(const TensorMatDual& other) const {
@@ -1544,6 +1549,12 @@ TensorMatDual TensorDual::eye() {
 }
 
 
+// Non-member overload for torch::Tensor * TensorDual
+TensorDual operator*(const torch::Tensor& tensor, const TensorDual& td) {
+    auto real = tensor * td.r;
+    auto dual = tensor.unsqueeze(-1) * td.d;
+    return TensorDual(std::move(real), std::move(dual));
+}
 
 
 
