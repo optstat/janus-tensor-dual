@@ -3,10 +3,10 @@
 
 #include <torch/torch.h>
 #include "tensordual.hpp"
-#include "tensorhyperdual.hpp"
 #include <iostream>
 
 using namespace janus;
+
 
 // Define the primary template for the tensor
 template <typename T>
@@ -28,9 +28,6 @@ struct is_dual<TensorDual> : std::true_type {};
 template <>
 struct is_tensor<torch::Tensor> : std::true_type {};
 
-// Specialize the is_hyperdual trait for HyperDualNumber
-template <>
-struct is_hyperdual<TensorHyperDual> : std::true_type {};
 
 template <typename T>
 bool check_if_tensor(const T& instance) {
@@ -46,6 +43,8 @@ template <typename T>
 bool check_if_hyperdual(const T& instance) {
     return is_hyperdual<T>::value;
 }
+
+
 
 namespace janus {
    auto eps = std::numeric_limits<double>::epsilon();
@@ -445,19 +444,8 @@ namespace janus {
       std::cout << "Tensor device =" << t.d.device() << std::endl;
       print_vector(t.d.flatten());
    }
-   void print_hyperdual(const TensorHyperDual &t) 
-   {
-      std::cout << "Tensor shape =" << t.r.sizes() << std::endl;
-      std::cout << "Tensor device =" << t.r.device() << std::endl;
-      print_vector(t.r.flatten());
-      std::cout << "Tensor shape =" << t.d.sizes() << std::endl;
-      std::cout << "Tensor device =" << t.d.device() << std::endl;
-      print_vector(t.d.flatten());
-      std::cout << "Tensor shape =" << t.hd.sizes() << std::endl;
-      std::cout << "Tensor device =" << t.hd.device() << std::endl;
-      print_vector(t.hd.flatten());
-   }
-
+   
+   
 
 torch::Tensor expand_to_match(const torch::Tensor& x, torch::Tensor y) 
 {
