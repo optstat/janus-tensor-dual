@@ -1,10 +1,12 @@
 #ifndef TENSORDUAL_H
 #define TENSORDUAL_H
+
 #include <torch/torch.h>
 #include <type_traits> // For std::is_scalar
 #include <vector>
 using TensorIndex = torch::indexing::TensorIndex;
 using Slice = torch::indexing::Slice;
+
 void safe_update(
     torch::Tensor& tensor_to_update,
     const torch::Tensor& indices,
@@ -108,7 +110,6 @@ void safe_update(
     tensor_copy.index_put_({indices}, value);
     tensor_to_update = tensor_copy;
 }
-
 
 
 
@@ -1049,10 +1050,8 @@ public:
 
 
     void index_put_(const torch::Tensor& mask, const TensorDual& value) {
-        //this->r.index_put_({mask}, value.r);
-        safe_update(this->r, mask, value.r);
-        //this->d.index_put_({mask}, value.d);
-        safe_update(this->d, mask, value.d);
+        this->r.index_put_({mask}, value.r);
+        this->d.index_put_({mask}, value.d);
     }
 
     /*void index_put_(const torch::Tensor& mask, const torch::Tensor& value) {
@@ -1070,32 +1069,24 @@ public:
 
 
     void index_put_(const TensorIndex& mask, const TensorDual& value) {
-        //this->r.index_put_({mask}, value.r);
-        safe_update(this->r, mask, value.r);
-        //this->d.index_put_({mask}, value.d);
-        safe_update(this->d, mask, value.d);
+        this->r.index_put_({mask}, value.r);
+        this->d.index_put_({mask}, value.d);
     }
 
     template <typename Scalar>
     void index_put_(const TensorIndex& mask, const Scalar& value) {
-        //this->r.index_put_({mask}, value);
-        safe_update(this->r, mask, value);
-        //this->d.index_put_({mask}, 0.0);
-        safe_update(this->d, mask, 0.0);
+        this->r.index_put_({mask}, value);
+        this->d.index_put_({mask}, 0.0);
     }
 
     void index_put_(const std::vector<TensorIndex>& mask, const TensorDual& value) {
-        //this->r.index_put_(mask, value.r);
-        safe_update(this->r, mask, value.r);
-        //this->d.index_put_(mask, value.d);
-        safe_update(this->d, mask, value.d);
+        this->r.index_put_(mask, value.r);
+        this->d.index_put_(mask, value.d);
     }
 
     void index_put_(const std::vector<TensorIndex>& mask, const double& value) {
-        //this->r.index_put_(mask, value);
-        safe_update(this->r, mask, value);
-        //this->d.index_put_(mask, 0.0);
-        safe_update(this->d, mask, 0.0);
+        this->r.index_put_(mask, value);
+        this->d.index_put_(mask, 0.0);
     }
 
 
@@ -1606,49 +1597,37 @@ public:
 
 
     void index_put_(const torch::Tensor& mask, const TensorDual& value) {
-        //this->r.index_put_({mask}, value.r.squeeze());
-        safe_update(this->r, mask, value.r.squeeze());
-        //this->d.index_put_({mask}, value.d.squeeze());
-        safe_update(this->d, mask, value.d.squeeze());
+        this->r.index_put_({mask}, value.r.squeeze());
+        this->d.index_put_({mask}, value.d.squeeze());
     }
 
 
     void index_put_(const TensorIndex& mask, const TensorDual& value) {
-        //this->r.index_put_({mask}, value.r.squeeze());
-        safe_update(this->r, mask, value.r.squeeze());
-        //this->d.index_put_({mask}, value.d.squeeze());
-        safe_update(this->d, mask, value.d.squeeze());
+        this->r.index_put_({mask}, value.r.squeeze());
+        this->d.index_put_({mask}, value.d.squeeze());
     }
 
 
     void index_put_(const std::vector<TensorIndex>& mask, const TensorDual& value) {
-        //this->r.index_put_(mask, value.r);
-        safe_update(this->r, mask, value.r);
-        //this->d.index_put_(mask, value.d);
-        safe_update(this->d, mask, value.d);
+        this->r.index_put_(mask, value.r);
+        this->d.index_put_(mask, value.d);
     }
 
     void index_put_(const std::vector<TensorIndex>& mask, const TensorMatDual& value) {
-        //this->r.index_put_(mask, value.r);
-        safe_update(this->r, mask, value.r);
-        //this->d.index_put_(mask, value.d);
-        safe_update(this->d, mask, value.d);  
+        this->r.index_put_(mask, value.r);
+        this->d.index_put_(mask, value.d);  
     }
 
     
 
     void index_put_(const std::vector<TensorIndex>& mask, const double& value) {
-        //this->r.index_put_({mask}, value);
-        safe_update(this->r, mask, value);
-        //this->d.index_put_({mask}, 0.0);
-        safe_update(this->d, mask, 0.0);
+        this->r.index_put_({mask}, value);
+        this->d.index_put_({mask}, 0.0);
     }
 
     void index_put_(const std::vector<TensorIndex>& mask, const torch::Tensor& value) {
-        //this->r.index_put_({mask}, value);
-        safe_update(this->r, mask, value);
-        //this->d.index_put_({mask}, 0.0);
-        safe_update(this->d, mask, 0.0);
+        this->r.index_put_({mask}, value);
+        this->d.index_put_({mask}, 0.0);
     }
 
 
@@ -1805,10 +1784,8 @@ TensorDual max(const TensorDual& lhs, const TensorDual& rhs) {
     auto r = torch::max(lhs.r, rhs.r);
     auto d = torch::zeros_like(lhs.d);
     auto maskrgt = lhs.r < rhs.r;
-    //d.index_put_({maskrgt}, rhs.d.index({maskrgt}));
-    safe_update(d, maskrgt, rhs.d.index({maskrgt}));
-    //d.index_put_({~maskrgt}, lhs.d.index({~maskrgt}));
-    safe_update(d, ~maskrgt, lhs.d.index({~maskrgt}));
+    d.index_put_({maskrgt}, rhs.d.index({maskrgt}));
+    d.index_put_({~maskrgt}, lhs.d.index({~maskrgt}));
     return TensorDual(r, d);
 }
 
@@ -1821,14 +1798,10 @@ TensorDual max(const TensorDual& lhs, const torch::Tensor& rhs) {
     auto mask = lhs.r > rhs;
     auto resr = torch::zeros_like(lhs.r);
     auto resd = torch::zeros_like(lhs.d);    
-    //resr.index_put_({mask}, lhs.r.index({mask}));
-    safe_update(resr, mask, lhs.r.index({mask}));
-    //rhs.dim() == lhs.r.dim() ? resr.index_put_({~mask}, rhs.index({~mask})) : 
-    //                           resr.index_put_({~mask}, rhs);
-    rhs.dim() == lhs.r.dim() ? safe_update(resr, ~mask, rhs.index({~mask})) : 
-                              safe_update(resr, ~mask, rhs);
-    //resd.index_put_({mask}, lhs.d.index({mask}));
-    safe_update(resd, mask, lhs.d.index({mask}));
+    resr.index_put_({mask}, lhs.r.index({mask}));
+    rhs.dim() == lhs.r.dim() ? resr.index_put_({~mask}, rhs.index({~mask})) : 
+                               resr.index_put_({~mask}, rhs);
+    resd.index_put_({mask}, lhs.d.index({mask}));
     return TensorDual(resr, resd);
 }
 
@@ -1840,10 +1813,8 @@ TensorDual min(const TensorDual& lhs, const TensorDual& rhs) {
     auto r = torch::min(lhs.r, rhs.r);
     auto maskl = lhs.r < rhs.r;
     auto d = torch::zeros_like(lhs.d);
-    //d.index_put_({maskl}, lhs.d.index({maskl}));
-    safe_update(d, maskl, lhs.d.index({maskl}));
-    //d.index_put_({~maskl}, rhs.d.index({~maskl}));
-    safe_update(d, ~maskl, rhs.d.index({~maskl}));
+    d.index_put_({maskl}, lhs.d.index({maskl}));
+    d.index_put_({~maskl}, rhs.d.index({~maskl}));
     return TensorDual(r, d);
 }
 
@@ -1853,12 +1824,9 @@ TensorDual min(const TensorDual& lhs, const torch::Tensor& rhs) {
     auto mask = lhs.r < rhs;
     auto resr = torch::zeros_like(lhs.r);
     auto resd = torch::zeros_like(lhs.d);
-    //resr.index_put_({mask}, lhs.r.index({mask}));
-    safe_update(resr, mask, lhs.r.index({mask}));
-    //resr.index_put_({~mask}, rhs.index({~mask}));
-    safe_update(resr, ~mask, rhs.index({~mask}));
-    //resd.index_put_({mask}, lhs.d.index({mask}));
-    safe_update(resd, mask, lhs.d.index({mask}));
+    resr.index_put_({mask}, lhs.r.index({mask}));
+    resr.index_put_({~mask}, rhs.index({~mask}));
+    resd.index_put_({mask}, lhs.d.index({mask}));
     return TensorDual(resr, resd);
 }
 
@@ -1869,8 +1837,7 @@ static TensorDual sign(TensorDual& td) {
     auto d = torch::zeros_like(td.d);
     if ( maskz.any().item<bool>())
     {
-      //d.index_put_({maskz}, r.index({maskz}));//The dual part is the same as the sign only if x==0
-      safe_update(d, maskz, r.index({maskz}));
+      d.index_put_({maskz}, r.index({maskz}));//The dual part is the same as the sign only if x==0
     }
     return TensorDual(r, d);
 }
