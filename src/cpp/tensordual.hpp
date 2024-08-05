@@ -951,7 +951,7 @@ public:
 
     TensorDual sloginv() const {
       auto r = torch::sign(this->r)*(torch::exp(torch::abs(this->r))-1.0); // Compute the sign and exponential of the absolute value of the real part
-      auto d = torch::exp(this->r).unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
+      auto d = torch::exp(torch::abs(this->r)).unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
       return TensorDual(r, d); 
     }
 
