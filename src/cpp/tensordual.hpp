@@ -1382,6 +1382,8 @@ public:
         return TensorMatDual(-this->r, -this->d);
     }
 
+
+
     
     TensorMatDual operator/(const TensorMatDual& other) const {
         auto r = this->r / other.r;
@@ -1395,7 +1397,7 @@ public:
 
     TensorMatDual operator/(const TensorDual& other) const {
         TensorMatDual other_mat = TensorMatDual::unsqueeze(other, 2);
-        return *this / other_mat;
+        return (*this) / other_mat;
     }
 
     TensorMatDual operator/(const torch::Tensor& other) const {
@@ -1756,6 +1758,11 @@ TensorDual operator*(const double& scalar, const TensorDual& td) {
     return TensorDual(td.r * scalar, td.d * scalar);
 }
 
+//overload the * operator for a double and a TensorDual
+TensorMatDual operator*(const double& scalar, const TensorMatDual& td) {
+    // Ensure the scalar is of a type convertible to Tensor
+    return TensorMatDual(td.r * scalar, td.d * scalar);
+}
 
 
 //pow for TensorDual to a TensorDual
