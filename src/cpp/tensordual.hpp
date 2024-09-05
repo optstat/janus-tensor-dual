@@ -1382,6 +1382,12 @@ public:
         return TensorMatDual(-this->r, -this->d);
     }
 
+    TensorMatDual operator*(const double other) const {
+        auto real = this->r*other;
+        auto dual = this->d*other;
+        return TensorMatDual(real, dual);
+    }
+
 
 
     
@@ -1403,6 +1409,13 @@ public:
     TensorMatDual operator/(const torch::Tensor& other) const {
         auto real = this->r/other;
         auto dual = this->d/other.unsqueeze(-1);
+        return TensorMatDual(real, dual);
+    }
+
+
+    TensorMatDual operator/(const double other) const {
+        auto real = this->r/other;
+        auto dual = this->d/other;
         return TensorMatDual(real, dual);
     }
 
