@@ -1374,7 +1374,7 @@ public:
         auto abs_r = torch::abs(r); // Compute the absolute value of the real part
         auto sign_r = torch::sign(r); // Compute the sign of the real part
         auto abs_d = sign_r.unsqueeze(-1) * d; // The dual part multiplies by the sign of the real part
-        auto abs_h = sign_r.unsqueeze(-1) * h; // The hyperdual part is zero
+        auto abs_h = torch::zeros_like(h); // The hyperdual part is zero-strictly this is a delta function
         return TensorHyperDual(abs_r, abs_d, abs_h);
     }
 
@@ -1565,7 +1565,7 @@ public:
     TensorMatDual sqrt() const {
         auto r = torch::sqrt(this->r); // Compute the square root of the real part
         auto rf = torch::where(torch::real(r) > 0, r, torch::zeros_like(r)); // Remove negative elements
-        auto d = torch::einsum("mij, mijn->mijn", {0.5 / rf, this->d});
+        auto d = torch::einsum("mij, mijn->mijn", {0.5*rf.pow(-0.5), this->d});
         return TensorMatDual(r, d);
     }
 
@@ -2108,13 +2108,545 @@ public:
         return TensorMatHyperDual(rsq, d, h);
     }
 
+
+    TensorMatHyperDual(const TensorHyperDual& x, int dim =2) {
+        auto r = x.r.unsqueeze(dim);
+        auto d = x.d.unsqueeze(dim);
+        auto h = x.h.unsqueeze(dim);
+        TensorMatHyperDual(r, d, h);
+    }
+
+
+
+    friend std::ostream& operator<<(std::ostream& os, const TensorMatHyperDual& obj){
+        os << "r: " << obj.r << std::endl;
+        os << "d: " << obj.d << std::endl;
+        os << "h: " << obj.h << std::endl;
+        return os;
+    }
+
+
+    // Constructor overload for scalar types
+    template <typename S>
+    TensorMatHyperDual(S r, S d, S h, int64_t dim = 1) {
+        auto options = torch::TensorOptions().dtype(torch::kFloat64); // You need to specify the correct data type here
+
+        this->r = torch::tensor({r}, options);
+        if (this->r.dim() == 2) {
+            this->r = this->r.unsqueeze(dim);
+        }
+
+        this->d = torch::tensor({d}, options);
+        if (this->d.dim() == 3 ) {
+            this->d = this->d.unsqueeze(dim);
+        }
+
+        this->h = torch::tensor({h}, options);
+        if (this->h.dim() == 4) {
+            this->h = this->h.unsqueeze(dim);
+        }
+
+    }
+
+    TensorHyperDual squeeze(int dim )
+    {
+        auto r = this->r.squeeze(dim);
+        auto d = this->d.squeeze(dim);
+        auto h = this->h.squeeze(dim);
+        return TensorHyperDual(r, d, h);
+    }
+
+    TensorMatHyperDual contiguous()
+    {
+        auto r = this->r.contiguous();
+        auto d = this->d.contiguous();
+        auto h = this->h.contiguous();
+        return TensorMatHyperDual(r, d, h);
+    }
+
+
+ 
+    TensorMatHyperDual eye() {
+        auto r = torch::eye(this->r.size(1), this->r.options()).repeat({this->r.size(0), 1, 1});
+        auto d = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(2), this->d.size(3)}, this->d.options());
+        auto h = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(2), this->h.size(3), this->h.size(4)}, this->h.options());
+        return TensorMatHyperDual(r, d, h);
+    }
+
+
+
+    TensorMatHyperDual sum(int dim){
+        auto r = this->r.sum(dim, true);
+        auto d = this->d.sum(dim, true);
+        auto h = this->h.sum(dim, true);
+        return TensorMatHyperDual(r, d, h);
+    }
+
+    TensorMatHyperDual square() const {
+        auto rsq = r.square(); // Compute the square of the real part
+        auto d = 2 * r.unsqueeze(-1) * this->d;
+        auto h = 2 * (d.square() + r.unsqueeze(-1) * this->h);
+        return TensorMatHyperDual(rsq, d, h);
+    }
+
     TensorMatHyperDual sqrt() const {
         auto r = torch::sqrt(this->r); // Compute the square root of the real part
         auto rf = torch::where(torch::real(r) > 0, r, torch::zeros_like(r)); // Remove negative elements
-        auto d = torch::einsum("mij, mijn->mijn", {0.5 / rf, this->d});
-        auto h = torch::einsum("mij, mijk->mijk", {0.5 / rf, this->h}) - 0.25 * torch::einsum("mij, mijk->mijk", {0.5 / rf.square(), this->d.square()});
+        auto d = torch::einsum("mij, mijn->mijn", {0.5*rf.pow(-0.5), this->d});
+        auto h = torch::einsum("mij, mijkn->mijkn", {0.5*rf.pow(-0.5), this->h}) - 0.25 * torch::einsum("mij, mijkn->mijk", {0.5*rf.pow(-1.5), this->d.unsqueeze(-1)});
         return TensorMatHyperDual(r, d, h);
     }
+
+    TensorMatHyperDual normL2()
+    {
+       auto norm_r = torch::norm(this->r, 2, -1, true);
+       auto norm_r_expanded =norm_r.expand_as(this->r);
+       auto grad_r = this->r / norm_r_expanded;
+       auto dual = torch::einsum("mij, mijn->min", {grad_r, this->d}).unsqueeze(2);
+       auto grad_grad_r = torch::eye(this->r.size(1)).unsqueeze(0).repeat({this->r.size(0), 1, 1});
+       auto h = torch::einsum("mij, mijkn->mijkn", {grad_r, this->h}) - 
+                torch::einsum("mij, mijkn->mijk", {grad_grad_r, this->d.unsqueeze(-1)});
+       return TensorMatHyperDual(norm_r, dual, h);
+    }
+
+    static TensorMatHyperDual createZero(const torch::Tensor& r, int ddim) {
+        auto dshape = r.sizes().vec(); // copy the sizes to a vector
+        dshape.push_back(ddim); // add the extra dimension for the dual part
+
+        // Create a zero tensor for the dual part with the new shape
+        auto options = torch::TensorOptions().dtype(r.dtype()).device(r.device());
+        auto ds = torch::zeros(dshape, options);
+        auto hs = torch::zeros({r.size(0), r.size(1), r.size(2), r.size(3), ddim}, options);
+        return TensorMatHyperDual(r, ds, hs);
+    }
+
+    TensorMatHyperDual zeros_like(const torch::Tensor &x) const {
+        auto rc = torch::zeros_like(x);
+        int nr1 = d.size(1);
+        int nr2 = d.size(2);
+        int nd = d.size(3);
+        auto dc = torch::zeros({nr1, nr2, nd}, x.dtype());
+        if (r.dtype() == torch::kBool) {
+            dc = torch::zeros({nr1, nr2, nd}, torch::kFloat64);
+        }
+        int nh = h.size(4);
+        auto hc = torch::zeros({nr1, nr2, nd, nh}, x.dtype());
+        
+        return TensorMatHyperDual(rc, dc, hc);
+    }
+
+    TensorMatHyperDual zeros_like() {
+        auto rc = torch::zeros_like(this->r);
+        auto dc = torch::zeros_like(this->d);
+        auto hc = torch::zeros_like(this->h);
+        return TensorMatHyperDual(rc, dc, hc);
+    }
+
+
+    TensorMatHyperDual clone() const {
+        return TensorMatHyperDual(this->r.clone(), this->d.clone(), this->h.clone());
+    }
+
+    TensorHyperDual squeeze() {
+        if (this->r.size(2) == 1) {
+            return TensorHyperDual(this->r.squeeze(2), this->d.squeeze(2), this->h.squeeze(2));
+        }
+        auto r = this->r.squeeze(1);
+        auto d = this->d.squeeze(1);
+        auto h = this->h.squeeze(1);
+        return TensorHyperDual(r, d, h);
+    }
+    
+    
+    /**
+     * Defaults to dimension 2 for concatenation
+     */
+    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const TensorMatHyperDual &t2)
+    {
+        auto r = torch::cat({t1.r, t2.r}, 2);
+        auto d = torch::cat({t1.d, t2.d}, 2);
+        auto h = torch::cat({t1.h, t2.h}, 2);
+        return TensorMatHyperDual(r, d, h);
+    }
+
+    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const TensorMatHyperDual &t2, int dim)
+    {
+        auto r = torch::cat({t1.r, t2.r}, dim);
+        auto d = torch::cat({t1.d, t2.d}, dim);
+        auto h = torch::cat({t1.h, t2.h}, dim);
+        return TensorMatHyperDual(r, d, h);
+    }
+
+    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const TensorHyperDual &t2)
+    {
+        auto r = torch::cat({t1.r, t2.r.unsqueeze(2)}, 2);
+        auto d = torch::cat({t1.d, t2.d.unsqueeze(2)}, 2);
+        auto h = torch::cat({t1.h, t2.h.unsqueeze(2)}, 2);
+        return TensorMatHyperDual(r, d, h);
+    }
+
+    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const torch::Tensor &t2)
+    {
+        auto rt = t2.repeat({t1.r.size(0), 1, 1});
+        auto r = torch::cat({t1.r, rt}, 2);
+        auto d = torch::cat({t1.d, t1.d*0}, 2);
+        auto h = torch::cat({t1.h, t1.h*0}, 2);
+        return TensorMatHyperDual(r, d, h);
+    }
+
+
+    //overload the + operator
+    TensorMatHyperDual operator+(const TensorMatHyperDual& other) const {
+        return TensorMatHyperDual(this->r + other.r, this->d + other.d, this->h + other.h);
+    }
+
+    //overload the + operator
+    TensorMatHyperDual operator+(const TensorHyperDual& other) const {
+        return TensorMatHyperDual(this->r + other.r.unsqueeze(1), 
+                                  this->d + other.d.unsqueeze(1), 
+                                  this->h + other.h.unsqueeze(1));
+    }
+
+    //overload the + operator for a double
+    TensorMatHyperDual operator+(const double& other) const {
+        return TensorMatHyperDual(this->r + other, this->d, this->h);
+    }
+
+
+    //overload the - operator
+    TensorMatHyperDual operator-(const TensorMatHyperDual& other) const {
+        return TensorMatHyperDual(this->r - other.r, this->d - other.d, this->h - other.h);
+    }
+
+    //overload the - operator
+    TensorMatHyperDual operator-(const double& other) const {
+        return TensorMatHyperDual(this->r - other, this->d, this->h);
+    }
+
+
+
+    // Overload the equals operator for TensorDual == TensorDual
+    torch::Tensor operator==(const TensorMatHyperDual& other) const {
+        auto mask = r == other.r;
+        return torch::squeeze(mask, 2);
+    }
+
+
+
+
+    //overload the - operator
+    TensorMatHyperDual operator-() const {
+        return TensorMatHyperDual(-this->r, -this->d, -this->h);
+    }
+
+    TensorMatHyperDual operator*(const double other) const {
+        auto real = this->r*other;
+        auto dual = this->d*other;
+        auto hyper = this->h*other;
+        return TensorMatHyperDual(real, dual, hyper);
+    }
+
+
+
+    
+    TensorMatHyperDual operator/(const TensorMatHyperDual& other) const {
+        auto r1 = this->r;
+        auto d1 = this->d;
+        auto h1 = this->h;
+        auto r2 = other.r;
+        auto d2 = other.d;
+        auto h2 = other.h;
+        auto r2sq = r2.square();
+        auto d1d2 = d1 * d2;
+        auto r1d2 = r1.unsqueeze(-1) * d2;
+        auto r1h2 = r1.unsqueeze(-1).unsqueeze(-1) * h2;
+        auto r1d2d2 = r1.unsqueeze(-1) * d2 * d2;
+        auto r2cube = r2 * r2 * r2;
+        auto rn = r1/r2;
+        auto dn = d1/r2.unsqueeze(-1)-r1d2/r2sq.unsqueeze(-1);
+        auto hn = h1/r2.unsqueeze(-1).unsqueeze(-1) - 
+                  2*d1d2.unsqueeze(-1)/r2sq.unsqueeze(-1).unsqueeze(-1) -
+                  r1h2/r2sq.unsqueeze(-1).unsqueeze(-1) +
+                  2*r1d2d2.unsqueeze(-1)/r2cube.unsqueeze(-1).unsqueeze(-1);
+        return TensorMatHyperDual(rn, dn, hn);
+    }
+
+    TensorMatHyperDual operator/(const TensorHyperDual& other) const {
+        auto r2 = other.r.unsqueeze(1);
+        auto d2 = other.d.unsqueeze(1);
+        auto h2 = torch::zeros_like(this->h);
+        return *this / TensorMatHyperDual(r2, d2, h2);
+    }
+
+    TensorMatHyperDual operator/(const torch::Tensor& other) const {
+        auto r2 = other.unsqueeze(1);
+        auto d2 = torch::zeros_like(this->d);
+        auto h2 = torch::zeros_like(this->h);
+        return *this / TensorMatHyperDual(r2, d2, h2);
+    }
+
+
+    TensorMatHyperDual operator/(const double other) const {
+        auto real = this->r/other;
+        auto dual = this->d/other;
+        auto hyper = this->h/other;
+        return TensorMatHyperDual(real, dual, hyper);
+    }
+
+    TensorMatHyperDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
+        auto r = this->r.index(indices);
+        //Add a column if it is missing.  If sow insert a column
+        r.dim() == 2 ? r = r.unsqueeze(2) : r;
+        auto d = this->d.index(indices);
+        d.dim() == 3 ? d = d.unsqueeze(2) : d;
+        auto h = this->h.index(indices);
+        h.dim() == 4 ? h = h.unsqueeze(2) : h;
+        return TensorMatHyperDual(r, d, h);
+    }
+
+
+    TensorMatHyperDual index(int index) {
+        auto real = this->r.index({index});
+        auto dual = this->d.index({index});
+        auto hyper = this->h.index({index});
+        return TensorMatHyperDual(real, dual, hyper);
+    }
+
+
+    TensorMatHyperDual index(const torch::Tensor& mask) {
+        auto real = r.index({mask});
+        auto dual = d.index({mask});
+        auto hyper = h.index({mask});
+        return TensorMatHyperDual(real, dual, hyper);
+    }
+
+
+    TensorMatHyperDual index(const std::vector<TensorIndex>& index) {
+        auto real = r.index(index);
+        auto dual = d.index(index);
+        auto hyper = h.index(index);
+        return TensorMatHyperDual(real, dual, hyper);
+    }
+
+    void requires_grad_(bool req_grad) {
+        r.requires_grad_(req_grad);
+        d.requires_grad_(req_grad);
+        h.requires_grad_(req_grad);
+    }
+
+    void backward() {
+        r.backward();
+        d.backward();
+        h.backward();
+    }
+
+ 
+
+
+    TensorMatHyperDual abs() const {
+        auto abs_r = torch::abs(r); // Compute the absolute value of the real part
+        auto sign_r = torch::is_complex(r) ? torch::sign(torch::real(r)) : torch::sign(r); // Compute the sign of the real part
+        auto abs_d = sign_r.unsqueeze(-1) * d; // The dual part multiplies by the sign of the real part
+        auto abs_h = sign_r.unsqueeze(-1).unsqueeze(-1) * h; // The hyperdual part multiplies by the sign of the real part
+        return TensorMatHyperDual(abs_r, abs_d, abs_h);
+    }
+
+
+
+
+
+    /**
+     * Static member function to perform einsum on two TensorDual objects
+     * Note this is more limited than the torch.einsum function
+     * as it only supports two arguments
+     */
+    static TensorHyperDual einsum(const std::string& arg, 
+                                  const TensorMatHyperDual& first, 
+                                  const TensorHyperDual& second) {
+
+        auto r = torch::einsum(arg, {first.r, second.r});
+
+        // Find the position of the '->' in the einsum string
+        auto pos = arg.find(",");
+        auto arg1 = arg.substr(0, pos);
+        int pos2 = arg.find("->");
+
+        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg3 = arg.substr(pos2 + 2);
+
+
+        auto darg1 = arg1 + "z," + arg2 + "->" + arg3 + "z";
+        auto d1 = torch::einsum(darg1, {first.d,  second.r});
+        auto darg2 = arg1+","+arg2+"z->"+arg3+"z";
+        auto d2 = torch::einsum(darg2, {first.r, second.d});
+
+        //Now for the hyper dual part
+        auto d1d2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
+        auto d1d2 = torch::einsum(d1d2arg, {first.d,  second.d});
+        auto h1r2arg = arg1 + "zw," + arg2 + "->" + arg3 + "zw";
+        auto h1r2 = torch::einsum(h1r2arg, {first.h,  second.r});
+        auto r1h2arg = arg1 + "," + arg2 + "zw->" + arg3 + "zw";
+        auto r1h2 = torch::einsum(r1h2arg, {first.r,  second.h});
+        auto h = d1d2.unsqueeze(-1) + h1r2 + r1h2;
+
+
+
+        return TensorHyperDual(std::move(r), std::move(d1 + d2), std::move(h));
+    }
+
+
+    static TensorMatHyperDual einsum(const std::string& arg, 
+                                     const TensorMatHyperDual& first, 
+                                     const torch::Tensor& second) {
+
+        auto r = torch::einsum(arg, {first.r, second});
+
+        // Find the position of the '->' in the einsum string
+        auto pos = arg.find(",");
+        auto arg1 = arg.substr(0, pos);
+        int pos2 = arg.find("->");
+        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg3 = arg.substr(pos2 + 2);
+        //The result here should be 
+
+        auto d1r1arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
+        auto d = torch::einsum(d1r1arg, {first.d,  second});
+
+        auto h1r1arg = arg1 + "zw," + arg2 + "->" + arg3 + "zw";
+        auto h = torch::einsum(h1r1arg, {first.h,  second});
+
+        return TensorMatHyperDual(std::move(r), std::move(d), std::move(h));
+    }
+
+
+    static TensorMatHyperDual einsum(const std::string& arg, 
+                                     const TensorHyperDual& first, 
+                                     const TensorMatHyperDual& second) {
+
+        auto r = torch::einsum(arg, {first.r, second.r});
+
+        // Find the position of the '->' in the einsum string
+        auto pos = arg.find(",");
+        auto arg1 = arg.substr(0, pos);
+        int pos2 = arg.find("->");
+        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg3 = arg.substr(pos2 + 2);
+        
+
+        auto d1r2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
+        auto d1r2 = torch::einsum(d1r2arg, {first.d,  second.r});
+        auto r1d2arg = arg1 + "," + arg2 + "z->" + arg3 + "z";
+        auto r1d2 = torch::einsum(r1d2arg, {first.r, second.d});
+
+        auto d1d2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
+        auto d1d2 = torch::einsum(d1d2arg, {first.d,  second.d});
+        auto h1r2arg = arg1 + "zw," + arg2 + "->" + arg3 + "zw";
+        auto h1r2 = torch::einsum(h1r2arg, {first.h,  second.r});
+        auto r1h2arg = arg1 + "," + arg2 + "zw->" + arg3 + "zw";
+        auto r1h2 = torch::einsum(r1h2arg, {first.r,  second.h});
+        auto h = d1d2.unsqueeze(-1) + h1r2 + r1h2;
+
+        return TensorMatHyperDual(std::move(r), std::move(d1r2 + r1d2), std::move(h));
+    }
+
+    static TensorMatHyperDual einsum(const std::string& arg, 
+                                     const torch::Tensor& first, 
+                                     const TensorMatHyperDual& second) {
+
+        auto r = torch::einsum(arg, {first, second.r});
+
+        // Find the position of the '->' in the einsum string
+        auto pos = arg.find(",");
+        auto arg1 = arg.substr(0, pos);
+        int pos2 = arg.find("->");
+        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg3 = arg.substr(pos2 + 2);
+
+
+        auto r1d1arg = arg1 + "," + arg2 + "z->" + arg3 + "z";
+        auto r1d1 = torch::einsum(r1d1arg, {first,  second.d});
+
+        auto r1h1arg = arg1 + "," + arg2 + "zw->" + arg3 + "zw";
+
+        auto r1h1 = torch::einsum(r1h1arg, {first,  second.h});
+
+        return TensorMatHyperDual(std::move(r), std::move(r1d1), std::move(r1h1));
+    }
+
+
+
+    static TensorMatHyperDual einsum(const std::string& arg, 
+                                     const TensorMatHyperDual& first, 
+                                     const TensorMatHyperDual& second) {
+
+        auto r = torch::einsum(arg, {first.r, second.r});
+
+        // Find the position of the '->' in the einsum string
+        auto pos = arg.find(",");
+        auto arg1 = arg.substr(0, pos);
+        int pos2 = arg.find("->");
+        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg3 = arg.substr(pos2 + 2);
+
+        auto r1d2arg = arg1 + "," + arg2 + "z->" + arg3 + "z";
+        auto r1d2 = torch::einsum(r1d2arg, {first.r,  second.d});
+        auto d1r2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
+        auto d1r2 = torch::einsum(d1r2arg, {first.d, second.r});
+
+        auto d1d2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
+        auto d1d2 = torch::einsum(d1d2arg, {first.d,  second.d});
+        auto h1r2arg = arg1 + "zw," + arg2 + "->" + arg3 + "zw";
+        auto h1r2 = torch::einsum(h1r2arg, {first.h,  second.r});
+        auto r1h2arg = arg1 + "," + arg2 + "zw->" + arg3 + "zw";
+        auto r1h2 = torch::einsum(r1h2arg, {first.r,  second.h});
+
+        return TensorMatHyperDual(std::move(r), 
+                                  std::move(r1d2 + d1r2), 
+                                  std::move(2*d1d2.unsqueeze(-1) + h1r2 + r1h2));
+    }
+
+    void index_put_(const torch::Tensor& mask, const TensorDual& value) {
+        this->r.index_put_({mask}, value.r.squeeze());
+        this->d.index_put_({mask}, value.d.squeeze());
+    }
+
+
+    void index_put_(const TensorIndex& mask, const TensorDual& value) {
+        this->r.index_put_({mask}, value.r.squeeze());
+        this->d.index_put_({mask}, value.d.squeeze());
+    }
+
+
+    void index_put_(const std::vector<TensorIndex>& mask, const TensorDual& value) {
+        this->r.index_put_(mask, value.r);
+        this->d.index_put_(mask, value.d);
+    }
+
+    void index_put_(const std::vector<TensorIndex>& mask, const TensorMatDual& value) {
+        this->r.index_put_(mask, value.r);
+        this->d.index_put_(mask, value.d);  
+    }
+
+    
+
+    void index_put_(const std::vector<TensorIndex>& mask, const double& value) {
+        this->r.index_put_({mask}, value);
+        this->d.index_put_({mask}, 0.0);
+    }
+
+    void index_put_(const std::vector<TensorIndex>& mask, const torch::Tensor& value) {
+        this->r.index_put_({mask}, value);
+        this->d.index_put_({mask}, 0.0);
+    }
+
+
+    static TensorMatDual unsqueeze(const TensorDual& x, int dim) {
+        auto r = x.r.unsqueeze(dim);
+        auto d = x.d.unsqueeze(dim);
+        return TensorMatDual(r, d);
+    }
+
+
 };
 
 
@@ -2134,32 +2666,33 @@ TensorMatDual TensorDual::eye() {
 
 
 // Non-member overload for torch::Tensor * TensorDual
-TensorDual operator*(const torch::Tensor& tensor, const TensorDual& td) {
+TensorHyperDual operator*(const torch::Tensor& tensor, const TensorHyperDual& td) {
     auto real = tensor * td.r;
     auto dual = tensor.unsqueeze(-1) * td.d;
-    return TensorDual(std::move(real), std::move(dual));
+    auto hyper = tensor.unsqueeze(-1).unsqueeze(-1) * td.h;
+    return TensorHyperDual(std::move(real), std::move(dual), std::move(hyper));
 }
 
 // Non-member overload for torch::Tensor / TensorDual
-TensorDual operator/(const torch::Tensor& tensor, const TensorDual& td) {
+TensorHyperDual operator/(const torch::Tensor& tensor, const TensorHyperDual& td) {
     auto tdr = td.reciprocal();
     return tensor * tdr;
 }
 
 
 // Non-member overload for torch::Tensor + TensorDual
-TensorDual operator+(const torch::Tensor& tensor, const TensorDual& td) {
-    return TensorDual(std::move(tensor + td.r), std::move(td.d.clone()));
+TensorHyperDual operator+(const torch::Tensor& tensor, const TensorHyperDual& td) {
+    return TensorHyperDual(std::move(tensor + td.r), std::move(td.d.clone()), std::move(td.h.clone()));
 }
 
 // Non-member template function for Scalar + TensorDual
-TensorDual operator+(const double& scalar, const TensorDual& td) {
+TensorHyperDual operator+(const double& scalar, const TensorHyperDual& td) {
     // Ensure the scalar is of a type convertible to Tensor
-    return TensorDual((scalar + td.r).clone(), td.d.clone());
+    return TensorHyperDual((scalar + td.r).clone(), td.d.clone(), td.h.clone());
 }
 
 // Non-member overload for torch::Tensor - TensorDual
-TensorDual operator-(const torch::Tensor& tensor, const TensorDual& td) {
+TensorHyperDual operator-(const torch::Tensor& tensor, const TensorHyperDual& td) {
     return TensorDual(std::move(tensor - td.r), std::move(-td.d.clone()));
 }
 
