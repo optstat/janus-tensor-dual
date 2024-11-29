@@ -519,6 +519,34 @@ torch::Tensor compute_batch_jacobian(torch::Tensor& output, torch::Tensor& input
 
 }
 
+torch::Tensor compute_batch_hessian(torch::Tensor& output, torch::Tensor& input) 
+{
+    auto batch_size = output.size(0);
+    auto output_size = output.numel() / batch_size;
+    auto input_size = input.numel() / batch_size;
+
+    auto hessian = torch::zeros({batch_size, output_size, input_size, input_size}).to(input.dtype()).to(input.device());
+
+    for (int64_t b = 0; b < batch_size; ++b) {
+        for (int64_t i = 0; i < output_size; ++i) {
+            auto grad_output = torch::zeros_like(output);
+            grad_output[b].view(-1)[i] = 1.0;
+
+            // Zero the gradients before the backward pass
+            if (input.grad().defined()) {
+                input.grad().zero_();
+            }
+
+            // Compute the gradients
+            output.backward(grad_output, true);
+
+            // Copy the gradient to the jacobian matrix
+            hessian[b].slice(0, i, i+1) = input.grad().view({batch_size, -1})[b].view({1, -1});
+        }
+    }
+    return hessian;
+}
+
 /**
  * Compute a 2d jacobian where the input is a 3D batched matrix
  */
@@ -554,9 +582,48 @@ torch::Tensor compute_batch_jacobian2d(torch::Tensor& output, torch::Tensor& inp
             }
         }
     }
-
     return jacobian;
+}
 
+torch::Tensor compute_batch_hessian2d(torch::Tensor& output, torch::Tensor& input) 
+{
+    auto batch_size = output.size(0);
+    auto dim1 = input.size(1);
+    auto dim2 = input.size(2);
+    auto output_size = output.size(1);
+    assert(output.dim() == 2 && "Output must be a 2D tensor");
+    assert(input.dim() == 3 && "Input must be a 3D tensor");
+
+    auto hessian = torch::zeros({batch_size, output_size, dim1, dim2, dim1, dim2}).to(input.dtype()).to(input.device());
+
+    for (int64_t b = 0; b < batch_size; ++b) {
+        for (int64_t i = 0; i < output_size; ++i) {
+            auto grad_output = torch::zeros_like(output);
+            grad_output.index_put_({b, i},1.0);
+            // Zero the gradients before the backward pass
+            if (input.grad().defined()) 
+            {
+              input.grad().zero_();
+            }
+            // Compute the gradients
+            output.backward(grad_output, true);
+
+            for ( int j=0; j < dim1; j++)
+            {
+                for ( int k=0; k < dim2; k++)
+                {
+                  for ( int l=0; l < dim1; l++)
+                  {
+                    for ( int m=0; m < dim2; m++)
+                    {
+                      hessian.index_put_( {b, i, j, k, l, m}, input.grad().index({b, l,m}) );
+                    }
+                  }
+                }
+            }
+        }
+    }
+    return hessian;
 }
 
 /**
@@ -600,6 +667,53 @@ torch::Tensor compute_batch_jacobian3d(const torch::Tensor& output, const torch:
     }
 
     return jacobian;
+
+}
+
+torch::Tensor compute_batch_hessian3d(const torch::Tensor& output, const torch::Tensor& input) 
+{
+    auto batch_size = output.size(0);
+    auto dim1 = input.size(1);
+    auto dim2 = input.size(2);
+    auto output_size1 = output.size(1);
+    auto output_size2 = output.size(2);
+    assert(output.dim() == 3 && "Output must be a 3D tensor");
+    assert(input.dim() == 3 && "Input must be a 3D tensor");
+
+    auto hessian = torch::zeros({batch_size, output_size1, output_size2, dim1, dim2, dim1, dim2}).to(input.dtype()).to(input.device());
+
+    for (int64_t b = 0; b < batch_size; ++b) {
+        for (int64_t i = 0; i < output_size1; ++i) {
+            for ( int j=0; j < output_size2; ++j)
+            {
+            auto grad_output = torch::zeros_like(output);
+            grad_output.index_put_({b, i,j},1.0);
+            // Zero the gradients before the backward pass
+            if (input.grad().defined()) 
+            {
+              input.grad().zero_();
+            }
+            // Compute the gradients
+            output.backward(grad_output, true);
+
+            for ( int k=0; k < dim1; k++)
+            {
+                for ( int l=0; l < dim2; l++)
+                {
+                  for ( int m=0; m < dim1; m++)
+                  {
+                    for ( int n=0; n < dim2; n++)
+                    {
+                      hessian.index_put_( {b, i, j, k,l, m, n}, input.grad().index({b, m,n}) );
+                    }
+                  }
+                }
+            }
+            }
+        }
+    }
+
+    return hessian;
 
 }
 
