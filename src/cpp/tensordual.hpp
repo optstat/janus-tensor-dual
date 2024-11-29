@@ -1199,6 +1199,8 @@ public:
         return TensorHyperDual(r.contiguous(), d.contiguous(), h.contiguous());
     }
 
+    TensorMatHyperDual eye();
+
 
     /**
      * Sum the TensorHyperDual along the first dimension
@@ -2137,8 +2139,10 @@ public:
 
     TensorMatHyperDual square() const {
         auto rsq = r.square(); // Compute the square of the real part
-        auto d = 2 * r.unsqueeze(-1) * this->d;
-        auto h = 2 * (d.square() + r.unsqueeze(-1) * this->h);
+        auto dn = 2 * r.unsqueeze(-1) * this->d;
+        //2dd+2rh
+        auto hn = 2*torch::einsum("mij, mik->mijk",{d, d})+
+                  2*torch::einsum("mi, mijk->mijk",{r, h}); 
         return TensorMatHyperDual(rsq, d, h);
     }
 
@@ -2201,30 +2205,6 @@ public:
         return TensorMatHyperDual(r, d, h);
     }
 
-
- 
-    TensorMatHyperDual eye() {
-        auto r = torch::eye(this->r.size(1), this->r.options()).repeat({this->r.size(0), 1, 1});
-        auto d = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(2), this->d.size(3)}, this->d.options());
-        auto h = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(2), this->h.size(3), this->h.size(4)}, this->h.options());
-        return TensorMatHyperDual(r, d, h);
-    }
-
-
-
-    TensorMatHyperDual sum(int dim){
-        auto r = this->r.sum(dim, true);
-        auto d = this->d.sum(dim, true);
-        auto h = this->h.sum(dim, true);
-        return TensorMatHyperDual(r, d, h);
-    }
-
-    TensorMatHyperDual square() const {
-        auto rsq = r.square(); // Compute the square of the real part
-        auto d = 2 * r.unsqueeze(-1) * this->d;
-        auto h = 2 * (d.square() + r.unsqueeze(-1) * this->h);
-        return TensorMatHyperDual(rsq, d, h);
-    }
 
     TensorMatHyperDual sqrt() const {
         auto r = torch::sqrt(this->r); // Compute the square root of the real part
@@ -2477,20 +2457,6 @@ public:
         h.backward();
     }
 
- 
-
-
-    TensorMatHyperDual abs() const {
-        auto abs_r = torch::abs(r); // Compute the absolute value of the real part
-        auto sign_r = torch::is_complex(r) ? torch::sign(torch::real(r)) : torch::sign(r); // Compute the sign of the real part
-        auto abs_d = sign_r.unsqueeze(-1) * d; // The dual part multiplies by the sign of the real part
-        auto abs_h = sign_r.unsqueeze(-1).unsqueeze(-1) * h; // The hyperdual part multiplies by the sign of the real part
-        return TensorMatHyperDual(abs_r, abs_d, abs_h);
-    }
-
-
-
-
 
     /**
      * Static member function to perform einsum on two TensorDual objects
@@ -2716,6 +2682,14 @@ TensorMatDual TensorDual::eye() {
 
 
 // Non-member overload for torch::Tensor * TensorDual
+TensorDual operator*(const torch::Tensor& tensor, const TensorDual& td) {
+    auto real = tensor * td.r;
+    auto dual = tensor.unsqueeze(-1) * td.d;
+    return TensorDual(std::move(real), std::move(dual));
+}
+
+
+// Non-member overload for torch::Tensor * TensorDual
 TensorHyperDual operator*(const torch::Tensor& tensor, const TensorHyperDual& td) {
     auto real = tensor * td.r;
     auto dual = tensor.unsqueeze(-1) * td.d;
@@ -2723,11 +2697,34 @@ TensorHyperDual operator*(const torch::Tensor& tensor, const TensorHyperDual& td
     return TensorHyperDual(std::move(real), std::move(dual), std::move(hyper));
 }
 
+
+// Non-member overload for torch::Tensor / TensorDual
+TensorDual operator/(const torch::Tensor& tensor, const TensorDual& td) {
+    auto r = tensor / td.r;
+    auto d = -(tensor / td.r.square()).unsqueeze(-1) * td.d;
+    return TensorDual(r, d);
+}
+
+
+
 // Non-member overload for torch::Tensor / TensorDual
 TensorHyperDual operator/(const torch::Tensor& tensor, const TensorHyperDual& td) {
-    auto tdr = td.reciprocal();
-    return tensor * tdr;
+    auto r1 = tensor;
+    auto r2 = td.r;
+    auto d2 = td.d;
+    auto h2 = td.h;
+    auto r = r1 / r2;
+    auto d = -(r1 / r2.square()).unsqueeze(-1) * d2;
+    auto h = torch::einsum("mi, mi, mij, mik->mijk",{r1, r2.pow(-3), d2, d2}) - 
+             torch::einsum("mi, mi, mijk->mijk",{r1, r2.pow(-2), h2});
+    return TensorHyperDual(r, d, h);
 }
+
+// Non-member overload for torch::Tensor + TensorDual
+TensorDual operator+(const torch::Tensor& tensor, const TensorDual& td) {
+    return TensorDual(std::move(tensor + td.r), std::move(td.d.clone()));
+}
+
 
 
 // Non-member overload for torch::Tensor + TensorDual
@@ -2736,14 +2733,29 @@ TensorHyperDual operator+(const torch::Tensor& tensor, const TensorHyperDual& td
 }
 
 // Non-member template function for Scalar + TensorDual
+TensorDual operator+(const double& scalar, const TensorDual& td) {
+    // Ensure the scalar is of a type convertible to Tensor
+    return TensorDual((scalar + td.r).clone(), td.d.clone());
+}
+
+
+
+// Non-member template function for Scalar + TensorDual
 TensorHyperDual operator+(const double& scalar, const TensorHyperDual& td) {
     // Ensure the scalar is of a type convertible to Tensor
     return TensorHyperDual((scalar + td.r).clone(), td.d.clone(), td.h.clone());
 }
 
 // Non-member overload for torch::Tensor - TensorDual
-TensorHyperDual operator-(const torch::Tensor& tensor, const TensorHyperDual& td) {
+TensorDual operator-(const torch::Tensor& tensor, const TensorDual& td) {
     return TensorDual(std::move(tensor - td.r), std::move(-td.d.clone()));
+}
+
+
+
+// Non-member overload for torch::Tensor - TensorDual
+TensorHyperDual operator-(const torch::Tensor& tensor, const TensorHyperDual& td) {
+    return TensorHyperDual(std::move(tensor - td.r), std::move(-td.d.clone()), std::move(-td.h.clone()));
 }
 
 
