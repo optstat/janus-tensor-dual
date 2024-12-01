@@ -1236,6 +1236,12 @@ public:
         return TensorHyperDual(r, d, h);
     }
 
+    // Overload the unary negation operator '-'
+    TensorHyperDual operator-() const {
+        return TensorHyperDual(-r, -d, -h);
+    }
+
+
     //Subtraction
     TensorHyperDual operator-(const TensorHyperDual& other) const {
         auto r = this->r - other.r;
@@ -1304,6 +1310,138 @@ public:
         auto scalar_tensor = torch::tensor(scalar, this->r.options());
         return TensorHyperDual(this->r / scalar_tensor, this->d / scalar_tensor, this->h / scalar_tensor);
     }
+
+    //overload the comparison operators
+    // Overload the less-than-or-equal-to operator for TensorDual <= TensorDual
+    torch::Tensor operator<=(const TensorHyperDual& other) const {
+        auto mask = r <= other.r;
+        return torch::squeeze(mask, 1);
+    }
+
+    // Overload the equals operator for TensorDual == TensorDual
+    torch::Tensor operator==(const TensorHyperDual& other) const {
+        auto mask = r == other.r;
+        return torch::squeeze(mask, 1);
+    }
+
+
+    // Overload the less-than-or-equal-to operator for TensorDual <= torch::Tensor
+    // This also implicitly supports TensorDual <= Scalar due to tensor's implicit constructors
+    torch::Tensor operator<=(const torch::Tensor& other) const {
+        auto mask = r <= other;
+        return torch::squeeze(mask, 1);
+    }
+
+    template <typename Scalar>
+    torch::Tensor operator<=(const Scalar& scalar) const {
+        // Ensure the scalar is of a type convertible to Tensor
+        auto mask = (r <= scalar);
+        return torch::squeeze(mask, 1);
+    }
+
+    //overload the > operator
+    torch::Tensor operator>(const TensorHyperDual& other) const {
+        auto mask = r > other.r;
+        return torch::squeeze(mask, 1);
+    }
+
+    //overload the > operator for a tensor and a TensorDual
+    torch::Tensor operator>(const torch::Tensor& other) const {
+        auto mask = r > other;
+        return torch::squeeze(mask, 1);
+    }
+
+    //overload the > for a scalar and a TensorDual
+    template <typename Scalar>
+    torch::Tensor operator>(const Scalar& scalar) const {
+        // Ensure the scalar is of a type convertible to Tensor
+        auto scalar_tensor = torch::tensor({scalar}, this->r.options());
+        auto mask = r > scalar_tensor;
+        return torch::squeeze(mask, 1);
+    }
+
+    //overload the < operator
+    torch::Tensor operator<(const TensorHyperDual& other) const {
+        auto mask = r < other.r;
+        return torch::squeeze(mask, 1);
+    }
+
+    //overload the < operator for a tensor and a TensorDual
+    torch::Tensor operator<(const torch::Tensor& other) const {
+        auto mask = r < other;
+        //std::cerr << "mask sizes in <: " << mask.sizes() << std::endl;
+        return torch::squeeze(mask, 1);
+    }
+
+    //overload the < for a scalar and a TensorDual
+    template <typename Scalar>
+    torch::Tensor operator<(const Scalar& scalar) const {
+        // Ensure the scalar is of a type convertible to Tensor
+        auto mask = r < scalar;
+        return torch::squeeze(mask, 1);
+    }
+
+
+
+    // Overload the greater-than-or-equal-to operator for TensorDual >= TensorDual
+    torch::Tensor operator>=(const TensorHyperDual& other) const {
+        auto mask = r >= other.r;
+        return torch::squeeze(mask, 1);
+    }
+
+    // Overload the greater-than-or-equal-to operator for TensorDual >= torch::Tensor
+    // This also implicitly supports TensorDual >= Scalar due to tensor's implicit constructors
+    torch::Tensor operator>=(const torch::Tensor& other) const {
+        auto mask = r >= other;
+        return torch::squeeze(mask, 1);
+    }
+
+    //overload the >= operator for TensorDual and a scalar
+    template <typename Scalar>
+    torch::Tensor operator>=(const Scalar& scalar) const {
+        // Ensure the scalar is of a type convertible to Tensor
+        auto scalar_tensor = torch::tensor({scalar}, this->r.options());
+        auto mask = r >= scalar_tensor;
+        return torch::squeeze(mask, 1);
+    }
+
+
+
+    // Overload the equality operator for TensorDual == torch::Tensor
+    // This also implicitly supports TensorDual == Scalar due to tensor's implicit constructors
+    torch::Tensor operator==(const torch::Tensor& other) const {
+        auto mask = r.eq(other); // Using the .eq() function for equality comparison
+        return torch::squeeze(mask, 1);
+    }
+
+    template <typename Scalar>
+    torch::Tensor operator==(const Scalar& scalar) const {
+        // Ensure the scalar is of a type convertible to Tensor
+        auto mask = r.eq(scalar);
+        return torch::squeeze(mask, 1);
+    }
+
+    // Overload the inequality operator for TensorDual != TensorDual
+    torch::Tensor operator!=(const TensorHyperDual& other) const {
+        auto mask = r.ne(other.r); // Using the .ne() function for inequality comparison
+        return torch::squeeze(mask, 1);
+    }
+
+    // Overload the inequality operator for TensorDual != torch::Tensor
+    // This also implicitly supports TensorDual != Scalar due to tensor's implicit constructors
+    torch::Tensor operator!=(const torch::Tensor& other) const {
+        auto mask = r.ne(other); // Using the .ne() function for inequality comparison
+        return torch::squeeze(mask, 1);
+    }
+
+    template <typename Scalar>
+    torch::Tensor operator!=(const Scalar& scalar) const {
+        // Ensure the scalar is of a type convertible to Tensor
+        auto mask = r.ne(scalar);
+        return torch::squeeze(mask, 1);
+    }
+
+
 
 
     TensorHyperDual reciprocal() const {
@@ -1416,6 +1554,29 @@ public:
         return TensorHyperDual(r, d, h);
     }
 
+    TensorHyperDual zeros_like() {
+        return TensorHyperDual(torch::zeros_like(this->r), 
+                               torch::zeros_like(this->d), 
+                               torch::zeros_like(this->h));
+    }
+
+    static TensorHyperDual zeros_like(TensorHyperDual& other) {
+        return TensorHyperDual(torch::zeros_like(other.r), 
+                               torch::zeros_like(other.d), 
+                               torch::zeros_like(other.h));
+    }
+
+
+
+    TensorHyperDual sign() const {
+        auto sign_r = torch::sign(r); // Compute the sign of the real part
+        //base this purely on the real part
+        auto sign_d = torch::zeros_like(d); // The dual part is zero
+
+        auto sign_h = torch::zeros_like(h); // The hyperdual part is zero
+        return TensorHyperDual(sign_r, sign_d, sign_h);
+    }
+
 
 
     TensorHyperDual min() {
@@ -1455,6 +1616,30 @@ public:
       // Return a new TensorHyperDual with the max values and corresponding dual and hyperdual values
       return TensorHyperDual(max_values, dual_values, hyper_values);
     }
+
+    // Static member function to replicate the 'where' class method
+    static TensorHyperDual where(const torch::Tensor& cond, 
+                            const TensorHyperDual& x, 
+                            const TensorHyperDual& y) {
+        torch::Tensor condr, condd, condh;
+
+        if (cond.dim() == 1) {
+            condr = cond.unsqueeze(1).expand({-1, x.r.size(1)});
+            condd = cond.unsqueeze(1).unsqueeze(2).expand({-1, x.d.size(1), x.d.size(2)});
+            condh = cond.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand({-1, x.h.size(1), x.h.size(2), x.h.size(3)});
+        } else {
+            condr = cond;
+            condd = cond.unsqueeze(2).expand({-1, -1, x.d.size(2)});
+            condh = cond.unsqueeze(2).unsqueeze(3).expand({-1, -1, x.h.size(2), x.h.size(3)});
+        }
+
+        auto xr = torch::where(condr, x.r, y.r);
+        auto xd = torch::where(condd, x.d, y.d);
+        auto xh = torch::where(condh, x.h, y.h);
+
+        return TensorHyperDual(xr, xd, xh);
+    }
+
 
     /**
      * Static member function to perform einsum on two TensorDual objects
@@ -1561,8 +1746,8 @@ public:
     {
         assert (arg.find("->") != std::string::npos && "einsum string must contain '->'");
         assert (arg.find(",") != std::string::npos && "einsum string must contain ','");
-        assert (arg.find("z")== std::string::npos 0 && "z is a reserved character in einsum used to operate on dual numbers");
-        assert (arg.find("w")== std::string::npos 0 && "w is a reserved character in einsum used to operate on dual numbers");
+        assert (arg.find("z")== std::string::npos && "z is a reserved character in einsum used to operate on dual numbers");
+        assert (arg.find("w")== std::string::npos && "w is a reserved character in einsum used to operate on dual numbers");
         std::vector<torch::Tensor> r_tensors;
         std::vector<torch::Tensor> d_tensors;
         std::vector<torch::Tensor> h_tensors;
@@ -1579,12 +1764,12 @@ public:
 
         //Find the positions of the "," in the einsum string
         std::vector<std::string> lhsargs{};
-        std::vector<std::string> rhsarg;
+        std::string rhsarg; //The right hand side of the einsum only one output
         size_t pos = arg.find(',');
         size_t posl = 0;
         while(pos != std::string::npos) 
         {
-           arglhs.push_back(arg.substr(posl+1, pos));
+           lhsargs.push_back(arg.substr(posl+1, pos));
            posl = pos;
         }
         size_t pos2 = arg.find('->');

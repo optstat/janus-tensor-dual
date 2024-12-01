@@ -168,6 +168,27 @@ namespace janus {
    }
 
 
+   TensorHyperDual custom_sign(const TensorHyperDual& input, double threshold = 1e-6) 
+   {
+    
+    auto x = TensorHyperDual(torch::real(input.r), torch::real(input.d), torch::real(input.h));
+    // Create a tensor with the same shape as input, filled with 0
+    auto output = TensorHyperDual::zeros_like(x);
+    
+    // Find indices where the absolute value is greater than the threshold
+    auto mask = x.abs() > threshold;
+    
+    // Apply the sign function to elements above the threshold
+    TensorHyperDual sign_tensor = x.sign();
+    
+    // Use where to combine the results
+    output = TensorHyperDual::where(mask, sign_tensor, output);
+    
+    return output;
+   }
+
+
+
    torch::Tensor signcond(const torch::Tensor &a, const torch::Tensor &b) 
    {
      torch::Tensor a_sign, b_sign;
@@ -179,6 +200,55 @@ namespace janus {
      return result;
    }
 
+
+  // Function to unfold a tensor along a specific mode
+  torch::Tensor unfold(const torch::Tensor& tensor, int mode) {
+    // Get tensor dimensions
+    auto sizes = tensor.sizes();
+    int I = sizes[0];
+    int J = sizes[1];
+    int K = sizes[2];
+
+    if (mode == 0) {
+        // Unfold along mode-0
+        return tensor.permute({0, 1, 2}).reshape({I, J * K});
+    } else if (mode == 1) {
+        // Unfold along mode-1
+        return tensor.permute({1, 0, 2}).reshape({J, I * K});
+    } else {
+        // Unfold along mode-2
+        return tensor.permute({2, 0, 1}).reshape({K, I * J});
+    }
+  }
+
+  // Function to compute Tucker decomposition (HOSVD)
+  void tuckerDecomposition(const torch::Tensor& tensor,
+                         torch::Tensor& core,
+                         std::vector<torch::Tensor>& factors,
+                         std::vector<int64_t> ranks) {
+    // Initialize factors
+    factors.clear();
+
+    for (int mode = 0; mode < 3; ++mode) {
+        // Unfold tensor along mode
+        auto unfolded = unfold(tensor, mode);
+
+        // Compute SVD on the unfolded tensor
+        auto svd_result = torch::svd(unfolded);
+        auto U = std::get<0>(svd_result); // U matrix
+
+        // Truncate U to the desired rank
+        auto truncated_U = U.index({"...", torch::indexing::Slice(0, ranks[mode])});
+        factors.push_back(truncated_U);
+    }
+
+    // Compute the core tensor by contracting original tensor with factor matrices
+    auto temp = tensor;
+    for (int mode = 0; mode < 3; ++mode) {
+        temp = torch::matmul(factors[mode].transpose(0, 1), unfold(temp, mode)).reshape(ranks);
+    }
+    core = temp; // Core tensor
+   }
 
    TensorDual signcond(const TensorDual &a, const TensorDual &b) 
    {
@@ -203,7 +273,7 @@ namespace janus {
 
      auto result = TensorHyperDual::einsum("mi,mi->mi", (b_sign >= 0) , (TensorHyperDual::einsum("mi,mi->mi", (a_sign >= 0) , a))) + 
                    TensorHyperDual::einsum("mi,mi->mi",(a_sign < 0) , -a) +
-             TensorHyperDual::einsum("mi,mi->mi",(b_sign < 0), (TensorDual::einsum("mi,mi->mi",(a_sign >= 0) ,-a))) + 
+             TensorHyperDual::einsum("mi,mi->mi",(b_sign < 0), (TensorHyperDual::einsum("mi,mi->mi",(a_sign >= 0) ,-a))) + 
              TensorHyperDual::einsum("mi,mi->mi",(a_sign < 0),a);
      return result;
    }
@@ -530,6 +600,39 @@ torch::Tensor compute_batch_jacobian(torch::Tensor& output, torch::Tensor& input
 
     return jacobian;
 
+}
+
+// Function to compute Hessians for a batch of inputs
+torch::Tensor compute_batch_hessian(
+    const torch::Tensor& inputs,  // [M, N, D]
+    const std::function<torch::Tensor(const torch::Tensor&)>& func) {  // Function f
+    int64_t M = inputs.size(0);
+    int64_t N = inputs.size(1);
+    int64_t D = inputs.size(2);
+    int64_t n = func(inputs[0][0]).size(0); // Output dimension of f
+    
+    torch::Tensor hessians = torch::zeros({M, n, D, D}, inputs.options());
+
+    for (int64_t m = 0; m < M; ++m) {
+        for (int64_t i = 0; i < n; ++i) {
+            // Create a scalar output for higher-order derivatives
+            auto output = func(inputs[m]).select(0, i);  // Select i-th output of f
+            
+            for (int64_t d1 = 0; d1 < D; ++d1) {
+                auto grad = torch::autograd::grad({output}, {inputs[m]}, /*grad_outputs=*/{torch::ones_like(output)},
+                                                  /*retain_graph=*/true, /*create_graph=*/true)[0];
+                
+                for (int64_t d2 = 0; d2 < D; ++d2) {
+                    auto second_grad = torch::autograd::grad({grad[d1]}, {inputs[m]}, /*grad_outputs=*/{torch::ones({1})},
+                                                             /*retain_graph=*/true, /*create_graph=*/false)[0];
+                    
+                    hessians[m][i][d1][d2] = second_grad[d2];
+                }
+            }
+        }
+    }
+
+    return hessians;  // [M, n, D, D]
 }
 
 torch::Tensor compute_batch_hessian(torch::Tensor& output, torch::Tensor& input) 
