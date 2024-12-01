@@ -194,6 +194,19 @@ namespace janus {
      return result;
    }
 
+   TensorHyperDual signcond(const TensorHyperDual &a, const TensorHyperDual &b) 
+   {
+     torch::Tensor a_sign, b_sign;
+     a_sign = custom_sign(torch::real(a.r));
+     b_sign = custom_sign(torch::real(b.r));
+     //If the number is very small assume the sign is positive to ensure compatibility with matlab
+
+     auto result = TensorHyperDual::einsum("mi,mi->mi", (b_sign >= 0) , (TensorHyperDual::einsum("mi,mi->mi", (a_sign >= 0) , a))) + 
+                   TensorHyperDual::einsum("mi,mi->mi",(a_sign < 0) , -a) +
+             TensorHyperDual::einsum("mi,mi->mi",(b_sign < 0), (TensorDual::einsum("mi,mi->mi",(a_sign >= 0) ,-a))) + 
+             TensorHyperDual::einsum("mi,mi->mi",(a_sign < 0),a);
+     return result;
+   }
 
 
 

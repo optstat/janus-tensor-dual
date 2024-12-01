@@ -1456,6 +1456,179 @@ public:
       return TensorHyperDual(max_values, dual_values, hyper_values);
     }
 
+    /**
+     * Static member function to perform einsum on two TensorDual objects
+     * Note this is more limited than the torch.einsum function
+     * as it only supports two arguments
+     */
+    static TensorHyperDual einsum(const std::string& arg, TensorHyperDual& first, TensorHyperDual& second) {
+
+        auto r = torch::einsum(arg, {first.r, second.r});
+
+        // Find the position of the '->' in the einsum string
+        auto pos1  = arg.find(",");
+        auto pos2  = arg.find("->");
+        auto arg1  = arg.substr(0, pos1);
+        auto arg2  = arg.substr(pos1+1, pos2-pos1-1);
+        auto arg3  = arg.substr(pos2+2);
+
+        // Find the position of the '->' in the einsum string
+        auto r1 = first.r;
+        auto r2 = second.r;
+        auto d1 = first.d;
+        auto d2 = second.d;
+        auto h1 = first.h;
+        auto h2 = second.h;
+
+        auto r1d2arg = arg1+","+arg2+"z->"+arg3+"z";
+        auto r1d2 = torch::einsum(r1d2arg, {r1, d2});
+        auto d1r2arg = arg1+"z,"+arg2+"->"+arg3+"z";
+        auto d1r2 = torch::einsum(d1r2arg, {d1, r2});
+        auto d = r1d2 + d1r2;
+        //Outer product
+        auto d1d2arg = arg1+"z,"+arg2+"w->"+arg3+"zw";
+        auto d1d2 = torch::einsum(d1d2arg, {d1, d2});
+        auto r1h2arg = arg1+","+arg2+"zw->"+arg3+"zw";
+        auto r1h2 = torch::einsum(r1h2arg, {r1, h2});
+        auto h1r2arg = arg1+"zw,"+arg2+"->"+arg3+"zw";
+        auto h1r2 = torch::einsum(h1r2arg, {h1, r2});
+        auto h = r1h2 + 2*d1d2+ h1r2;
+
+        return TensorHyperDual(std::move(r), std::move(d), std::move(h));
+    }
+
+
+
+    static TensorHyperDual einsum(const std::string& arg, 
+                                  const torch::Tensor& first, 
+                                  const TensorHyperDual & second)
+    {
+
+        auto r = torch::einsum(arg, {first, second.r});
+
+        // Find the position of the '->' in the einsum string
+        auto pos1  = arg.find(",");
+        auto pos2  = arg.find("->");
+        auto arg1  = arg.substr(0, pos1);
+        auto arg2  = arg.substr(pos1+1, pos2-pos1-1);
+        auto arg3  = arg.substr(pos2+2);
+        
+        //This is commutative so we can put the dual part at the end
+        auto r1d2arg = arg1+","+arg2+"z->"+arg3+"z";
+        auto r1d2 = torch::einsum(r1d2arg, {first, second.d});
+        auto d = r1d2;
+
+        auto r1h2arg = arg1+","+arg2+"zw->"+arg3+"zw";
+        auto r1h2 = torch::einsum(r1h2arg, {first, second.h});
+        auto h = r1h2;
+        return TensorHyperDual(r, d, h);
+        
+    }
+
+
+    static TensorHyperDual einsum(const std::string& arg, 
+                                  const TensorHyperDual& first, 
+                                  const torch::Tensor & second)
+    {
+        auto r = torch::einsum(arg, {first.r, second});
+
+        // Find the position of the '->' in the einsum string
+        auto pos1 = arg.find(",");
+        auto pos2 = arg.find("->");
+        auto arg1 = arg.substr(0, pos1);
+        auto arg2 = arg.substr(pos1+1,pos2-pos1-1);
+        auto arg3 = arg.substr(pos2+2);
+        auto r1 = first.r;
+        auto d1 = first.d;
+        auto h1 = first.h;
+        auto r2 = second;
+        auto d1r2arg = arg1+"z,"+arg2+"->"+arg3+"z";
+        auto d1r2 = torch::einsum(d1r2arg, {d1, r2});
+        auto d = d1r2;
+
+        auto h1r2arg = arg1+"zw,"+arg2+"->"+arg3+"zw";
+        auto h1r2 = torch::einsum(h1r2arg, {h1, r2});
+        auto d1d2arg = arg1+"z,"+arg2+"w->"+arg3+"zw";
+        auto d1d2 = torch::einsum(d1d2arg, {d1, r2});
+        auto h = h1r2 + d1d2;
+
+        return TensorHyperDual(r, d, h);
+    }
+
+
+    static TensorHyperDual einsum(const std::string& arg, 
+                             std::vector<TensorHyperDual> tensors) 
+    {
+        assert (arg.find("->") != std::string::npos && "einsum string must contain '->'");
+        assert (arg.find(",") != std::string::npos && "einsum string must contain ','");
+        assert (arg.find("z")== std::string::npos 0 && "z is a reserved character in einsum used to operate on dual numbers");
+        assert (arg.find("w")== std::string::npos 0 && "w is a reserved character in einsum used to operate on dual numbers");
+        std::vector<torch::Tensor> r_tensors;
+        std::vector<torch::Tensor> d_tensors;
+        std::vector<torch::Tensor> h_tensors;
+        for (const auto& t : tensors) {
+            r_tensors.push_back(t.r);
+            d_tensors.push_back(t.d);
+            h_tensors.push_back(t.h);
+        }
+        //The real part is straightforward
+        auto r = torch::einsum(arg, r_tensors);
+
+        // Find the position of the '->' in the einsum string
+        auto posa = arg.find("->");
+
+        //Find the positions of the "," in the einsum string
+        std::vector<std::string> lhsargs{};
+        std::vector<std::string> rhsarg;
+        size_t pos = arg.find(',');
+        size_t posl = 0;
+        while(pos != std::string::npos) 
+        {
+           arglhs.push_back(arg.substr(posl+1, pos));
+           posl = pos;
+        }
+        size_t pos2 = arg.find('->');
+        rhsarg = arg.substr(pos2+2);
+        std::vector<torch::Tensor> dr_tensors{};
+
+        auto d = torch::zeros_like(tensors[0].d);
+        for ( int i=0; i < tensors.size(); i++)
+        {
+            auto dpart = torch::zeros_like(tensors[0].d);
+            auto dl = tensors[i].d;
+            for ( int j=0; j < tensors.size(); i++)
+            {
+                if ( i==j) continue;
+                auto darg = lhsargs[i] + "z," + lhsargs[j] + "->" + rhsarg + "z";
+                dl = dl+torch::einsum(darg, {dpart, d_tensors[j]});
+            }
+            d = d + dl;
+            dr_tensors.push_back(dl); //Keep this for the h calculation
+
+        }
+
+        torch::Tensor h = torch::zeros_like(tensors[0].h);
+        for ( int i=0; i < tensors.size(); i++)
+        {
+            for ( int j=0; j < tensors.size(); i++)
+            {
+                if ( i==j) continue;
+                auto harg = lhsargs[i] + "zw," + lhsargs[j] + "->" + rhsarg + "zw";
+                h = h + torch::einsum(harg, {tensors[i].h, d_tensors[j]});
+            }
+            //Now for the d^2 terms
+            auto d2 = torch::zeros_like(tensors[0].d);
+            for ( int j=0; j < tensors.size(); i++)
+            {
+                if ( i==j) continue;
+                auto d2arg = lhsargs[i] + "z," + lhsargs[j] + "w->" + rhsarg + "zw";
+                h = h + torch::einsum(d2arg, {d_tensors[i], dr_tensors[j]});
+            }
+        }
+        
+        return TensorHyperDual(r, d, h);
+    }
+
 
 
 };
@@ -1848,6 +2021,42 @@ public:
         return TensorDual(std::move(r), std::move(d1 + d2));
     }
 
+    static TensorHyperDual einsum(const std::string& arg, 
+                                  const TensorMatHyperDual& first, 
+                                  const TensorHyperDual& second) {
+
+        auto r = torch::einsum(arg, {first.r, second.r});
+
+        // Find the position of the '->' in the einsum string
+        auto pos = arg.find(",");
+        auto arg1 = arg.substr(0, pos);
+        int pos2 = arg.find("->");
+        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg3 = arg.substr(pos2 + 2);
+        auto darg1 = arg1 + "z," + arg2 + "->" + arg3 + "z";
+
+        auto d1 = torch::einsum(darg1, {first.d,  second.r});
+        auto darg2 = arg1+","+arg2+"z->"+arg3+"z";
+        auto d2 = torch::einsum(darg2, {first.r, second.d});
+
+        auto d1d1r2arg = arg1 + "z," + arg1 + "w," + arg2+"->" + arg3 + "zw";
+        auto d1d1r2 = torch::einsum(d1d1r2arg, {first.d, first.d, second.r});
+        auto r1h1r2arg = arg1 + "," + arg1 + "zw," + arg2+"->" + arg3 + "zw";
+        auto r1h1r2 = torch::einsum(r1h1r2arg, {first.r, first.h, second.r});
+        auto r1d1d2arg = arg1 + "," + arg1 + "z," + arg2+"w->" + arg3 + "zw";
+        auto r1d1d2 = torch::einsum(r1d1d2arg, {first.r, first.d, second.d});
+        auto d1r2d2arg = arg1 + "z," + arg2 + "," + arg2+"w->" + arg3 + "zw";
+        auto d1r2d2 = torch::einsum(d1r2d2arg, {first.d, second.r, second.d});
+        auto r1d2d2arg = arg1 + "," + arg2 + "z," + arg2+"w->" + arg3 + "zw";
+        auto r1d2d2 = torch::einsum(r1d2d2arg, {first.r, second.d, second.d});
+        auto r1r2h2arg = arg1 + "," + arg2 + "," + arg2+"zw->" + arg3 + "zw";
+        auto r1r2h2 = torch::einsum(r1r2h2arg, {first.r, second.r, second.h});
+
+        return TensorHyperDual(std::move(r), 
+                               std::move(d1 + d2), 
+                               std::move(d1d1r2 + r1h1r2 + r1d1d2 + d1r2d2 + r1d2d2 + r1r2h2));
+    }
+
 
     static TensorMatDual einsum(const std::string& arg, const TensorMatDual& first, const torch::Tensor& second) {
 
@@ -1863,6 +2072,25 @@ public:
         auto d1 = torch::einsum(darg1, {first.d,  second});
 
         return TensorMatDual(std::move(r), std::move(d1));
+    }
+
+    static TensorMatHyperDual einsum(const std::string& arg,
+                                     const TensorMatHyperDual& first,
+                                     const torch::Tensor& second) {
+        auto r = torch::einsum(arg, {first.r, second});
+        // Find the position of the '->' in the einsum string
+        auto pos = arg.find(",");
+        auto arg1 = arg.substr(0, pos);
+        int pos2 = arg.find("->");
+        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg3 = arg.substr(pos2 + 2);
+        auto darg1 = arg1 + "z," + arg2 + "->" + arg3 + "z";
+        auto d = torch::einsum(darg1, {first.d,  second});
+        auto d1d1r2arg = arg1 + "z," + arg1 + "w," + arg2+"->" + arg3 + "zw";
+        auto d1d1r2 = torch::einsum(d1d1r2arg, {first.d, first.d, second});
+        auto r1h1r2arg = arg1 + "," + arg1 + "zw," + arg2+"->" + arg3 + "zw";
+        auto r1h1r2 = torch::einsum(r1h1r2arg, {first.r, first.h, second});
+        return TensorMatHyperDual(std::move(r), std::move(d), std::move(d1d1r2 + r1h1r2));
     }
 
 
