@@ -1987,7 +1987,7 @@ public:
     /**
      * Convert the TensorHyperDual object to a complex TensorHyperDual object.
      */
-    TensorHyperDual complex() {
+    TensorHyperDual complex() const{
         torch::Tensor rc, dc, hc;
         this->r.is_complex() ? rc = this->r : rc = torch::complex(this->r, torch::zeros_like(this->r)).to(this->r.device());
         this->d.is_complex() ? dc = this->d : dc = torch::complex(this->d, torch::zeros_like(this->d)).to(this->d.device());
@@ -1998,7 +1998,7 @@ public:
     /**
      * Extract the real part of the TensorHyperDual object.
      */
-    TensorHyperDual real() {
+    TensorHyperDual real() const {
         auto r = torch::real(this->r);
         auto d = torch::real(this->d);
         auto h = torch::real(this->h);
@@ -2955,72 +2955,105 @@ public:
  * */
 class TensorMatHyperDual {
 public:
-    torch::Tensor r;
-    torch::Tensor d;
-    torch::Tensor h;
-    torch::Dtype dtype_ = torch::kFloat64;
-    torch::Device device_ = torch::kCPU;
+    torch::Tensor r;       // Real part [M, N, L]
+    torch::Tensor d;       // Dual part [M, N, L, D]
+    torch::Tensor h;       // Hyperdual part [M, N, L, H1, H2]
+    torch::Dtype dtype_;   // Data type (default: Float64)
+    torch::Device device_; // Device (default: CPU)
     
+    // Constructor with tensors
+    TensorMatHyperDual(torch::Tensor r, torch::Tensor d, torch::Tensor h) 
+        : r(r), d(d), h(h), 
+          dtype_(torch::typeMetaToScalarType(r.dtype())),
+          device_(r.device()) {
+        if (r.dim() != 3) {
+            throw std::invalid_argument("Real part (r) must have dimensions [M, N, L].");
+        }
+        if (d.dim() != 4) {
+            throw std::invalid_argument("Dual part (d) must have dimensions [M, N, L, D].");
+        }
+        if (h.dim() != 5) {
+            throw std::invalid_argument("Hyperdual part (h) must have dimensions [M, N, L, H1, H2].");
+        }
+        if (r.size(0) != d.size(0) || r.size(0) != h.size(0) ||
+            r.size(1) != d.size(1) || r.size(1) != h.size(1) ||
+            r.size(2) != d.size(2) || r.size(2) != h.size(2)) {
+            throw std::invalid_argument("Shape mismatch: r, d, and h must share the same [M, N, L] dimensions.");
+        }
+    }
+    /**
+     * Constructor for a TensorMatHyperDual object with zeros
+     */
+    TensorMatHyperDual(int M, int N, int L, int D = 1, int H1 = 1, int H2 = 1, 
+                    torch::Dtype dtype = torch::kFloat64, torch::Device device = torch::kCPU) 
+        : dtype_(dtype), device_(device) {
+        // Create TensorOptions with dtype and device
+        auto options = torch::TensorOptions().dtype(dtype).device(device);
 
-    TensorMatHyperDual(torch::Tensor r, torch::Tensor d, torch::Tensor h) {
-        assert (r.dim() ==3 && "In TensorMatHyperDual, the real part must be a matrix");
-        assert (d.dim() ==4 && "Dual part of TensorMatHyperDual must have four dimensions");
-        assert (h.dim() ==5 && "Hyperdual part of TensorMatHyperDual must have five dimensions");   
-
-        this->r = r;
-        this->d = d;
-        this->h = h;
-        dtype_ = torch::typeMetaToScalarType(r.dtype());
-        this->device_ = r.device();
+        // Initialize tensors with zeros
+        r = torch::zeros({M, N, L}, options);
+        d = torch::zeros({M, N, L, D}, options);
+        h = torch::zeros({M, N, L, H1, H2}, options);
     }
 
-    TensorMatHyperDual to(torch::Device device) {
-        this->r = this->r.to(device);
-        this->d = this->d.to(device);
-        this->h = this->h.to(device);
-        this->device_ = device;
-        return *this;
+    TensorMatHyperDual to(torch::Device device) const {
+        // Create a new TensorMatHyperDual object with tensors moved to the specified device
+        return TensorMatHyperDual(
+            this->r.to(device),
+            this->d.to(device),
+            this->h.to(device)
+        );
     }
 
     torch::Device device() const {
-        return this->device_;
+      return this->device_;
     }
-
-    TensorMatHyperDual() {
-        auto options = torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU); // You need to specify the correct data type here
-
-        // Create zero tensors with the specified options
-        torch::Tensor rl{torch::zeros({1, 1, 1}, options)};
-        torch::Tensor dl{torch::zeros({1, 1, 1, 1}, options)};
-        torch::Tensor hl{torch::zeros({1, 1, 1, 1, 1}, options)};
-        TensorMatHyperDual(rl, dl, hl);
-    }
-
-
-
-    TensorMatHyperDual(const TensorDual& x, int dim =2) {
-        auto r = x.r.unsqueeze(dim);
-        auto d = x.d.unsqueeze(dim);
-        auto h = torch::zeros_like(d);
-        TensorMatHyperDual(r, d, h);
-    }
-
-    TensorMatHyperDual complex() {
+    TensorMatHyperDual(const TensorDual& x, int dim = 2)
+        : r(x.r.unsqueeze(dim)), 
+        d(x.d.unsqueeze(dim)), 
+        h(torch::zeros_like(x.d.unsqueeze(dim))),
+        dtype_(torch::typeMetaToScalarType(x.r.dtype())), // Explicit conversion
+        device_(x.r.device()) {}
+    
+    
+    TensorMatHyperDual complex() const {
         torch::Tensor rc, dc, hc;
-        this->r.is_complex() ? rc = this->r : rc = torch::complex(this->r, torch::zeros_like(this->r)).to(this->r.device());
-        this->d.is_complex() ? dc = this->d : dc = torch::complex(this->d, torch::zeros_like(this->d)).to(this->d.device());
-        this->h.is_complex() ? hc = this->h : hc = torch::complex(this->h, torch::zeros_like(this->h)).to(this->h.device());
-        return TensorMatHyperDual(std::move(rc), std::move(dc), std::move(hc));
+
+        // Convert real tensors to complex tensors
+        if (this->r.is_complex()) {
+            rc = this->r;
+        } else {
+            rc = torch::cat({this->r.unsqueeze(-1), torch::zeros_like(this->r).unsqueeze(-1)}, -1);
+        }
+
+        if (this->d.is_complex()) {
+            dc = this->d;
+        } else {
+            dc = torch::cat({this->d.unsqueeze(-1), torch::zeros_like(this->d).unsqueeze(-1)}, -1);
+        }
+
+        if (this->h.is_complex()) {
+            hc = this->h;
+        } else {
+            hc = torch::cat({this->h.unsqueeze(-1), torch::zeros_like(this->h).unsqueeze(-1)}, -1);
+        }
+
+        // Return a new TensorMatHyperDual with complex tensors
+        return TensorMatHyperDual(rc, dc, hc);
     }
 
-    TensorMatHyperDual real() {
+    TensorMatHyperDual real() const {
+        // Extract real parts
         auto r = torch::real(this->r);
         auto d = torch::real(this->d);
         auto h = torch::real(this->h);
-        return TensorMatHyperDual(std::move(r), std::move(d), std::move(h));
+
+        // Return a new TensorMatHyperDual with real parts
+        return TensorMatHyperDual(r, d, h);
     }
 
-    TensorMatHyperDual imag() {
+
+    TensorMatHyperDual imag() const  {
         auto r = torch::imag(this->r);
         auto d = torch::imag(this->d);
         auto h = torch::imag(this->h);
