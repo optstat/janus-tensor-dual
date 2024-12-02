@@ -1138,7 +1138,12 @@ public:
     torch::Dtype dtype_ = torch::kFloat64;
     torch::Device device_ = torch::kCPU;
 
-
+    TensorHyperDual(int r_dim1, int r_dim2, int d_dim1, int d_dim2, int d_dim3, int h_dim1, int h_dim2, int h_dim3, int h_dim4) 
+    : r(torch::zeros({r_dim1, r_dim2}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
+      d(torch::zeros({d_dim1, d_dim2, d_dim3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
+      h(torch::zeros({h_dim1, h_dim2, h_dim3, h_dim4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))) {}
+    
+    
     TensorHyperDual()
     : r(torch::zeros({1, 1, 1}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
       d(torch::zeros({1, 1, 1, 1}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
@@ -1147,10 +1152,7 @@ public:
       device_(torch::kCPU) {}
 
     TensorHyperDual(torch::Tensor r, torch::Tensor d, torch::Tensor h) {
-        assert (r.dim() == 3 && "In TensorHyperDual, the real part must be a matrix");
-        assert (d.dim() == 4 && "Dual part of TensorHyperDual must have four dimensions");
-        assert (h.dim() == 5 && "Hyperdual part of TensorHyperDual must have five dimensions");
-
+        validateTensors(r, d, h);
         this->r = r;
         this->d = d;
         this->h = h;
@@ -1169,33 +1171,61 @@ public:
     torch::Device device() const {
         return this->device_;
     }
+private:
+    void validateTensors(const torch::Tensor& r, const torch::Tensor& d, const torch::Tensor& h) const {
+        if (r.dim() != 3) throw std::invalid_argument("Real part must be a 3D tensor");
+        if (d.dim() != 4) throw std::invalid_argument("Dual part must be a 4D tensor");
+        if (h.dim() != 5) throw std::invalid_argument("Hyperdual part must be a 5D tensor");
+        if (r.device() != d.device() || d.device() != h.device()) {
+            throw std::invalid_argument("All tensors must reside on the same device");
+        }
+        if (r.dtype() != d.dtype() || d.dtype() != h.dtype()) {
+            throw std::invalid_argument("All tensors must have the same dtype");
+        }
+    }
 
-    /**
-     * @brief Construct a new TensorHyperDual object from a TensorDual object
-     * The real and dual parts are the same.  We construct a new TensorHyperDual object
-     * with the same real and dual parts, but with a zero hyperdual part.
-     */
+public:
+
+  /**
+   * @brief Construct a new TensorHyperDual object from a TensorDual object.
+   * 
+   * The real and dual parts are the same. We construct a new TensorHyperDual 
+   * object with the same real and dual parts but with a zero hyperdual part 
+   * that has an additional dimension replicating the dual part's last dimension.
+   */
     TensorHyperDual(const TensorDual& x)
       : r(x.r),
-      d(x.d),
-      //The hyperdual part is is a zero tensor with the dual part last dimension replicated
-      h(torch::zeros_like(x.d.unsqueeze(-1).repeat({1, 1, 1, x.d.size(-1)}))),
-      dtype_(torch::typeMetaToScalarType(r.dtype())),
-      device_(r.device()) {
-
+        d(x.d),
+        h(torch::zeros({x.d.size(0), x.d.size(1), x.d.size(2), x.d.size(3), x.d.size(3)}, x.d.options())),
+        dtype_(torch::typeMetaToScalarType(x.r.dtype())),
+        device_(x.r.device()) {
+        // Validate input dimensions and consistency
+        if (x.r.dim() != 3) {
+          throw std::invalid_argument("TensorDual real part must be a 3D tensor");
+        }
+        if (x.d.dim() != 4) {
+          throw std::invalid_argument("TensorDual dual part must be a 4D tensor");
+        }
+        if (x.r.device() != x.d.device()) {
+          throw std::invalid_argument("TensorDual real and dual parts must reside on the same device");
+        }
+        if (x.r.dtype() != x.d.dtype()) {
+          throw std::invalid_argument("TensorDual real and dual parts must have the same dtype");
+        }
     }
 
     /**
      * Shallow copy constructor
      */
-    TensorHyperDual(const TensorHyperDual& other) {
-        this->r = other.r;
-        this->d = other.d;
-        this->h = other.h;
-        this->device_ = other.device_;
-    }
+    TensorHyperDual(const TensorHyperDual& other)
+    : r(other.r),
+      d(other.d),
+      h(other.h),
+      dtype_(other.dtype_),
+      device_(other.device_) {}
 
     TensorHyperDual contiguous() const {
+        // Ensure each tensor (r, d, h) is stored in contiguous memory
         return TensorHyperDual(r.contiguous(), d.contiguous(), h.contiguous());
     }
 
@@ -1203,334 +1233,760 @@ public:
 
 
     /**
-     * Sum the TensorHyperDual along the first dimension
+     * Sum the TensorHyperDual along the specified dimension.
+     * 
+     * @param dim The dimension to sum along (default: 1).
+     * @param keepdim Whether to retain reduced dimensions (default: true).
+     * @return A new TensorHyperDual object with summed components.
+     * 
+     * @note Assumes that `r`, `d`, and `h` are tensors with compatible dimensions.
      */
-    TensorHyperDual sum(){
-        auto r = this->r.sum(1, true);
-        auto d = this->d.sum(1, true);
-        auto h = this->h.sum(1, true);
+    TensorHyperDual sum(int64_t dim = 1, bool keepdim=true) const {
+        auto r = this->r.sum(dim, true);
+        auto d = this->d.sum(dim, true);
+        auto h = this->h.sum(dim, true);
         return TensorHyperDual(r, d, h);
     }
-
+    
+    
+    /**
+     * Compute the square of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object with squared components.
+     *
+     * The computation follows:
+     * - r_new = r^2
+     * - d_new = 2 * r * d
+     * - h_new = 2 * d^2 + 2 * r * h
+     */
     TensorHyperDual square() const {
-        auto rsq = r.square(); // Compute the square of the real part
-        auto dn = 2 * torch::einsum("mi, mij->mij", {this->r, this->d});
-        auto hn = 2*torch::einsum("mij, mik->mijk", {this->d, this->d}) +
-                  2*torch::einsum("mi, mijk->mijk", {this->r, this->h});
-        return TensorHyperDual(rsq, dn, hn);
+      // Compute the square of the real part
+      auto rsq = r.square();
+
+      // Compute the dual part using the chain rule
+      auto dn = 2 * torch::einsum("mi, mij->mij", {this->r, this->d});
+
+      // Compute the hyperdual part using the chain rule
+      auto hn = 2 * torch::einsum("mij, mik->mijk", {this->d, this->d}) +
+              2 * torch::einsum("mi, mijk->mijk", {this->r, this->h});
+
+      // Return the resulting TensorHyperDual object
+      return TensorHyperDual(rsq, dn, hn);
     }
 
+    /**
+     * Compute the square root of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object with square root components.
+     *
+     * The computation follows:
+     * - r_new = sqrt(r)
+     * - d_new = d / (2 * sqrt(r))
+     * - h_new = -d^2 / (4 * r^(3/2)) + h / (2 * sqrt(r))
+     */
     TensorHyperDual sqrt() const {
-        auto rsq = r.sqrt(); // Compute the square root of the real part
-        auto dn = 0.5 *torch::einsum("mi, mij->mij", {this->r.pow(-0.5), this->d});
-        auto hn = -0.25*torch::einsum("mi, mij, mik->mijk", {this->r.pow(-0.25), this->d, this->d}) +
-                  0.125*torch::einsum("mi, mijk->mijk", {this->r.pow(-2.5), this->h});
-        return TensorHyperDual(rsq, d, h);
-    }
+      // Compute the square root of the real part
+      auto rsq = r.sqrt();
 
-    //Addition
+      // Compute the dual part
+      auto dn = 0.5 * torch::einsum("mi, mij->mij", {r.pow(-0.5), d});
+
+      // Compute the hyperdual part
+      auto hn = -0.25 * torch::einsum("mi, mij, mik->mijk", {r.pow(-1.5), d, d}) +
+                0.5 * torch::einsum("mi, mijk->mijk", {r.pow(-0.5), h});
+
+      // Return the resulting TensorHyperDual object
+      return TensorHyperDual(rsq, dn, hn);
+    }
+    
+    /**
+     * Overload the addition operator for TensorHyperDual.
+     *
+     * @param other The TensorHyperDual object to add.
+     * @return A new TensorHyperDual object representing the element-wise sum.
+     */
     TensorHyperDual operator+(const TensorHyperDual& other) const {
-        auto r = this->r + other.r;
-        auto d = this->d + other.d;
-        auto h = this->h + other.h;
-        return TensorHyperDual(r, d, h);
+      return TensorHyperDual(this->r + other.r, this->d + other.d, this->h + other.h);
     }
-
-    // Overload the unary negation operator '-'
+    
+    /**
+     * Overload the unary negation operator for TensorHyperDual.
+     *
+     * @return A new TensorHyperDual object with each component negated.
+     */
     TensorHyperDual operator-() const {
-        return TensorHyperDual(-r, -d, -h);
+      return TensorHyperDual(-r, -d, -h);
     }
 
-
-    //Subtraction
+    /**
+     * Overload the subtraction operator for TensorHyperDual.
+     *
+     * @param other The TensorHyperDual object to subtract.
+     * @return A new TensorHyperDual object representing the element-wise difference.
+    */
     TensorHyperDual operator-(const TensorHyperDual& other) const {
-        auto r = this->r - other.r;
-        auto d = this->d - other.d;
-        auto h = this->h - other.h;
-        return TensorHyperDual(r, d, h);
+      auto r_diff = this->r - other.r;
+      auto d_diff = this->d - other.d;
+      auto h_diff = this->h - other.h;
+      return TensorHyperDual(r_diff, d_diff, h_diff);
     }
-
-
+    /**
+     * Overload the multiplication operator for TensorHyperDual.
+     *
+     * @param other The TensorHyperDual object to multiply with.
+     * @return A new TensorHyperDual object representing the product.
+     *
+     * The computation follows:
+     * - r_new = r1 * r2
+     * - d_new = r1 * d2 + d1 * r2
+     * - h_new = d1 * d2 + d2 * d1 + r1 * h2 + r2 * h1
+     */
     TensorHyperDual operator*(const TensorHyperDual& other) const {
       // Real part
       auto rn = this->r * other.r;
-      auto r1 = this->r;
-      auto r2 = other.r;
-      auto d1 = this->d;
-      auto d2 = other.d;
-      auto h1 = this->h;
-      auto h2 = other.h;
 
-      // First-order derivative
-      auto dn = torch::einsum("mi, mij, mi->mij", {r1, d1, r2})
-              + torch::einsum("mi, mi, mij->mij", {r1, r2, d2});
+      // First-order derivative (dual part)
+      auto dn = torch::einsum("mi, mij->mij", {this->r, other.d})
+            + torch::einsum("mi, mij->mij", {other.r, this->d});
 
-      // Second-order derivative
-      auto hn = torch::einsum("mij, mik, mi->mijk", {d1, d1, r2})
-              + torch::einsum("mi, mijk, mi->mijk", {r1, h1, r2})
-              + torch::einsum("mi, mij, mik->mijk", {r1, d1, d2})
-              + torch::einsum("mij, mi, mik->mijk", {d1, r2, d2})
-              + torch::einsum("mi, mij, mik->mijk", {r1, d2, d2})
-              + torch::einsum("mi, mi, mijk->mijk", {r1, r2, h2});
+      // Second-order derivative (hyperdual part)
+      auto hn = torch::einsum("mij, mik->mijk", {this->d, other.d}) // d1 * d2
+            + torch::einsum("mij, mik->mijk", {other.d, this->d}) // d2 * d1 (symmetric)
+            + torch::einsum("mi, mijk->mijk", {this->r, other.h}) // r1 * h2
+            + torch::einsum("mi, mijk->mijk", {other.r, this->h}); // r2 * h1
 
-      return TensorHyperDual(r, d, h);
-    }
-
-    TensorHyperDual operator/(const TensorHyperDual& other) const {
-      auto rn = this->r / other.r;
-      auto otherrsq = torch::pow(other.r, 2);  // Square of other.r
-      auto othercube = torch::pow(other.r, 3); // Cube of other.r
-      auto dn = (this->d / other.r.unsqueeze(-1)) - (this->r / otherrsq).unsqueeze(-1) * other.d;
-      auto h1 = this->h;
-      auto h2 = other.h;
-      auto r1 = this->r;
-      auto r2 = other.r;
-      auto d2 = other.d;
-      auto d1 = this->d;
-      auto hn = torch::einsum("mijk, mi->mijk", {h1, r2.reciprocal()})-
-                2*torch::einsum("mij, mi, mik->mijk", {d1, r2.pow(-2), d2})+
-                2*torch::einsum("mi, mi, mij, mik->mijk", {r1, r2.pow(-3), d2, d2})-
-                torch::einsum("mi, mi, mijk->mijk", {r1, r2.pow(-2), h2});
+      // Return the resulting TensorHyperDual object
       return TensorHyperDual(rn, dn, hn);
     }
+  /**
+   * Overload the multiplication operator for TensorHyperDual.
+   *
+   * @param other The TensorHyperDual object to multiply with.
+   * @return A new TensorHyperDual object representing the product.
+   *
+   * The computation follows:
+   * - r_new = r1 * r2
+   * - d_new = r1 * d2 + d1 * r2
+   * - h_new = d1 * d2 + d2 * d1 + r1 * h2 + r2 * h1
+   */
+  TensorHyperDual operator*(const TensorHyperDual& other) const {
+    // Real part
+    auto rn = this->r * other.r;
 
-    TensorHyperDual operator/(const torch::Tensor& other) const {
-        auto othere = other.dim() != this->r.dim() ? other.unsqueeze(1) : other;
-        auto r1 = this->r;
-        auto d1 = this->d;
-        auto h1 = this->h;
-        auto r2 = othere;
-        auto rn = this->r / othere;
-        auto dn = this->d / othere.unsqueeze(-1);
-        auto hn = torch::einsum("mi, mijk->mijk", {r2.reciprocal(), h1});
-        return TensorHyperDual(rn, dn, hn);
-    }
+    // First-order derivative (dual part)
+    auto dn = torch::einsum("mi, mij->mij", {this->r, other.d})
+            + torch::einsum("mi, mij->mij", {other.r, this->d});
 
+    // Second-order derivative (hyperdual part)
+    auto hn = torch::einsum("mij, mik->mijk", {this->d, other.d}) // d1 * d2 outer product
+            + torch::einsum("mij, mik->mijk", {other.d, this->d}) // d2 * d1 (symmetric)
+            + torch::einsum("mi, mijk->mijk", {this->r, other.h}) // r1 * h2
+            + torch::einsum("mi, mijk->mijk", {other.r, this->h}); // r2 * h1
+
+    // Return the resulting TensorHyperDual object
+    return TensorHyperDual(rn, dn, hn);
+  }
+
+  /**
+   * Overload the division operator for TensorHyperDual.
+   *
+   * @param other The TensorHyperDual object to divide by.
+   * @return A new TensorHyperDual object representing the quotient.
+   *
+   * The computation follows:
+   * - r_new = r1 / r2
+   * - d_new = (d1 / r2) - (r1 * d2) / r2^2
+   * - h_new = h1 / r2 - 2 * (d1 * d2) / r2^2 + 2 * (r1 * d2^2) / r2^3 - (r1 * h2) / r2^2
+   */
+  TensorHyperDual operator/(const TensorHyperDual& other) const {
+    // Real part
+    auto rn = this->r / other.r;
+
+    // First-order derivative
+    auto dn = (this->d / other.r.unsqueeze(-1)) 
+              - (this->r / other.r.pow(2)).unsqueeze(-1) * other.d;
+
+    // Second-order derivative
+    auto hn = torch::einsum("mijk, mi->mijk", {this->h, other.r.reciprocal()})  // h1 / r2
+            - 2 * torch::einsum("mij, mik->mijk", {this->d / other.r.unsqueeze(-1), other.d / other.r.unsqueeze(-1)})  // (d1 * d2) / r2^2
+            + 2 * torch::einsum("mi, mij, mik->mijk", {this->r / other.r.pow(3), other.d, other.d})  // (r1 * d2^2) / r2^3
+            - torch::einsum("mi, mijk->mijk", {this->r / other.r.pow(2), other.h});  // (r1 * h2) / r2^2
+
+    // Return the resulting TensorHyperDual object
+    return TensorHyperDual(rn, dn, hn);
+  }
+
+
+
+   /**
+    * Overload the division operator for TensorHyperDual when dividing by a simple tensor.
+    *
+    * @param other A simple torch::Tensor with only a real part (no dual or hyperdual components).
+    * @return A new TensorHyperDual object representing the quotient.
+    *
+    * The computation follows:
+    * - r_new = r1 / r2
+    * - d_new = d1 / r2
+    * - h_new = h1 / r2
+    */
+   TensorHyperDual operator/(const torch::Tensor& other) const {
+    // Ensure `other` has the same dimensionality as the real part `r`
+    auto othere = other.dim() != this->r.dim() ? other.unsqueeze(1) : other;
+
+    // Real part
+    auto rn = this->r / othere;
+
+    // First-order derivative (dual part)
+    auto dn = this->d / othere.unsqueeze(-1);
+
+    // Second-order derivative (hyperdual part)
+    auto hn = torch::einsum("mijk, mi->mijk", {this->h, othere.reciprocal()});
+
+    // Return the resulting TensorHyperDual object
+    return TensorHyperDual(rn, dn, hn); 
+   }
+
+   /**
+    * Overload the division operator for TensorHyperDual by a scalar.
+    *
+    * @param scalar A scalar value to divide each component by.
+    * @return A new TensorHyperDual object with each component divided by the scalar.
+    *
+    * @throws std::runtime_error if scalar is zero.
+    */
     TensorHyperDual operator/(const double& scalar) const {
-        auto scalar_tensor = torch::tensor(scalar, this->r.options());
-        return TensorHyperDual(this->r / scalar_tensor, this->d / scalar_tensor, this->h / scalar_tensor);
-    }
+        // Check for division by zero
+        TORCH_CHECK(scalar != 0, "Division by zero is not allowed.");
 
-    //overload the comparison operators
-    // Overload the less-than-or-equal-to operator for TensorDual <= TensorDual
+        // Perform element-wise division
+        return TensorHyperDual(this->r / scalar, this->d / scalar, this->h / scalar);
+    }
+    /**
+     * Overload the less-than-or-equal-to operator for TensorHyperDual <= TensorHyperDual.
+     *
+     * @param other The TensorHyperDual object to compare with.
+     * @return A torch::Tensor boolean mask indicating which batch elements satisfy the condition.
+     *
+     * Note: This operator compares only the real part (r) of the TensorHyperDual objects.
+     */
     torch::Tensor operator<=(const TensorHyperDual& other) const {
+        // Perform element-wise comparison of the real parts
         auto mask = r <= other.r;
-        return torch::squeeze(mask, 1);
+
+        // Reduce across non-batch dimensions (if necessary) to generate a batch-level mask
+        auto batch_mask = mask.all(1); // Adjust dimension as needed based on tensor shape
+
+        // Return the mask for batch selection
+        return batch_mask;
     }
 
-    // Overload the equals operator for TensorDual == TensorDual
+
+    /**
+     * Overload the equality operator for TensorHyperDual == TensorHyperDual (batch-level).
+     *
+     * @param other The TensorHyperDual object to compare with.
+     * @return A torch::Tensor boolean mask of size [B], where each entry indicates whether
+     *         all elements in the corresponding batch of the real part (r) are equal.
+     *
+     * Note: This operator only compares the real part (r) of the TensorHyperDual objects.
+     */
     torch::Tensor operator==(const TensorHyperDual& other) const {
+        // Perform element-wise comparison of the real parts
         auto mask = r == other.r;
-        return torch::squeeze(mask, 1);
+
+        // Reduce across the feature dimension (N) to get a batch-level mask
+        auto batch_mask = mask.all(1);
+
+        return batch_mask;
     }
 
-
-    // Overload the less-than-or-equal-to operator for TensorDual <= torch::Tensor
-    // This also implicitly supports TensorDual <= Scalar due to tensor's implicit constructors
+    /**
+     * Overload the less-than-or-equal-to operator for TensorHyperDual <= torch::Tensor.
+     * This also implicitly supports TensorHyperDual <= Scalar due to PyTorch's implicit scalar handling.
+     *
+     * @param other A torch::Tensor to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask of the same shape as the broadcasted tensors.
+     *
+     * Note: This operator only compares the real part (r) of the TensorHyperDual object.
+     */
     torch::Tensor operator<=(const torch::Tensor& other) const {
+        // Perform element-wise comparison of the real part with the other tensor
         auto mask = r <= other;
-        return torch::squeeze(mask, 1);
+
+        // Return the mask directly (no squeezing required)
+        auto batch_mask = mask.all(1);
+
+        return batch_mask;
+
     }
 
+
+    /**
+     * Overload the less-than-or-equal-to operator for TensorHyperDual <= Scalar.
+     *
+     * @tparam Scalar A scalar type convertible to Tensor (e.g., int, float, double).
+     * @param scalar A scalar value to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating the comparison result.
+     */
     template <typename Scalar>
     torch::Tensor operator<=(const Scalar& scalar) const {
-        // Ensure the scalar is of a type convertible to Tensor
+        // Perform element-wise comparison of the real part with the scalar
         auto mask = (r <= scalar);
-        return torch::squeeze(mask, 1);
+
+        //Remove the last dimension
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    //overload the > operator
+
+    /**
+     * Overload the greater-than operator for TensorHyperDual > TensorHyperDual.
+     *
+     * @param other The TensorHyperDual object to compare with.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     *         is greater than the real part of the other TensorHyperDual.
+     *
+     * Note: This operator only compares the real part (r) of the TensorHyperDual objects.
+     */
     torch::Tensor operator>(const TensorHyperDual& other) const {
+        // Perform element-wise comparison of the real parts
         auto mask = r > other.r;
-        return torch::squeeze(mask, 1);
+
+        //Remove the last dimension
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    //overload the > operator for a tensor and a TensorDual
+    /**
+     * Overload the greater-than operator for TensorHyperDual > torch::Tensor.
+     * This also implicitly supports TensorHyperDual > Scalar due to PyTorch's implicit scalar handling.
+     *
+     * @param other A torch::Tensor to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     *         is greater than the other tensor.
+     *
+     * Note: This operator only compares the real part (r) of the TensorHyperDual object.
+     */
     torch::Tensor operator>(const torch::Tensor& other) const {
         auto mask = r > other;
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    //overload the > for a scalar and a TensorDual
+    /**
+     * Overload the greater-than operator for TensorHyperDual > Scalar.
+     *
+     * @tparam Scalar A scalar type convertible to Tensor (e.g., int, float, double).
+     * @param scalar A scalar value to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     *         is greater than the scalar value.
+     */
     template <typename Scalar>
     torch::Tensor operator>(const Scalar& scalar) const {
         // Ensure the scalar is of a type convertible to Tensor
         auto scalar_tensor = torch::tensor({scalar}, this->r.options());
         auto mask = r > scalar_tensor;
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    //overload the < operator
+    /**
+     * Overload the less-than operator for TensorHyperDual < TensorHyperDual.
+     * @param other The TensorHyperDual object to compare with.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     torch::Tensor operator<(const TensorHyperDual& other) const {
         auto mask = r < other.r;
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    //overload the < operator for a tensor and a TensorDual
+    /**
+     * Overload the less-than operator for TensorHyperDual < torch::Tensor.
+     * This also implicitly supports TensorHyperDual < Scalar due to PyTorch's implicit scalar handling.
+     * @param other A torch::Tensor to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     torch::Tensor operator<(const torch::Tensor& other) const {
         auto mask = r < other;
         //std::cerr << "mask sizes in <: " << mask.sizes() << std::endl;
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    //overload the < for a scalar and a TensorDual
+    /**
+     * Overload the less-than operator for TensorHyperDual < Scalar.
+     * @tparam Scalar A scalar type convertible to Tensor (e.g., int, float, double).
+     * @param scalar A scalar value to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     template <typename Scalar>
     torch::Tensor operator<(const Scalar& scalar) const {
         // Ensure the scalar is of a type convertible to Tensor
         auto mask = r < scalar;
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
 
 
-    // Overload the greater-than-or-equal-to operator for TensorDual >= TensorDual
+    /**
+     * Overload the greater-than-or-equal-to operator for TensorHyperDual >= TensorHyperDual.
+     * @param other The TensorHyperDual object to compare with.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     torch::Tensor operator>=(const TensorHyperDual& other) const {
         auto mask = r >= other.r;
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    // Overload the greater-than-or-equal-to operator for TensorDual >= torch::Tensor
-    // This also implicitly supports TensorDual >= Scalar due to tensor's implicit constructors
+    /**
+     * Overload the greater-than-or-equal-to operator for TensorHyperDual >= torch::Tensor.
+     * This also implicitly supports TensorHyperDual >= Scalar due to PyTorch's implicit scalar handling.
+     * @param other A torch::Tensor to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     torch::Tensor operator>=(const torch::Tensor& other) const {
         auto mask = r >= other;
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    //overload the >= operator for TensorDual and a scalar
+    /**
+     * Overload the greater-than-or-equal-to operator for TensorHyperDual >= Scalar.
+     * @tparam Scalar A scalar type convertible to Tensor (e.g., int, float, double).
+     * @param scalar A scalar value to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     template <typename Scalar>
     torch::Tensor operator>=(const Scalar& scalar) const {
         // Ensure the scalar is of a type convertible to Tensor
         auto scalar_tensor = torch::tensor({scalar}, this->r.options());
         auto mask = r >= scalar_tensor;
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
 
 
-    // Overload the equality operator for TensorDual == torch::Tensor
-    // This also implicitly supports TensorDual == Scalar due to tensor's implicit constructors
+    /**
+     * Overload the equality operator for TensorHyperDual == torch::Tensor.
+     * This also implicitly supports TensorHyperDual == Scalar due to PyTorch's implicit scalar handling.
+     * @param other A torch::Tensor to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     torch::Tensor operator==(const torch::Tensor& other) const {
         auto mask = r.eq(other); // Using the .eq() function for equality comparison
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
+    
+    /**
+     * Overload the equality operator for TensorHyperDual == Scalar.
+     * @tparam Scalar A scalar type convertible to Tensor (e.g., int, float, double).
+     * @param scalar A scalar value to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     template <typename Scalar>
     torch::Tensor operator==(const Scalar& scalar) const {
         // Ensure the scalar is of a type convertible to Tensor
         auto mask = r.eq(scalar);
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    // Overload the inequality operator for TensorDual != TensorDual
+    /**
+     * Overload the inequality operator for TensorHyperDual != TensorHyperDual.
+     * @param other The TensorHyperDual object to compare with.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     torch::Tensor operator!=(const TensorHyperDual& other) const {
         auto mask = r.ne(other.r); // Using the .ne() function for inequality comparison
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-    // Overload the inequality operator for TensorDual != torch::Tensor
-    // This also implicitly supports TensorDual != Scalar due to tensor's implicit constructors
+    /**
+     * Overload the inequality operator for TensorHyperDual != torch::Tensor.
+     * This also implicitly supports TensorHyperDual != Scalar due to PyTorch's implicit scalar handling.
+     * @param other A torch::Tensor to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     torch::Tensor operator!=(const torch::Tensor& other) const {
         auto mask = r.ne(other); // Using the .ne() function for inequality comparison
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
+    
 
+    /**
+     * Overload the inequality operator for TensorHyperDual != Scalar.
+     * @tparam Scalar A scalar type convertible to Tensor (e.g., int, float, double).
+     * @param scalar A scalar value to compare with the real part (r) of TensorHyperDual.
+     * @return A torch::Tensor boolean mask indicating where the real part of this TensorHyperDual
+     */
     template <typename Scalar>
     torch::Tensor operator!=(const Scalar& scalar) const {
         // Ensure the scalar is of a type convertible to Tensor
         auto mask = r.ne(scalar);
-        return torch::squeeze(mask, 1);
+        auto batch_mask = mask.all(1);
+        return batch_mask;
     }
 
-
-
-
+    /**
+     * Compute the reciprocal of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the reciprocal.
+     */
     TensorHyperDual reciprocal() const {
-      auto rrec = this->r.reciprocal();  // Compute the reciprocal of the real part
-      auto rrec_sq = rrec * rrec;        // Square of the reciprocal
-      auto rrec_cube = rrec_sq * rrec;   // Cube of the reciprocal
-      // First-order derivative
-      auto dn = -rrec_sq.unsqueeze(-1) * this->d;
-      // Second-order derivative
-      auto hn = 2*torch::einsum("mi, mij, mik->mijk", {r.pow(-3), d, d})-
-                  torch::einsum("mi, mijk->mijk", {r.pow(-2), h});
+        // Real part
+        auto rrec = this->r.reciprocal();  // 1 / r
+        auto rrec_sq = rrec * rrec;        // (1 / r)^2
+        auto rrec_cube = rrec_sq * rrec;   // (1 / r)^3
 
-      return TensorHyperDual(rrec, dn, hn);
+        // First-order derivative
+        auto dn = -rrec_sq.unsqueeze(-1) * this->d;
+
+        // Second-order derivative
+        auto hn = 2 * torch::einsum("mi, mij, mik->mijk", {rrec_cube, this->d, this->d}) -
+                torch::einsum("mi, mijk->mijk", {rrec_sq, this->h});
+
+        return TensorHyperDual(rrec, dn, hn);
+    }    
+    /**
+     * Compute the cosine of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the cosine.
+     */
+    TensorHyperDual cos() const {
+        // Real part
+        auto rn = torch::cos(this->r);  // Compute cos(r)
+
+        // First-order derivative
+        auto dn = -torch::sin(this->r).unsqueeze(-1) * this->d;  // -sin(r) * d
+
+        // Second-order derivative
+        auto hn = -torch::einsum("mi, mij, mik->mijk", {torch::cos(this->r), this->d, this->d}) -
+                torch::einsum("mi, mijk->mijk", {torch::sin(this->r), this->h});  // -cos(r)*d*d - sin(r)*h
+
+        return TensorHyperDual(rn, dn, hn);
+    }
+    /**
+     * Compute the sine of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the sine.
+     */
+    TensorHyperDual sin() const {
+        // Real part
+        auto rn = torch::sin(this->r);  // Compute sin(r)
+
+        // First-order derivative
+        auto dn = torch::cos(this->r).unsqueeze(-1) * this->d;  // cos(r) * d
+
+        // Second-order derivative
+        auto hn = -torch::einsum("mi, mij, mik->mijk", {torch::sin(this->r), this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {torch::cos(this->r), this->h});  // -sin(r)*d*d + cos(r)*h
+
+        return TensorHyperDual(rn, dn, hn);
+    }
+    /**
+     * Compute the tangent of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the tangent.
+     */
+    TensorHyperDual tan() const {
+        // Real part
+        auto rn = torch::tan(this->r);  // Compute tan(r)
+
+        // First-order derivative
+        auto dn = torch::pow(torch::cos(this->r), -2).unsqueeze(-1) * this->d;  // sec^2(r) * d
+
+        // Second-order derivative
+        auto hn = 2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cos(this->r), -2) * torch::tan(this->r), this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {torch::pow(torch::cos(this->r), -2), this->h});  // 2*sec^2(r)*tan(r)*d*d + sec^2(r)*h
+
+        return TensorHyperDual(rn, dn, hn);
     }
     
+    /**
+     * Compute the inverse sine of the TensorHyperDual object.
+     * 
+     */
+    TensorHyperDual asin() const {
+        auto one_minus_r_sq = 1 - this->r * this->r;  // 1 - r^2
+        auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);  // sqrt(1 - r^2)
 
-    TensorHyperDual cos() const {
-        auto rn = torch::cos(this->r); // Compute the cosine of the real part
-        auto dn = -r.sin().unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
-        auto hn = torch::einsum("mi, mij, mik->mijk", {-r.cos(), this->d, this->d})-
-                  torch::einsum("mi, mijk->mijk", {-r.sin(), this->h});  
+        // Real part
+        auto rn = torch::asin(this->r);
+
+        // First-order derivative
+        auto dn = (1 / sqrt_one_minus_r_sq).unsqueeze(-1) * this->d;
+
+        // Second-order derivative
+        auto hn = torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * this->r, this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), this->h});
+
+        return TensorHyperDual(rn, dn, hn);
+    }
+    
+    /**
+     * Compute the inverse cosine of the TensorHyperDual object.
+     */
+    TensorHyperDual acos() const {
+        auto one_minus_r_sq = 1 - this->r * this->r;  // 1 - r^2
+        auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);  // sqrt(1 - r^2)
+
+        // Real part
+        auto rn = torch::acos(this->r);
+
+        // First-order derivative
+        auto dn = -(1 / sqrt_one_minus_r_sq).unsqueeze(-1) * this->d;
+
+        // Second-order derivative
+        auto hn = -torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * this->r, this->d, this->d}) -
+                torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), this->h});
+
+        return TensorHyperDual(rn, dn, hn);
+    }
+    
+    /**
+     * Compute the inverse tangent of the TensorHyperDual object.
+     */
+    TensorHyperDual atan() const {
+        auto one_plus_r_sq = 1 + this->r * this->r;  // 1 + r^2
+
+        // Real part
+        auto rn = torch::atan(this->r);
+
+        // First-order derivative
+        auto dn = (1 / one_plus_r_sq).unsqueeze(-1) * this->d;
+
+        // Second-order derivative
+        auto hn = -torch::einsum("mi, mij, mik->mijk", {(2 / torch::pow(one_plus_r_sq, 2)) * this->r, this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {(1 / one_plus_r_sq), this->h});
+
         return TensorHyperDual(rn, dn, hn);
     }
 
-    TensorHyperDual sin() const {
-        auto rn = torch::sin(this->r); // Compute the sine of the real part
-        auto dn = r.cos().unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
-        auto hn = torch::einsum("mi, mij, mik->mijk", {-r.sin(), this->d, this->d})-
-                  torch::einsum("mi, mijk->mijk", {r.cos(), this->h});
-        return TensorHyperDual(rn, dn, hn);
-    }
-
-    TensorHyperDual tan() const {
-        auto rn = torch::tan(this->r); // Compute the tangent of the real part
-        auto dn = r.cos().pow(-2).unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
-        auto hn = -2*torch::einsum("mi, mij, mik->mijk", {r.cos().pow(-3)*r.sin(), d, d})-
-                  torch::einsum("mi, mijk->mijk", {r.cos().pow(-2), h});
-        return TensorHyperDual(rn, dn, hn);
-    }
-
-
+    /**
+     * Compute the hyperbolic sine of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the hyperbolic sine.
+     */
     TensorHyperDual sinh() const {
-        auto rn = torch::sinh(this->r); // Compute the hyperbolic sine of the real part
-        auto dn = r.cosh().unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
-        auto hn = torch::einsum("mi, mij, mik->mijk", {r.sinh(), d, d})+
-                  torch::einsum("mi, mijk->mijk", {r.cosh(), h});
+        // Real part
+        auto rn = torch::sinh(this->r);  // Compute sinh(r)
+
+        // First-order derivative
+        auto dn = torch::cosh(this->r).unsqueeze(-1) * this->d;  // cosh(r) * d
+
+        // Second-order derivative
+        auto hn = torch::einsum("mi, mij, mik->mijk", {torch::sinh(this->r), this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {torch::cosh(this->r), this->h});  // sinh(r)*d*d + cosh(r)*h
+
         return TensorHyperDual(rn, dn, hn);
     }
-
+    /**
+     * Compute the hyperbolic cosine of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the hyperbolic cosine.
+     */
     TensorHyperDual cosh() const {
-        auto rn = r.sinh(); // Compute the hyperbolic cosine of the real part
-        auto dn = r.cosh().unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
-        auto hn = torch::einsum("mi, mij, mik->mijk", {r.sinh(), d, d})+
-                  torch::einsum("mi, mijk->mijk", {r.cosh(), h});
+        // Real part
+        auto rn = torch::cosh(this->r);  // Compute cosh(r)
+
+        // First-order derivative
+        auto dn = torch::sinh(this->r).unsqueeze(-1) * this->d;  // sinh(r) * d
+
+        // Second-order derivative
+        auto hn = torch::einsum("mi, mij, mik->mijk", {torch::cosh(this->r), this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {torch::sinh(this->r), this->h});  // cosh(r)*d*d + sinh(r)*h
+
         return TensorHyperDual(rn, dn, hn);
     }
 
+    /**
+     * Compute the hyperbolic tangent of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the hyperbolic tangent.
+     */
     TensorHyperDual tanh() const {
-        auto rn = r.tanh(); // Compute the hyperbolic tangent of the real part
-        auto dn = r.cosh().pow(-2).unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
-        auto hn = -2*torch::einsum("mi, mij, mik->mijk", {r.cosh().pow(-3)*r.sinh(), d, d})-
-                  torch::einsum("mi, mijk->mijk", {r.cosh().pow(-2), h});
+        // Real part
+        auto rn = torch::tanh(this->r);  // Compute tanh(r)
+
+        // First-order derivative
+        auto dn = torch::pow(torch::cosh(this->r), -2).unsqueeze(-1) * this->d;  // sech^2(r) * d
+
+        // Second-order derivative
+        auto hn = -2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cosh(this->r), -2) * torch::tanh(this->r), this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {torch::pow(torch::cosh(this->r), -2), this->h});  // -2*sech^2(r)*tanh(r)*d*d + sech^2(r)*h
+
         return TensorHyperDual(rn, dn, hn);
     }
 
+    /**
+     * Compute the exponential of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the exponential.
+     */
     TensorHyperDual exp() const {
-        auto rn = torch::exp(this->r); // Compute the exponential of the real part
-        auto dn = r.exp().unsqueeze(-1) * this->d; // Apply the scaling factor
-        auto hn = torch::einsum("mi, mij, mik->mijk", {r.exp(), d, d})+
-                  torch::einsum("mi, mijk->mijk", {r.exp(), h});    
+        // Real part
+        auto rn = torch::exp(this->r);  // Compute exp(r)
+
+        // First-order derivative
+        auto dn = rn.unsqueeze(-1) * this->d;  // exp(r) * d
+
+        // Second-order derivative
+        auto hn = torch::einsum("mi, mij, mik->mijk", {rn, this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {rn, this->h});  // exp(r) * (d * d + h)
+
         return TensorHyperDual(rn, dn, hn);
     }
 
+    /**
+     * Compute the natural logarithm of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the natural logarithm.
+     */
     TensorHyperDual log() const {
-        auto rn = torch::log(this->r); // Compute the natural logarithm of the real part
-        auto dn = r.pow(-1).unsqueeze(-1) * this->d; // Apply the scaling factor to the dual part
-        auto hn = torch::einsum("mi, mij, mik->mijk", {-r.pow(-2), d, d})-
-                  torch::einsum("mi, mijk->mijk", {r.pow(-1), h});
+        // Real part
+        auto rn = torch::log(this->r);  // Compute log(r)
+
+        // First-order derivative
+        auto dn = torch::pow(this->r, -1).unsqueeze(-1) * this->d;  // 1 / r * d
+
+        // Second-order derivative
+        auto hn = -torch::einsum("mi, mij, mik->mijk", {torch::pow(this->r, -2), this->d, this->d}) +
+                torch::einsum("mi, mijk->mijk", {torch::pow(this->r, -1), this->h});  // -1 / r^2 * d * d + 1 / r * h
+
         return TensorHyperDual(rn, dn, hn);
     }
 
+
+    /**
+     * Compute the absolute value of the TensorHyperDual object.
+     *
+     * @return A new TensorHyperDual object representing the absolute value.
+     */
     TensorHyperDual abs() const {
-        auto abs_r = torch::abs(r); // Compute the absolute value of the real part
-        auto sign_r = torch::sign(r); // Compute the sign of the real part
-        auto dn = sign_r.unsqueeze(-1) * d; // The dual part multiplies by the sign of the real part
-        auto hn = torch::einsum("mi, mijk->mijk", {sign_r, h}); // The hyperdual part multiplies by the sign of the real part
+        // Real part
+        auto abs_r = torch::abs(this->r);  // Compute |r|
+
+        // First-order derivative
+        auto sign_r = torch::sign(this->r);  // Compute sign(r)
+        auto dn = sign_r.unsqueeze(-1) * this->d;  // sign(r) * d
+
+        // Second-order derivative
+        auto hn = torch::einsum("mi, mijk->mijk", {sign_r, this->h});  // sign(r) * h
+
         return TensorHyperDual(abs_r, dn, hn);
     }
 
+    /**
+     * Convert the TensorHyperDual object to a complex TensorHyperDual object.
+     */
     TensorHyperDual complex() {
         torch::Tensor rc, dc, hc;
         this->r.is_complex() ? rc = this->r : rc = torch::complex(this->r, torch::zeros_like(this->r)).to(this->r.device());
@@ -1539,6 +1995,9 @@ public:
         return TensorHyperDual(std::move(rc), std::move(dc), std::move(hc));
     }
 
+    /**
+     * Extract the real part of the TensorHyperDual object.
+     */
     TensorHyperDual real() {
         auto r = torch::real(this->r);
         auto d = torch::real(this->d);
@@ -1546,7 +2005,9 @@ public:
         return TensorHyperDual(std::move(r), std::move(d), std::move(h));
     }   
 
-
+    /**
+     * Extract the imaginary part of the TensorHyperDual object.
+     */
     TensorHyperDual imag() {
         auto r = torch::imag(this->r);
         auto d = torch::imag(this->d);
@@ -1554,92 +2015,163 @@ public:
         return TensorHyperDual(r, d, h);
     }
 
-    TensorHyperDual zeros_like() {
-        return TensorHyperDual(torch::zeros_like(this->r), 
-                               torch::zeros_like(this->d), 
-                               torch::zeros_like(this->h));
+    /**
+     * Create a TensorHyperDual object with the same shape as the current object,
+     * but with all values set to zero.
+     *
+     * @return A new TensorHyperDual object where all components (r, d, h) are zeros.
+     */
+    TensorHyperDual zeros_like() const {
+        return TensorHyperDual(
+            torch::zeros_like(this->r),  // Zeros for the real part
+            torch::zeros_like(this->d),  // Zeros for the dual part
+            torch::zeros_like(this->h)   // Zeros for the hyperdual part
+        );
     }
 
-    static TensorHyperDual zeros_like(TensorHyperDual& other) {
-        return TensorHyperDual(torch::zeros_like(other.r), 
-                               torch::zeros_like(other.d), 
-                               torch::zeros_like(other.h));
+    /**
+     * Create a TensorHyperDual object with the same shape as the given object,
+     * but with all values set to zero.
+     *
+     * @param other The TensorHyperDual object whose shape and type are used
+     *              to create the new zeros-like TensorHyperDual.
+     * @return A new TensorHyperDual object where all components (r, d, h) are zeros.
+     */
+    static TensorHyperDual zeros_like(const TensorHyperDual& other) {
+        return TensorHyperDual(
+            torch::zeros_like(other.r),  // Zeros for the real part
+            torch::zeros_like(other.d),  // Zeros for the dual part
+            torch::zeros_like(other.h)   // Zeros for the hyperdual part
+        );
     }
 
-
-
+    /**
+     * Compute the sign of the TensorHyperDual object.
+     * The derivative of the sign function is zero everywhere, so the dual and hyperdual parts are zero.
+     *
+     * @return A new TensorHyperDual object representing the sign.
+     */
     TensorHyperDual sign() const {
-        auto sign_r = torch::sign(r); // Compute the sign of the real part
-        //base this purely on the real part
-        auto sign_d = torch::zeros_like(d); // The dual part is zero
+        // Compute the sign of the real part
+        auto sign_r = torch::sign(this->r);  // sign(r)
 
-        auto sign_h = torch::zeros_like(h); // The hyperdual part is zero
+        // Dual and hyperdual parts are zero
+        auto sign_d = torch::zeros_like(this->d);  // 0 for the dual part
+        auto sign_h = torch::zeros_like(this->h);  // 0 for the hyperdual part
+
         return TensorHyperDual(sign_r, sign_d, sign_h);
     }
-
-
-
+    
+    /**
+     * Compute the minimum value of the TensorHyperDual object along dimension 1.
+     */
     TensorHyperDual min() {
-      // Compute the min values and indices along dimension 1, keeping the dimension
-      auto min_result = torch::min(this->r, /*dim=*/1, /*keepdim=*/true);
-      auto min_values = std::get<0>(min_result);  // Minimum values
-      auto min_indices = std::get<1>(min_result); // Indices of the minimum values
+        // Compute the min values and indices along dimension 1, keeping the dimension
+        auto min_result = torch::min(this->r, /*dim=*/1, /*keepdim=*/true);
+        auto min_values = std::get<0>(min_result);  // Minimum values
+        auto min_indices = std::get<1>(min_result); // Indices of the minimum values
 
-      // Adjust the shape of min_indices to match the dual tensor for gathering
-      auto dshape = min_indices.unsqueeze(-1).expand({min_indices.size(0), min_indices.size(1), this->d.size(-1)});
-      // Adjust the shape of min_indices to match the hyperdual tensor for gathering
-      auto hshape = min_indices.unsqueeze(-1).unsqueeze(-1).expand({min_indices.size(0), min_indices.size(1), this->h.size(-2), this->h.size(-1)});
+        // Validate tensor dimensions for consistency
+        if (this->d.size(1) != this->r.size(1) || this->h.size(1) != this->r.size(1)) {
+            throw std::invalid_argument("Shape mismatch: `d` and `h` tensors must match the size of `r` along dimension 1.");
+        }
 
-      // Gather the dual and hyperdual values based on the min indices
-      auto dual_values = torch::gather(this->d, /*dim=*/1, dshape);
-      auto hyper_values = torch::gather(this->h, /*dim=*/1, hshape);
+        // Adjust the shape of min_indices to match the dual tensor for gathering
+        auto dshape = min_indices.unsqueeze(-1).expand({
+            min_indices.size(0), 
+            min_indices.size(1), 
+            this->d.size(-1)
+        });
 
-      // Return a new TensorHyperDual with the min values and corresponding dual and hyperdual values
-      return TensorHyperDual(min_values, dual_values, hyper_values);
+        // Adjust the shape of min_indices to match the hyperdual tensor for gathering
+        auto hshape = min_indices.unsqueeze(-1).unsqueeze(-1).expand({
+            min_indices.size(0), 
+            min_indices.size(1), 
+            this->h.size(-2), 
+            this->h.size(-1)
+        });
+
+        // Gather the dual and hyperdual values based on the min indices
+        auto dual_values = torch::gather(this->d, /*dim=*/1, dshape);
+        auto hyper_values = torch::gather(this->h, /*dim=*/1, hshape);
+
+        // Construct and return a new TensorHyperDual with the min values and corresponding dual and hyperdual values
+        return TensorHyperDual(min_values, dual_values, hyper_values);
     }
-
+    
+    /**
+     * Compute the maximum value of the TensorHyperDual object along dimension 1.
+     */
     TensorHyperDual max() {
-      // Compute the max values and indices along dimension 1, keeping the dimension
-      auto max_result = torch::max(this->r, /*dim=*/1, /*keepdim=*/true);
-      auto max_values = std::get<0>(max_result);  // Maximum values
-      auto max_indices = std::get<1>(max_result); // Indices of the maximum values
+        // Compute the max values and indices along dimension 1, keeping the dimension
+        auto max_result = torch::max(this->r, /*dim=*/1, /*keepdim=*/true);
+        auto max_values = std::get<0>(max_result);  // Maximum values
+        auto max_indices = std::get<1>(max_result); // Indices of the maximum values
 
-      // Adjust the shape of max_indices to match the dual tensor for gathering
-      auto dshape = max_indices.unsqueeze(-1).expand({max_indices.size(0), max_indices.size(1), this->d.size(-1)});
-      // Adjust the shape of max_indices to match the hyperdual tensor for gathering
-      auto hshape = max_indices.unsqueeze(-1).unsqueeze(-1).expand({max_indices.size(0), max_indices.size(1), this->h.size(-2), this->h.size(-1)});
+        // Validate tensor dimensions for consistency
+        if (this->d.size(1) != this->r.size(1) || this->h.size(1) != this->r.size(1)) {
+            throw std::invalid_argument("Shape mismatch: `d` and `h` tensors must match the size of `r` along dimension 1.");
+        }
 
-      // Gather the dual and hyperdual values based on the max indices
-      auto dual_values = torch::gather(this->d, /*dim=*/1, dshape);
-      auto hyper_values = torch::gather(this->h, /*dim=*/1, hshape);
+        // Adjust the shape of max_indices to match the dual tensor for gathering
+        auto dshape = max_indices.unsqueeze(-1).expand({
+            max_indices.size(0), 
+            max_indices.size(1), 
+            this->d.size(-1)
+        });
 
-      // Return a new TensorHyperDual with the max values and corresponding dual and hyperdual values
-      return TensorHyperDual(max_values, dual_values, hyper_values);
+        // Adjust the shape of max_indices to match the hyperdual tensor for gathering
+        auto hshape = max_indices.unsqueeze(-1).unsqueeze(-1).expand({
+            max_indices.size(0), 
+            max_indices.size(1), 
+            this->h.size(-2), 
+            this->h.size(-1)
+        });
+
+        // Gather the dual and hyperdual values based on the max indices
+        auto dual_values = torch::gather(this->d, /*dim=*/1, dshape);
+        auto hyper_values = torch::gather(this->h, /*dim=*/1, hshape);
+
+        // Construct and return a new TensorHyperDual with the max values and corresponding dual and hyperdual values
+        return TensorHyperDual(max_values, dual_values, hyper_values);
     }
 
-    // Static member function to replicate the 'where' class method
+    /**
+     * Implement the where function for TensorHyperDual objects.
+     */
     static TensorHyperDual where(const torch::Tensor& cond, 
-                            const TensorHyperDual& x, 
-                            const TensorHyperDual& y) {
+                                 const TensorHyperDual& x, 
+                                 const TensorHyperDual& y) {
+        // Ensure that the shapes of x and y match
+        if (x.r.sizes() != y.r.sizes() || x.d.sizes() != y.d.sizes() || x.h.sizes() != y.h.sizes()) {
+            throw std::invalid_argument("Tensor shapes of x and y must match for TensorHyperDual::where.");
+        }
+
+        // Create condition tensors for r, d, and h
         torch::Tensor condr, condd, condh;
 
         if (cond.dim() == 1) {
+            // Expand cond for each dimension of x and y
             condr = cond.unsqueeze(1).expand({-1, x.r.size(1)});
             condd = cond.unsqueeze(1).unsqueeze(2).expand({-1, x.d.size(1), x.d.size(2)});
             condh = cond.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand({-1, x.h.size(1), x.h.size(2), x.h.size(3)});
-        } else {
+        } else if (cond.sizes() == x.r.sizes()) {
+            // Directly use cond if its shape matches x.r
             condr = cond;
             condd = cond.unsqueeze(2).expand({-1, -1, x.d.size(2)});
             condh = cond.unsqueeze(2).unsqueeze(3).expand({-1, -1, x.h.size(2), x.h.size(3)});
+        } else {
+            throw std::invalid_argument("Shape of cond must match x.r or be broadcastable to its shape.");
         }
 
+        // Perform element-wise selection using torch::where
         auto xr = torch::where(condr, x.r, y.r);
         auto xd = torch::where(condd, x.d, y.d);
         auto xh = torch::where(condh, x.h, y.h);
 
+        // Return a new TensorHyperDual object with selected values
         return TensorHyperDual(xr, xd, xh);
     }
-
 
     /**
      * Static member function to perform einsum on two TensorDual objects
