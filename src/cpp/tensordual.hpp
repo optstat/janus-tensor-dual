@@ -4,6 +4,8 @@
 #include <torch/torch.h>
 #include <type_traits> // For std::is_scalar
 #include <vector>
+#include <sstream>  // For std::ostringstream
+
 using TensorIndex = torch::indexing::TensorIndex;
 using Slice = torch::indexing::Slice;
 
@@ -2981,40 +2983,109 @@ public:
             throw std::invalid_argument("Shape mismatch: r, d, and h must share the same [M, N, L] dimensions.");
         }
     }
-    /**
-     * Constructor for a TensorMatHyperDual object with zeros
-     */
-    TensorMatHyperDual(int M, int N, int L, int D = 1, int H1 = 1, int H2 = 1, 
-                    torch::Dtype dtype = torch::kFloat64, torch::Device device = torch::kCPU) 
-        : dtype_(dtype), device_(device) {
-        // Create TensorOptions with dtype and device
-        auto options = torch::TensorOptions().dtype(dtype).device(device);
 
-        // Initialize tensors with zeros
-        r = torch::zeros({M, N, L}, options);
-        d = torch::zeros({M, N, L, D}, options);
-        h = torch::zeros({M, N, L, H1, H2}, options);
+    // Helper function to convert tensor sizes to a string
+    static std::string sizes_to_string(const torch::Tensor& tensor) {
+        std::ostringstream oss;
+        oss << "[";
+        for (size_t i = 0; i < tensor.sizes().size(); ++i) {
+            oss << tensor.sizes()[i];
+            if (i != tensor.sizes().size() - 1) {
+                oss << ", ";
+            }
+        }
+        oss << "]";
+        return oss.str();
     }
 
+    /**
+     * Constructor for TensorMatHyperDual.
+     *
+     * @param r The real part tensor [M, N, L].
+     * @param d The dual part tensor [M, N, L, D].
+     * @param h The hyperdual part tensor [M, N, L, D, D].
+     * @throws std::invalid_argument if dimensions or types are invalid.
+     */
+
+
+    /**
+     * Constructor for TensorMatHyperDual.
+     */
+    TensorMatHyperDual(torch::Tensor r, torch::Tensor d, torch::Tensor h) 
+        : r(r), d(d), h(h), 
+        dtype_(torch::typeMetaToScalarType(r.dtype())),
+        device_(r.device()) {
+        if (r.dim() != 3) {
+            throw std::invalid_argument("Real part (r) must have dimensions [M, N, L], but got: " + 
+                                        sizes_to_string(r));
+        }
+        if (d.dim() != 4) {
+            throw std::invalid_argument("Dual part (d) must have dimensions [M, N, L, D], but got: " + 
+                                        sizes_to_string(d));
+        }
+        if (h.dim() != 5) {
+            throw std::invalid_argument("Hyperdual part (h) must have dimensions [M, N, L, D, D], but got: " + 
+                                        sizes_to_string(h));
+        }
+        if (r.sizes().slice(0, 3) != d.sizes().slice(0, 3) || 
+            r.sizes().slice(0, 3) != h.sizes().slice(0, 3)) {
+            throw std::invalid_argument("Shape mismatch: r, d, and h must share the same [M, N, L] dimensions. "
+                                        "Got r: " + sizes_to_string(r) + ", d: " + sizes_to_string(d) + 
+                                        ", h: " + sizes_to_string(h));
+        }
+        if (h.size(3) != d.size(3) || h.size(4) != d.size(3)) {
+            throw std::invalid_argument("Hyperdual dimensions [D, D] must match the dual dimensions [D]. "
+                                        "Got d: " + sizes_to_string(d) + ", h: " + sizes_to_string(h));
+        }
+    }
+    /**
+     * Create a new TensorMatHyperDual object with tensors moved to the specified device.
+     *
+     * @param device The device to move the tensors to (e.g., torch::kCUDA, torch::kCPU).
+     * @return A new TensorMatHyperDual object with all components moved to the specified device.
+     */
     TensorMatHyperDual to(torch::Device device) const {
-        // Create a new TensorMatHyperDual object with tensors moved to the specified device
         return TensorMatHyperDual(
-            this->r.to(device),
-            this->d.to(device),
-            this->h.to(device)
+            this->r.to(device),  // Move the real part
+            this->d.to(device),  // Move the dual part
+            this->h.to(device)   // Move the hyperdual part
         );
     }
 
+    /**
+     * Get the device of the TensorMatHyperDual object.
+     *
+     * @return The torch::Device where the tensors are stored.
+     */
     torch::Device device() const {
-      return this->device_;
+        return this->device_;
     }
+
     TensorMatHyperDual(const TensorDual& x, int dim = 2)
         : r(x.r.unsqueeze(dim)), 
         d(x.d.unsqueeze(dim)), 
         h(torch::zeros_like(x.d.unsqueeze(dim))),
         dtype_(torch::typeMetaToScalarType(x.r.dtype())), // Explicit conversion
         device_(x.r.device()) {}
-    
+
+    /**
+     * Constructor to create a TensorMatHyperDual object from a TensorDual object.
+     *
+     * @param x The TensorDual object to extend into a TensorMatHyperDual.
+     * @param dim The dimension along which to unsqueeze the tensors (default: 2).
+     * @throws std::invalid_argument if the specified dimension is invalid.
+     */
+    TensorMatHyperDual(const TensorDual& x, int dim = 2)
+        : r(x.r.unsqueeze(dim)), 
+        d(x.d.unsqueeze(dim)), 
+        h(torch::zeros_like(x.d.unsqueeze(dim))), // Initialize hyperdual part with zeros
+        dtype_(torch::typeMetaToScalarType(x.r.dtype())), 
+        device_(x.r.device()) {
+        if (dim < 0 || dim > x.r.dim()) {
+            throw std::invalid_argument("Invalid dimension for unsqueeze: " + std::to_string(dim) +
+                                        ". Must be in the range [0, " + std::to_string(x.r.dim()) + "].");
+        }
+    }    
     
     TensorMatHyperDual complex() const {
         torch::Tensor rc, dc, hc;
@@ -3042,398 +3113,1020 @@ public:
         return TensorMatHyperDual(rc, dc, hc);
     }
 
+
+    /**
+     * Convert the TensorMatHyperDual object to use complex tensors.
+     *
+     * If the tensors are already complex, they are returned as is. Otherwise,
+     * real tensors are converted to complex tensors by appending a zero imaginary part.
+     *
+     * @return A new TensorMatHyperDual object with complex tensors.
+     */
+    TensorMatHyperDual complex() const {
+        // Convert real part to complex
+        auto rc = this->r.is_complex()
+                    ? this->r
+                    : torch::cat({this->r.unsqueeze(-1), torch::zeros_like(this->r).unsqueeze(-1)}, -1);
+
+        // Convert dual part to complex
+        auto dc = this->d.is_complex()
+                    ? this->d
+                    : torch::cat({this->d.unsqueeze(-1), torch::zeros_like(this->d).unsqueeze(-1)}, -1);
+
+        // Convert hyperdual part to complex
+        auto hc = this->h.is_complex()
+                    ? this->h
+                    : torch::cat({this->h.unsqueeze(-1), torch::zeros_like(this->h).unsqueeze(-1)}, -1);
+
+        // Return a new TensorMatHyperDual with complex tensors
+        return TensorMatHyperDual(rc, dc, hc);
+    }
+    /**
+     * Extract the real part of the TensorMatHyperDual object.
+     *
+     * If the tensors are already real, they are returned as is.
+     *
+     * @return A new TensorMatHyperDual object with the real parts of the tensors.
+     */
     TensorMatHyperDual real() const {
-        // Extract real parts
-        auto r = torch::real(this->r);
-        auto d = torch::real(this->d);
-        auto h = torch::real(this->h);
+        // Extract the real part of each tensor
+        auto r = this->r.is_complex() ? torch::real(this->r) : this->r;
+        auto d = this->d.is_complex() ? torch::real(this->d) : this->d;
+        auto h = this->h.is_complex() ? torch::real(this->h) : this->h;
 
         // Return a new TensorMatHyperDual with real parts
         return TensorMatHyperDual(r, d, h);
     }
 
+    /**
+     * Extract the imaginary part of the TensorMatHyperDual object.
+     *
+     * If the tensors are real, the imaginary part is zero tensors of the same shape.
+     *
+     * @return A new TensorMatHyperDual object with the imaginary parts of the tensors.
+     */
+    TensorMatHyperDual imag() const {
+        // Extract the imaginary part or return zero tensors if already real
+        auto r = this->r.is_complex() ? torch::imag(this->r) : torch::zeros_like(this->r);
+        auto d = this->d.is_complex() ? torch::imag(this->d) : torch::zeros_like(this->d);
+        auto h = this->h.is_complex() ? torch::imag(this->h) : torch::zeros_like(this->h);
 
-    TensorMatHyperDual imag() const  {
-        auto r = torch::imag(this->r);
-        auto d = torch::imag(this->d);
-        auto h = torch::imag(this->h);
+        // Return a new TensorMatHyperDual with imaginary parts
         return TensorMatHyperDual(r, d, h);
     }
 
-
+    /**
+     * Compute the absolute value of the TensorMatHyperDual object.
+     *
+     * For the absolute value:
+     * - The real part becomes |r|.
+     * - The dual part is scaled by the sign of the real part.
+     * - The hyperdual part is zero because the second derivative of |r| is undefined at r = 0.
+     *
+     * @return A new TensorMatHyperDual object with the absolute value applied.
+     */
     TensorMatHyperDual abs() const {
-        auto abs_r = torch::abs(r); // Compute the absolute value of the real part
-        auto sign_r = torch::sign(r); // Compute the sign of the real part
-        auto abs_d = sign_r.unsqueeze(-1) * d; // The dual part multiplies by the sign of the real part
-        auto abs_h = torch::zeros_like(h); // The hyperdual part is zero
+        // Compute the absolute value of the real part
+        auto abs_r = torch::abs(this->r);
+
+        // Compute the sign of the real part
+        auto sign_r = torch::sign(this->r);
+
+        // Scale the dual part by the sign of the real part
+        auto abs_d = sign_r.unsqueeze(-1) * this->d;
+
+        // Hyperdual part is zero
+        auto abs_h = torch::zeros_like(this->h);
+
         return TensorMatHyperDual(abs_r, abs_d, abs_h);
     }
 
-    TensorMatHyperDual max(int dim=1) {
-        // Compute the max values and indices along dimension 1, keeping the dimension
-        auto max_result = torch::max(this->r, /*dim=*/dim, /*keepdim=*/true);
+
+    /**
+     * Compute the maximum values along a specified dimension for the TensorMatHyperDual object.
+     *
+     * The real, dual, and hyperdual parts are reduced based on the indices of the maximum values.
+     *
+     * @param dim The dimension along which to compute the maximum (default: 1).
+     * @return A new TensorMatHyperDual object containing the maximum values and corresponding dual and hyperdual values.
+     */
+    TensorMatHyperDual max(int dim = 1) const {
+        // Compute max values and indices along the specified dimension
+        auto max_result = torch::max(this->r, dim, /*keepdim=*/true);
         auto max_values = std::get<0>(max_result);  // Maximum values
         auto max_indices = std::get<1>(max_result); // Indices of the maximum values
 
-        // Adjust the shape of max_indices to match the dual tensor for gathering
-        auto dshape = max_indices.unsqueeze(-1).expand({max_indices.size(0), max_indices.size(1), this->d.size(-1)});
-        // Adjust the shape of max_indices to match the hyperdual tensor for gathering
-        auto hshape = max_indices.unsqueeze(-1).unsqueeze(-1).expand({max_indices.size(0), max_indices.size(1), this->h.size(-2), this->h.size(-1)});
+        // Adjust the shape of max_indices for gathering
+        auto dshape = max_indices.unsqueeze(-1).expand_as(this->d.select(dim, 0)); // Expand to match dual shape
+        auto hshape = max_indices.unsqueeze(-1).unsqueeze(-1).expand_as(this->h.select(dim, 0).select(dim, 0)); // Expand to match hyperdual shape
 
-        // Gather the dual and hyperdual values based on the max indices
-        auto dual_values = torch::gather(this->d, /*dim=*/dim, dshape);
-        auto hyper_values = torch::gather(this->h, /*dim=*/dim, hshape);
+        // Gather dual and hyperdual values based on max indices
+        auto dual_values = torch::gather(this->d, dim, dshape);
+        auto hyper_values = torch::gather(this->h, dim, hshape);
 
-        // Return a new TensorMatHyperDual with the max values and corresponding dual and hyperdual values
+        // Return a new TensorMatHyperDual object
         return TensorMatHyperDual(max_values, dual_values, hyper_values);
     }
 
-    TensorMatHyperDual min(int dim=1) {
-        // Compute the min values and indices along dimension 1, keeping the dimension
-        auto min_result = torch::min(this->r, /*dim=*/dim, /*keepdim=*/true);
+    /**
+     * Compute the minimum values along a specified dimension for the TensorMatHyperDual object.
+     *
+     * The real, dual, and hyperdual parts are reduced based on the indices of the minimum values.
+     *
+     * @param dim The dimension along which to compute the minimum (default: 1).
+     * @return A new TensorMatHyperDual object containing the minimum values and corresponding dual and hyperdual values.
+     */
+    TensorMatHyperDual min(int dim = 1) const {
+        // Compute min values and indices along the specified dimension
+        auto min_result = torch::min(this->r, dim, /*keepdim=*/true);
         auto min_values = std::get<0>(min_result);  // Minimum values
         auto min_indices = std::get<1>(min_result); // Indices of the minimum values
 
-        // Adjust the shape of min_indices to match the dual tensor for gathering
-        auto dshape = min_indices.unsqueeze(-1).expand({min_indices.size(0), min_indices.size(1), this->d.size(-1)});
-        // Adjust the shape of min_indices to match the hyperdual tensor for gathering
-        auto hshape = min_indices.unsqueeze(-1).unsqueeze(-1).expand({min_indices.size(0), min_indices.size(1), this->h.size(-2), this->h.size(-1)});
+        // Adjust the shape of min_indices for gathering
+        auto dshape = min_indices.unsqueeze(-1).expand_as(this->d.select(dim, 0)); // Expand to match dual shape
+        auto hshape = min_indices.unsqueeze(-1).unsqueeze(-1).expand_as(this->h.select(dim, 0).select(dim, 0)); // Expand to match hyperdual shape
 
-        // Gather the dual and hyperdual values based on the min indices
-        auto dual_values = torch::gather(this->d, /*dim=*/dim, dshape);
-        auto hyper_values = torch::gather(this->h, /*dim=*/dim, hshape);
+        // Gather dual and hyperdual values based on min indices
+        auto dual_values = torch::gather(this->d, dim, dshape);
+        auto hyper_values = torch::gather(this->h, dim, hshape);
 
-        // Return a new TensorMatHyperDual with the min values and corresponding dual and hyperdual values
+        // Return a new TensorMatHyperDual object
         return TensorMatHyperDual(min_values, dual_values, hyper_values);
     }
 
+    /**
+     * Compute the sum of the TensorMatHyperDual object along a specified dimension.
+     *
+     * This method sums the real, dual, and hyperdual parts along the specified dimension, keeping the dimension.
+     *
+     * @param dim The dimension along which to compute the sum.
+     * @return A new TensorMatHyperDual object containing the summed values.
+     */
+    TensorMatHyperDual sum(int dim) const {
+        // Compute the sum for each part
+        auto r_sum = this->r.sum(dim, /*keepdim=*/true);
+        auto d_sum = this->d.sum(dim, /*keepdim=*/true);
+        auto h_sum = this->h.sum(dim, /*keepdim=*/true);
 
-    TensorMatHyperDual sum(int dim){
-        auto r = this->r.sum(dim, true);
-        auto d = this->d.sum(dim, true);
-        auto h = this->h.sum(dim, true);
-        return TensorMatHyperDual(r, d, h);
+        // Return a new TensorMatHyperDual object with summed components
+        return TensorMatHyperDual(r_sum, d_sum, h_sum);
     }
 
+
+    /**
+     * Compute the square of the TensorMatHyperDual object.
+     *
+     * This method computes:
+     * - Real part: \( r^2 \)
+     * - Dual part: \( 2r \cdot d \)
+     * - Hyperdual part: \( 2(d \cdot d + r \cdot h) \)
+     *
+     * @return A new TensorMatHyperDual object representing the square of the input.
+     */
     TensorMatHyperDual square() const {
-        auto rsq = r.square(); // Compute the square of the real part
+        // Compute the square of the real part
+        auto rsq = r.square();
+
+        // Compute the dual part: 2 * r * d
         auto dn = 2 * r.unsqueeze(-1) * this->d;
-        //2dd+2rh
-        auto hn = 2*torch::einsum("mij, mik->mijk",{d, d})+
-                  2*torch::einsum("mi, mijk->mijk",{r, h}); 
-        return TensorMatHyperDual(rsq, d, h);
-    }
 
+        // Compute the hyperdual part: 2 * (d * d + r * h)
+        auto hn = 2 * torch::einsum("mij, mik->mijk", {d, d}) + 
+                2 * torch::einsum("mi, mijk->mijk", {r, h});
 
-    TensorMatHyperDual(const TensorHyperDual& x, int dim =2) {
-        auto r = x.r.unsqueeze(dim);
-        auto d = x.d.unsqueeze(dim);
-        auto h = x.h.unsqueeze(dim);
-        TensorMatHyperDual(r, d, h);
+        // Return the squared TensorMatHyperDual
+        return TensorMatHyperDual(rsq, dn, hn);
     }
 
 
 
-    friend std::ostream& operator<<(std::ostream& os, const TensorMatHyperDual& obj){
-        os << "r: " << obj.r << std::endl;
-        os << "d: " << obj.d << std::endl;
-        os << "h: " << obj.h << std::endl;
+    /**
+     * Overload the stream insertion operator for TensorMatHyperDual.
+     *
+     * This method provides a formatted string representation of the TensorMatHyperDual object, 
+     * displaying the real, dual, and hyperdual parts.
+     *
+     * @param os The output stream.
+     * @param obj The TensorMatHyperDual object to be printed.
+     * @return The output stream with the object data appended.
+     */
+    friend std::ostream& operator<<(std::ostream& os, const TensorMatHyperDual& obj) {
+        os << "TensorMatHyperDual {" << std::endl;
+        os << "  r: " << obj.r << std::endl;
+        os << "  d: " << obj.d << std::endl;
+        os << "  h: " << obj.h << std::endl;
+        os << "}";
         return os;
     }
 
 
-    // Constructor overload for scalar types
+    /**
+     * Constructor overload for scalar types to create a TensorMatHyperDual.
+     *
+     * This constructor initializes the real, dual, and hyperdual parts from scalar values,
+     * and adjusts dimensions to align with the TensorMatHyperDual structure.
+     *
+     * @param r Scalar value for the real part.
+     * @param d Scalar value for the dual part.
+     * @param h Scalar value for the hyperdual part.
+     * @param dim The dimension along which to unsqueeze tensors (default: 1).
+     */
     template <typename S>
     TensorMatHyperDual(S r, S d, S h, int64_t dim = 1) {
-        auto options = torch::TensorOptions().dtype(torch::kFloat64); // You need to specify the correct data type here
+        // Tensor options for double precision
+        auto options = torch::TensorOptions().dtype(torch::kFloat64);
 
-        this->r = torch::tensor({r}, options);
-        if (this->r.dim() == 2) {
-            this->r = this->r.unsqueeze(dim);
-        }
+        // Initialize the real part
+        this->r = torch::tensor(r, options).unsqueeze(dim);
 
-        this->d = torch::tensor({d}, options);
-        if (this->d.dim() == 3 ) {
-            this->d = this->d.unsqueeze(dim);
-        }
+        // Initialize the dual part
+        this->d = torch::tensor(d, options).unsqueeze(dim).unsqueeze(-1);
 
-        this->h = torch::tensor({h}, options);
-        if (this->h.dim() == 4) {
-            this->h = this->h.unsqueeze(dim);
-        }
-
+        // Initialize the hyperdual part
+        this->h = torch::tensor(h, options).unsqueeze(dim).unsqueeze(-1).unsqueeze(-1);
     }
+
+
+
     
     //Forward declaration for eye function
     TensorMatHyperDual eye();
+    /**
+     * Squeeze the specified dimension of the TensorHyperDual object.
+     *
+     * Removes the specified dimension if it has size 1 from the real, dual, and hyperdual tensors.
+     *
+     * @param dim The dimension to squeeze. If the dimension does not have size 1, it remains unchanged.
+     * @return A new TensorHyperDual object with the specified dimension squeezed.
+     */
+    TensorHyperDual squeeze(int dim) const {
+        // Squeeze the specified dimension for each part
+        auto r_squeezed = this->r.squeeze(dim);
+        auto d_squeezed = this->d.squeeze(dim);
+        auto h_squeezed = this->h.squeeze(dim);
 
-    TensorHyperDual squeeze(int dim )
-    {
-        auto r = this->r.squeeze(dim);
-        auto d = this->d.squeeze(dim);
-        auto h = this->h.squeeze(dim);
-        return TensorHyperDual(r, d, h);
+        // Return the squeezed TensorHyperDual
+        return TensorHyperDual(r_squeezed, d_squeezed, h_squeezed);
     }
 
-    TensorMatHyperDual contiguous()
-    {
-        auto r = this->r.contiguous();
-        auto d = this->d.contiguous();
-        auto h = this->h.contiguous();
-        return TensorMatHyperDual(r, d, h);
+    /**
+     * Ensure that all components of the TensorMatHyperDual object are stored in contiguous memory.
+     *
+     * If the tensors are already contiguous, this method has no effect. Otherwise, it makes a contiguous copy.
+     *
+     * @return A new TensorMatHyperDual object with all tensors stored contiguously.
+     */
+    TensorMatHyperDual contiguous() const {
+        // Ensure contiguous storage for each part
+        auto r_contiguous = this->r.contiguous();
+        auto d_contiguous = this->d.contiguous();
+        auto h_contiguous = this->h.contiguous();
+
+        // Return a new TensorMatHyperDual with contiguous tensors
+        return TensorMatHyperDual(r_contiguous, d_contiguous, h_contiguous);
     }
 
-
+    /**
+     * Compute the square root of the TensorMatHyperDual object.
+     *
+     * For the square root operation:
+     * - Real part: \( r_{\text{sqrt}} = \sqrt{r} \)
+     * - Dual part: \( d_{\text{sqrt}} = \frac{1}{2 \sqrt{r}} \cdot d \)
+     * - Hyperdual part: \( h_{\text{sqrt}} = \frac{1}{2 \sqrt{r}} \cdot h - \frac{1}{4 r^{3/2}} \cdot d \cdot d \)
+     *
+     * @return A new TensorMatHyperDual object representing the square root.
+     * @throws std::invalid_argument if any element of `r` is negative.
+     */
     TensorMatHyperDual sqrt() const {
-        auto r = torch::sqrt(this->r); // Compute the square root of the real part
-        auto rf = torch::where(torch::real(r) > 0, r, torch::zeros_like(r)); // Remove negative elements
-        auto d = torch::einsum("mij, mijn->mijn", {0.5*rf.pow(-0.5), this->d});
-        auto h = torch::einsum("mij, mijkn->mijkn", {0.5*rf.pow(-0.5), this->h}) - 0.25 * torch::einsum("mij, mijkn->mijk", {0.5*rf.pow(-1.5), this->d.unsqueeze(-1)});
-        return TensorMatHyperDual(r, d, h);
+        // Compute the square root of the real part
+        if ((this->r < 0).any().item<bool>()) {
+            throw std::invalid_argument("Square root of negative elements is not supported.");
+        }
+        auto r_sqrt = torch::sqrt(this->r);
+
+        // Compute the dual part: d / (2 * sqrt(r))
+        auto rf_inv_sqrt = 0.5 * r_sqrt.pow(-1); // 1 / (2 * sqrt(r))
+        auto d_sqrt = torch::einsum("mij, mijn->mijn", {rf_inv_sqrt, this->d});
+
+        // Compute the hyperdual part: h / (2 * sqrt(r)) - d * d / (4 * r^(3/2))
+        auto rf_inv_3_sqrt = 0.25 * r_sqrt.pow(-3); // 1 / (4 * r^(3/2))
+        auto h_sqrt = torch::einsum("mij, mijkn->mijkn", {rf_inv_sqrt, this->h}) -
+                    torch::einsum("mij, mijk, mij->mijkn", {rf_inv_3_sqrt, this->d, this->d});
+
+        // Return the new TensorMatHyperDual object
+        return TensorMatHyperDual(r_sqrt, d_sqrt, h_sqrt);
     }
 
-    TensorMatHyperDual normL2()
-    {
-       auto norm_r = torch::norm(this->r, 2, -1, true);
-       auto norm_r_expanded =norm_r.expand_as(this->r);
-       auto grad_r = this->r / norm_r_expanded;
-       auto dual = torch::einsum("mij, mijn->min", {grad_r, this->d}).unsqueeze(2);
-       auto grad_grad_r = torch::eye(this->r.size(1)).unsqueeze(0).repeat({this->r.size(0), 1, 1});
-       auto h = torch::einsum("mij, mijkn->mijkn", {grad_r, this->h}) - 
-                torch::einsum("mij, mijkn->mijk", {grad_grad_r, this->d.unsqueeze(-1)});
-       return TensorMatHyperDual(norm_r, dual, h);
+    /**
+     * Compute the L2 norm of the TensorMatHyperDual object along the last dimension.
+     *
+     * For the L2 norm operation:
+     * - Real part: \( ||r||_2 \)
+     * - Dual part: \( \frac{r}{||r||_2} \cdot d \)
+     * - Hyperdual part: Derived from the chain rule, involving second derivatives of the norm.
+     *
+     * @return A new TensorMatHyperDual object representing the L2 norm and its derivatives.
+     */
+    TensorMatHyperDual normL2() const {
+        // Compute the L2 norm of the real part along the last dimension
+        auto norm_r = torch::norm(this->r, 2, /*dim=*/-1, /*keepdim=*/true);
+
+        // Avoid division by zero: Replace zeros in norm_r with a small epsilon
+        auto norm_r_safe = torch::where(norm_r > 0, norm_r, torch::ones_like(norm_r) * 1e-12);
+
+        // Gradient of the norm w.r.t. r: r / ||r||_2
+        auto grad_r = this->r / norm_r_safe.expand_as(this->r);
+
+        // Dual part: grad_r * d
+        auto dual = torch::einsum("mij, mijn->min", {grad_r, this->d}).unsqueeze(2);
+
+        // Compute the gradient of grad_r (second derivative of the norm w.r.t. r)
+        auto grad_grad_r = torch::eye(this->r.size(-1), this->r.options())
+                            .unsqueeze(0)
+                            .expand({this->r.size(0), this->r.size(-1), this->r.size(-1)}) -
+                        torch::einsum("mij,mik->mijk", {grad_r, grad_r});
+
+        // Hyperdual part: grad_r * h - grad_grad_r * d
+        auto hyperdual = torch::einsum("mij, mijnk->mink", {grad_r, this->h}) -
+                        torch::einsum("mijk, mijn->mink", {grad_grad_r, this->d});
+
+        // Return the TensorMatHyperDual with norm, dual, and hyperdual parts
+        return TensorMatHyperDual(norm_r, dual, hyperdual);
     }
 
+    /**
+     * Create a TensorMatHyperDual object with zero-initialized dual and hyperdual parts.
+     *
+     * @param r The real part tensor [M, N, L].
+     * @param ddim The dual dimension (number of sensitivities to track).
+     * @return A new TensorMatHyperDual object with zero-initialized dual and hyperdual parts.
+     */
     static TensorMatHyperDual createZero(const torch::Tensor& r, int ddim) {
-        auto dshape = r.sizes().vec(); // copy the sizes to a vector
-        dshape.push_back(ddim); // add the extra dimension for the dual part
+        // Validate input dimensions
+        if (r.dim() != 3) {
+            throw std::invalid_argument("Real part tensor must have dimensions [M, N, L].");
+        }
 
-        // Create a zero tensor for the dual part with the new shape
+        // Create the shape for the dual tensor
+        auto dshape = r.sizes().vec();  // Copy the sizes to a vector
+        dshape.push_back(ddim);         // Add the dual dimension
+
+        // Create the shape for the hyperdual tensor
+        auto hshape = r.sizes().vec();  // Copy the sizes to a vector
+        hshape.push_back(ddim);         // Add the first hyperdual dimension
+        hshape.push_back(ddim);         // Add the second hyperdual dimension
+
+        // Create zero tensors for the dual and hyperdual parts
         auto options = torch::TensorOptions().dtype(r.dtype()).device(r.device());
         auto ds = torch::zeros(dshape, options);
-        auto hs = torch::zeros({r.size(0), r.size(1), r.size(2), r.size(3), ddim}, options);
+        auto hs = torch::zeros(hshape, options);
+
+        // Return the TensorMatHyperDual object
         return TensorMatHyperDual(r, ds, hs);
     }
 
+
+    /**
+     * Create a TensorMatHyperDual object with zero-initialized components matching the dimensions of the input tensor `x`.
+     *
+     * This method generates:
+     * - A real part tensor with zeros matching `x`.
+     * - A dual part tensor with zeros matching the batch and spatial dimensions of `d` but with an additional dual dimension.
+     * - A hyperdual part tensor with zeros matching the batch and spatial dimensions of `h` but with two additional hyperdual dimensions.
+     *
+     * @param x The input tensor whose shape and dtype determine the real part.
+     * @return A TensorMatHyperDual object with zero-initialized components.
+     */
     TensorMatHyperDual zeros_like(const torch::Tensor &x) const {
+        // Create a real part tensor with zeros matching `x`
         auto rc = torch::zeros_like(x);
-        int nr1 = d.size(1);
-        int nr2 = d.size(2);
-        int nd = d.size(3);
-        auto dc = torch::zeros({nr1, nr2, nd}, x.dtype());
-        if (r.dtype() == torch::kBool) {
-            dc = torch::zeros({nr1, nr2, nd}, torch::kFloat64);
-        }
-        int nh = h.size(4);
-        auto hc = torch::zeros({nr1, nr2, nd, nh}, x.dtype());
-        
+
+        // Retrieve dimensions for dual and hyperdual tensors
+        auto nr1 = d.size(1); // Number of rows
+        auto nr2 = d.size(2); // Number of columns
+        auto nd = d.size(3);  // Dual dimension
+        auto nh = h.size(4);  // Hyperdual dimension
+
+        // Create dual part tensor
+        auto options = torch::TensorOptions().dtype(x.dtype()).device(x.device());
+        auto dc = torch::zeros({x.size(0), nr1, nr2, nd}, options);
+
+        // Create hyperdual part tensor
+        auto hc = torch::zeros({x.size(0), nr1, nr2, nd, nh}, options);
+
+        // Return the zero-initialized TensorMatHyperDual
         return TensorMatHyperDual(rc, dc, hc);
     }
 
-    TensorMatHyperDual zeros_like() {
-        auto rc = torch::zeros_like(this->r);
-        auto dc = torch::zeros_like(this->d);
-        auto hc = torch::zeros_like(this->h);
-        return TensorMatHyperDual(rc, dc, hc);
-    }
 
-
+    /**
+     * Create a deep copy of the TensorMatHyperDual object.
+     *
+     * This method clones the real, dual, and hyperdual tensors to ensure that
+     * the new object is independent of the original.
+     *
+     * @return A new TensorMatHyperDual object that is a deep copy of the current object.
+     */
     TensorMatHyperDual clone() const {
+        // Clone the real, dual, and hyperdual parts
         return TensorMatHyperDual(this->r.clone(), this->d.clone(), this->h.clone());
     }
 
-    TensorHyperDual squeeze() {
-        if (this->r.size(2) == 1) {
-            return TensorHyperDual(this->r.squeeze(2), this->d.squeeze(2), this->h.squeeze(2));
-        }
-        auto r = this->r.squeeze(1);
-        auto d = this->d.squeeze(1);
-        auto h = this->h.squeeze(1);
-        return TensorHyperDual(r, d, h);
-    }
-    
-    
+
     /**
-     * Defaults to dimension 2 for concatenation
+     * Squeeze singleton dimensions (dimensions of size 1) from the TensorHyperDual object.
+     *
+     * If a specific dimension is of size 1, it will be removed. If no dimension is specified,
+     * all singleton dimensions are squeezed.
+     *
+     * @return A new TensorHyperDual object with the specified dimensions squeezed.
      */
-    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const TensorMatHyperDual &t2)
-    {
-        auto r = torch::cat({t1.r, t2.r}, 2);
-        auto d = torch::cat({t1.d, t2.d}, 2);
-        auto h = torch::cat({t1.h, t2.h}, 2);
-        return TensorMatHyperDual(r, d, h);
+    TensorHyperDual squeeze(int dim = -1) const {
+        // Check if a specific dimension is provided
+        if (dim >= 0) {
+            // Ensure the specified dimension can be squeezed
+            if (this->r.size(dim) != 1) {
+                throw std::invalid_argument("Specified dimension is not of size 1 and cannot be squeezed.");
+            }
+            // Squeeze the specified dimension
+            return TensorHyperDual(this->r.squeeze(dim), this->d.squeeze(dim), this->h.squeeze(dim));
+        }
+
+        // If no dimension is specified, squeeze all singleton dimensions
+        return TensorHyperDual(this->r.squeeze(), this->d.squeeze(), this->h.squeeze());
     }
 
-    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const TensorMatHyperDual &t2, int dim)
-    {
+    /**
+     * Concatenate two TensorMatHyperDual objects along a specified dimension.
+     *
+     * This method concatenates the real, dual, and hyperdual parts of two
+     * TensorMatHyperDual objects along the specified dimension.
+     *
+     * @param t1 The first TensorMatHyperDual object.
+     * @param t2 The second TensorMatHyperDual object.
+     * @param dim The dimension along which to concatenate (default: 2).
+     * @return A new TensorMatHyperDual object with concatenated components.
+     * @throws std::invalid_argument if the tensors cannot be concatenated due to mismatched dimensions.
+     */
+    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const TensorMatHyperDual& t2, int dim = 2) {
+        // Validate that the tensors can be concatenated
+        if (t1.r.sizes() != t2.r.sizes() && dim != 2) {
+            throw std::invalid_argument("The shapes of t1 and t2 are incompatible for concatenation along dimension " + std::to_string(dim));
+        }
+
+        // Concatenate the real, dual, and hyperdual parts
         auto r = torch::cat({t1.r, t2.r}, dim);
         auto d = torch::cat({t1.d, t2.d}, dim);
         auto h = torch::cat({t1.h, t2.h}, dim);
+
+        // Return the concatenated TensorMatHyperDual
         return TensorMatHyperDual(r, d, h);
     }
 
-    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const TensorHyperDual &t2)
-    {
-        auto r = torch::cat({t1.r, t2.r.unsqueeze(2)}, 2);
-        auto d = torch::cat({t1.d, t2.d.unsqueeze(2)}, 2);
-        auto h = torch::cat({t1.h, t2.h.unsqueeze(2)}, 2);
+    /**
+     * Concatenate two TensorMatHyperDual objects along a specified dimension.
+     *
+     * This method concatenates the real, dual, and hyperdual parts of two
+     * TensorMatHyperDual objects along the specified dimension.
+     *
+     * @param t1 The first TensorMatHyperDual object.
+     * @param t2 The second TensorMatHyperDual object.
+     * @param dim The dimension along which to concatenate (default: 2).
+     * @return A new TensorMatHyperDual object with concatenated components.
+     * @throws std::invalid_argument if the tensors cannot be concatenated due to mismatched dimensions.
+     */
+    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const TensorMatHyperDual& t2, int dim = 2) {
+        // Validate that the tensors can be concatenated
+        if (t1.r.sizes() != t2.r.sizes() && dim != 2) {
+            throw std::invalid_argument("The shapes of t1 and t2 are incompatible for concatenation along dimension " + std::to_string(dim));
+        }
+
+        // Concatenate the real, dual, and hyperdual parts
+        auto r = torch::cat({t1.r, t2.r}, dim);
+        auto d = torch::cat({t1.d, t2.d}, dim);
+        auto h = torch::cat({t1.h, t2.h}, dim);
+
+        // Return the concatenated TensorMatHyperDual
         return TensorMatHyperDual(r, d, h);
     }
 
-    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const torch::Tensor &t2)
-    {
-        auto rt = t2.repeat({t1.r.size(0), 1, 1});
+    /**
+     * Concatenate a TensorMatHyperDual object with a plain torch::Tensor along the third dimension.
+     *
+     * The plain tensor is broadcast and repeated along the batch dimension to match
+     * the TensorMatHyperDual structure. The dual and hyperdual parts of the resulting
+     * TensorMatHyperDual object are zero-initialized for the appended tensor.
+     *
+     * @param t1 The TensorMatHyperDual object.
+     * @param t2 The torch::Tensor to concatenate.
+     * @return A new TensorMatHyperDual object with concatenated components.
+     * @throws std::invalid_argument if the dimensions of t2 are incompatible.
+     */
+    static TensorMatHyperDual cat(const TensorMatHyperDual& t1, const torch::Tensor& t2) {
+        // Validate dimensions of t2
+        if (t2.dim() != 2 || t2.size(0) != t1.r.size(1)) {
+            throw std::invalid_argument(
+                "The input tensor t2 must have dimensions [N, L], where N matches the row dimension of t1.");
+        }
+
+        // Repeat t2 along the batch dimension to match t1
+        auto rt = t2.unsqueeze(0).expand({t1.r.size(0), t2.size(0), t2.size(1)});
+
+        // Concatenate the real parts
         auto r = torch::cat({t1.r, rt}, 2);
-        auto d = torch::cat({t1.d, t1.d*0}, 2);
-        auto h = torch::cat({t1.h, t1.h*0}, 2);
+
+        // Concatenate the dual parts with zero tensors for the added data
+        auto zero_d = torch::zeros({t1.d.size(0), t1.d.size(1), t2.size(1), t1.d.size(3)}, t1.d.options());
+        auto d = torch::cat({t1.d, zero_d}, 2);
+
+        // Concatenate the hyperdual parts with zero tensors for the added data
+        auto zero_h = torch::zeros({t1.h.size(0), t1.h.size(1), t2.size(1), t1.h.size(3), t1.h.size(4)}, t1.h.options());
+        auto h = torch::cat({t1.h, zero_h}, 2);
+
+        // Return the new TensorMatHyperDual
         return TensorMatHyperDual(r, d, h);
     }
+    
 
 
-    //overload the + operator
+    /**
+     * Overload the + operator for TensorMatHyperDual objects.
+     *
+     * This method performs element-wise addition of the real, dual, and hyperdual parts
+     * of two TensorMatHyperDual objects. Both objects must have compatible shapes.
+     *
+     * @param other The TensorMatHyperDual object to add.
+     * @return A new TensorMatHyperDual object representing the element-wise sum.
+     * @throws std::invalid_argument if the dimensions of the two objects are incompatible.
+     */
     TensorMatHyperDual operator+(const TensorMatHyperDual& other) const {
-        return TensorMatHyperDual(this->r + other.r, this->d + other.d, this->h + other.h);
-    }
+        // Validate that the dimensions of the two objects are compatible
+        if (this->r.sizes() != other.r.sizes() || this->d.sizes() != other.d.sizes() || this->h.sizes() != other.h.sizes()) {
+            throw std::invalid_argument("TensorMatHyperDual objects must have matching dimensions for addition.");
+        }
 
-    //overload the + operator
+        // Perform element-wise addition for real, dual, and hyperdual parts
+        auto r_sum = this->r + other.r;
+        auto d_sum = this->d + other.d;
+        auto h_sum = this->h + other.h;
+
+        // Return the result as a new TensorMatHyperDual object
+        return TensorMatHyperDual(r_sum, d_sum, h_sum);
+    }
+    /**
+     * Overload the + operator for TensorMatHyperDual and TensorHyperDual objects.
+     *
+     * This operator performs element-wise addition of a TensorMatHyperDual object
+     * with a TensorHyperDual object. The TensorHyperDual components are expanded
+     * along dimension 1 to align with the TensorMatHyperDual structure.
+     *
+     * @param other The TensorHyperDual object to add.
+     * @return A new TensorMatHyperDual object representing the element-wise sum.
+     * @throws std::invalid_argument if the dimensions of the two objects are incompatible.
+     */
     TensorMatHyperDual operator+(const TensorHyperDual& other) const {
-        return TensorMatHyperDual(this->r + other.r.unsqueeze(1), 
-                                  this->d + other.d.unsqueeze(1), 
-                                  this->h + other.h.unsqueeze(1));
-    }
+        // Validate compatibility of dimensions
+        if (this->r.size(0) != other.r.size(0) || this->r.size(2) != other.r.size(1)) {
+            throw std::invalid_argument(
+                "TensorHyperDual dimensions are incompatible with TensorMatHyperDual for addition.");
+        }
 
-    //overload the + operator for a double
+        // Perform element-wise addition with broadcasting
+        auto r_sum = this->r + other.r.unsqueeze(1);
+        auto d_sum = this->d + other.d.unsqueeze(1);
+        auto h_sum = this->h + other.h.unsqueeze(1);
+
+        // Return the result as a new TensorMatHyperDual object
+        return TensorMatHyperDual(r_sum, d_sum, h_sum);
+    }
+    /**
+     * Overload the + operator for TensorMatHyperDual and a scalar (double).
+     *
+     * This operator performs element-wise addition of the scalar to the real part
+     * of the TensorMatHyperDual object, leaving the dual and hyperdual parts unchanged.
+     *
+     * @param other The scalar (double) to add to the real part.
+     * @return A new TensorMatHyperDual object with the scalar added to the real part.
+     */
     TensorMatHyperDual operator+(const double& other) const {
-        return TensorMatHyperDual(this->r + other, this->d, this->h);
+        // Perform element-wise addition of the scalar to the real part
+        auto r_sum = this->r + other;
+
+        // Return a new TensorMatHyperDual object
+        return TensorMatHyperDual(r_sum, this->d, this->h);
     }
 
 
-    //overload the - operator
+    /**
+     * Overload the - operator for TensorMatHyperDual objects.
+     *
+     * This operator performs element-wise subtraction of the real, dual, and hyperdual parts
+     * of one TensorMatHyperDual object from another. The dimensions of the two objects must match.
+     *
+     * @param other The TensorMatHyperDual object to subtract.
+     * @return A new TensorMatHyperDual object representing the element-wise difference.
+     * @throws std::invalid_argument if the dimensions of the two objects do not match.
+     */
     TensorMatHyperDual operator-(const TensorMatHyperDual& other) const {
-        return TensorMatHyperDual(this->r - other.r, this->d - other.d, this->h - other.h);
+        // Validate compatibility of dimensions
+        if (this->r.sizes() != other.r.sizes() ||
+            this->d.sizes() != other.d.sizes() ||
+            this->h.sizes() != other.h.sizes()) {
+            throw std::invalid_argument("TensorMatHyperDual objects must have matching dimensions for subtraction.");
+        }
+
+        // Perform element-wise subtraction
+        auto r_diff = this->r - other.r;
+        auto d_diff = this->d - other.d;
+        auto h_diff = this->h - other.h;
+
+        // Return the result as a new TensorMatHyperDual object
+        return TensorMatHyperDual(r_diff, d_diff, h_diff);
     }
 
-    //overload the - operator
+    /**
+     * Overload the - operator for TensorMatHyperDual and a scalar (double).
+     *
+     * This operator subtracts the scalar from the real part of the TensorMatHyperDual object,
+     * leaving the dual and hyperdual parts unchanged.
+     *
+     * @param other The scalar (double) to subtract from the real part.
+     * @return A new TensorMatHyperDual object with the scalar subtracted from the real part.
+     */
     TensorMatHyperDual operator-(const double& other) const {
-        return TensorMatHyperDual(this->r - other, this->d, this->h);
+        // Perform element-wise subtraction of the scalar from the real part
+        auto r_diff = this->r - other;
+
+        // Return a new TensorMatHyperDual object
+        return TensorMatHyperDual(r_diff, this->d, this->h);
     }
 
-
-
-    // Overload the equals operator for TensorDual == TensorDual
+    /**
+     * Overload the equality operator (==) for TensorMatHyperDual objects.
+     *
+     * This operator compares the real parts of two TensorMatHyperDual objects element-wise
+     * and returns a tensor mask indicating where the real parts are equal. The dimensions
+     * of the two objects must match for comparison.
+     *
+     * @param other The TensorMatHyperDual object to compare with.
+     * @return A torch::Tensor mask indicating element-wise equality of the real parts.
+     * @throws std::invalid_argument if the dimensions of the two objects do not match.
+     */
     torch::Tensor operator==(const TensorMatHyperDual& other) const {
-        auto mask = r == other.r;
-        return torch::squeeze(mask, 2);
+        // Validate compatibility of dimensions
+        if (this->r.sizes() != other.r.sizes()) {
+            throw std::invalid_argument("TensorMatHyperDual objects must have matching dimensions for comparison.");
+        }
+
+        // Perform element-wise comparison of the real parts
+        auto mask = this->r == other.r;
+
+        // Optionally squeeze dimension 2 if necessary (assuming mask is 3D)
+        if (mask.size(2) == 1) {
+            return torch::squeeze(mask, 2);
+        }
+
+        return mask; // Return the mask as is if no squeezing is required
     }
 
 
-
-
-    //overload the - operator
+    /**
+     * Overload the unary - operator for TensorMatHyperDual objects.
+     *
+     * This operator negates the real, dual, and hyperdual parts of the TensorMatHyperDual object.
+     *
+     * @return A new TensorMatHyperDual object with all components negated.
+     */
     TensorMatHyperDual operator-() const {
+        // Negate the real, dual, and hyperdual parts
         return TensorMatHyperDual(-this->r, -this->d, -this->h);
     }
 
+    /**
+     * Overload the * operator for TensorMatHyperDual and a scalar (double).
+     *
+     * This operator scales the real, dual, and hyperdual parts of the TensorMatHyperDual
+     * object by the given scalar.
+     *
+     * @param other The scalar (double) to multiply with.
+     * @return A new TensorMatHyperDual object with all components scaled by the scalar.
+     */
     TensorMatHyperDual operator*(const double other) const {
-        auto real = this->r*other;
-        auto dual = this->d*other;
-        auto hyper = this->h*other;
+        // Scale each component by the scalar
+        auto real = this->r * other;
+        auto dual = this->d * other;
+        auto hyper = this->h * other;
+
+        // Return the scaled TensorMatHyperDual object
         return TensorMatHyperDual(real, dual, hyper);
     }
 
-
-
-    
+    /**
+     * Overload the / operator for TensorMatHyperDual objects.
+     *
+     * This operator performs element-wise division of two TensorMatHyperDual objects.
+     * It computes the division for the real, dual, and hyperdual parts while ensuring
+     * correctness in propagating derivatives.
+     *
+     * @param other The TensorMatHyperDual object to divide by.
+     * @return A new TensorMatHyperDual object representing the element-wise division.
+     * @throws std::invalid_argument if the dimensions of the two objects do not match.
+     */
     TensorMatHyperDual operator/(const TensorMatHyperDual& other) const {
+        // Validate compatibility of dimensions
+        if (this->r.sizes() != other.r.sizes() ||
+            this->d.sizes() != other.d.sizes() ||
+            this->h.sizes() != other.h.sizes()) {
+            throw std::invalid_argument("TensorMatHyperDual objects must have matching dimensions for division.");
+        }
+
+        // Extract components
         auto r1 = this->r;
         auto d1 = this->d;
         auto h1 = this->h;
         auto r2 = other.r;
         auto d2 = other.d;
         auto h2 = other.h;
-        auto r2sq = r2.square();
-        auto d1d2 = d1 * d2;
-        auto r1d2 = r1.unsqueeze(-1) * d2;
-        auto r1h2 = r1.unsqueeze(-1).unsqueeze(-1) * h2;
-        auto r1d2d2 = r1.unsqueeze(-1) * d2 * d2;
-        auto r2cube = r2 * r2 * r2;
-        auto rn = r1/r2;
-        auto dn = d1/r2.unsqueeze(-1)-r1d2/r2sq.unsqueeze(-1);
-        auto hn = h1/r2.unsqueeze(-1).unsqueeze(-1) - 
-                  2*d1d2.unsqueeze(-1)/r2sq.unsqueeze(-1).unsqueeze(-1) -
-                  r1h2/r2sq.unsqueeze(-1).unsqueeze(-1) +
-                  2*r1d2d2.unsqueeze(-1)/r2cube.unsqueeze(-1).unsqueeze(-1);
+
+        // Precompute common terms
+        auto r2sq = r2.square();                               // r2^2
+        auto r2cube = r2 * r2sq;                               // r2^3
+        auto r1d2 = r1.unsqueeze(-1) * d2;                    // r1 * d2
+        auto r1h2 = r1.unsqueeze(-1).unsqueeze(-1) * h2;      // r1 * h2
+        auto d1d2 = torch::einsum("...ij,...ij->...ij", d1, d2); // d1 * d2 (element-wise)
+        auto r1d2d2 = torch::einsum("...i,...ij->...ij", r1, d2 * d2); // r1 * d2 * d2
+
+        // Real part of the result
+        auto rn = r1 / r2;
+
+        // Dual part of the result
+        auto dn = d1 / r2.unsqueeze(-1) - r1d2 / r2sq.unsqueeze(-1);
+
+        // Hyperdual part of the result
+        auto hn = h1 / r2.unsqueeze(-1).unsqueeze(-1) -
+                2 * d1d2.unsqueeze(-1) / r2sq.unsqueeze(-1).unsqueeze(-1) -
+                r1h2 / r2sq.unsqueeze(-1).unsqueeze(-1) +
+                2 * r1d2d2.unsqueeze(-1) / r2cube.unsqueeze(-1).unsqueeze(-1);
+
+        // Return the result as a new TensorMatHyperDual object
         return TensorMatHyperDual(rn, dn, hn);
     }
 
+
+    /**
+     * Overload the / operator for TensorMatHyperDual and TensorHyperDual objects.
+     *
+     * This operator divides a TensorMatHyperDual object by a TensorHyperDual object.
+     * The TensorHyperDual components are expanded along the appropriate dimensions
+     * to match the structure of the TensorMatHyperDual. The hyperdual part of the
+     * TensorHyperDual is assumed to be zero.
+     *
+     * @param other The TensorHyperDual object to divide by.
+     * @return A new TensorMatHyperDual object representing the element-wise division.
+     * @throws std::invalid_argument if the dimensions of the objects are incompatible.
+     */
     TensorMatHyperDual operator/(const TensorHyperDual& other) const {
-        auto r2 = other.r.unsqueeze(1);
-        auto d2 = other.d.unsqueeze(1);
-        auto h2 = torch::zeros_like(this->h);
-        return *this / TensorMatHyperDual(r2, d2, h2);
+        // Expand TensorHyperDual components to match TensorMatHyperDual dimensions
+        auto r2 = other.r.unsqueeze(1);                  // Add singleton dimension
+        auto d2 = other.d.unsqueeze(1);                  // Add singleton dimension
+        auto h2 = torch::zeros_like(this->h);            // Hyperdual part is zero
+
+        // Construct a TensorMatHyperDual object from the expanded TensorHyperDual
+        TensorMatHyperDual mat_hyper_dual(r2, d2, h2);
+
+        // Reuse the division logic for TensorMatHyperDual
+        return *this / mat_hyper_dual;
     }
 
+    
+    /**
+     * Overload the / operator for TensorMatHyperDual and torch::Tensor objects.
+     *
+     * This operator divides a TensorMatHyperDual object by a torch::Tensor. The torch::Tensor
+     * is expanded to match the structure of the TensorMatHyperDual, and the dual and hyperdual
+     * parts are treated as zero.
+     *
+     * @param other The torch::Tensor to divide by.
+     * @return A new TensorMatHyperDual object representing the element-wise division.
+     * @throws std::invalid_argument if the dimensions of the torch::Tensor are incompatible.
+     */
     TensorMatHyperDual operator/(const torch::Tensor& other) const {
-        auto r2 = other.unsqueeze(1);
-        auto d2 = torch::zeros_like(this->d);
-        auto h2 = torch::zeros_like(this->h);
+        // Validate compatibility of dimensions
+        if (other.sizes() != this->r.sizes().slice(0, 1).vec()) {
+            throw std::invalid_argument("The torch::Tensor must have dimensions compatible with the real part of TensorMatHyperDual.");
+        }
+
+        // Expand the torch::Tensor to match TensorMatHyperDual dimensions
+        auto r2 = other.unsqueeze(1);                  // Add singleton dimension for batch alignment
+        auto d2 = torch::zeros_like(this->d);          // Dual part is zero
+        auto h2 = torch::zeros_like(this->h);          // Hyperdual part is zero
+
+        // Reuse the division logic for TensorMatHyperDual
         return *this / TensorMatHyperDual(r2, d2, h2);
     }
 
 
+    /**
+     * Overload the / operator to divide a TensorMatHyperDual object by a scalar (double).
+     *
+     * This operator performs element-wise division of the real, dual, and hyperdual parts
+     * of the TensorMatHyperDual object by the given scalar.
+     *
+     * @param other The scalar (double) to divide by.
+     * @return A new TensorMatHyperDual object with all components divided by the scalar.
+     * @throws std::invalid_argument if the scalar is zero.
+     */
     TensorMatHyperDual operator/(const double other) const {
-        auto real = this->r/other;
-        auto dual = this->d/other;
-        auto hyper = this->h/other;
+        // Handle division by zero
+        if (other == 0.0) {
+            throw std::invalid_argument("Division by zero is not allowed.");
+        }
+
+        // Perform element-wise division for all components
+        auto real = this->r / other;
+        auto dual = this->d / other;
+        auto hyper = this->h / other;
+
+        // Return the scaled TensorMatHyperDual object
         return TensorMatHyperDual(real, dual, hyper);
     }
 
+    /**
+     * Index into the TensorMatHyperDual object using a list of TensorIndex objects.
+     *
+     * This method performs advanced indexing on the real, dual, and hyperdual parts
+     * of the TensorMatHyperDual object. If the indexing operation reduces a dimension,
+     * it ensures the resulting tensors maintain the expected shape by unsqueezing the
+     * missing dimension as needed.
+     *
+     * @param indices A vector of torch::indexing::TensorIndex objects to specify the indexing.
+     * @return A new TensorMatHyperDual object with the indexed components.
+     * @throws std::invalid_argument if the indices are invalid.
+     */
     TensorMatHyperDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
+        // Index the real part
         auto r = this->r.index(indices);
-        //Add a column if it is missing.  If sow insert a column
-        r.dim() == 2 ? r = r.unsqueeze(2) : r;
+        if (r.dim() == 2) {  // If a column is missing, unsqueeze dimension 2
+            r = r.unsqueeze(2);
+        }
+
+        // Index the dual part
         auto d = this->d.index(indices);
-        d.dim() == 3 ? d = d.unsqueeze(2) : d;
+        if (d.dim() == 3) {  // If a column is missing, unsqueeze dimension 2
+            d = d.unsqueeze(2);
+        }
+
+        // Index the hyperdual part
         auto h = this->h.index(indices);
-        h.dim() == 4 ? h = h.unsqueeze(2) : h;
+        if (h.dim() == 4) {  // If a column is missing, unsqueeze dimension 2
+            h = h.unsqueeze(2);
+        }
+
+        // Return a new TensorMatHyperDual object with the indexed components
         return TensorMatHyperDual(r, d, h);
     }
 
 
-    TensorMatHyperDual index(int index) {
+    /**
+     * Index into the TensorMatHyperDual object along the first dimension using an integer index.
+     *
+     * This method extracts the slice corresponding to the specified index from the real, dual,
+     * and hyperdual parts of the TensorMatHyperDual object along the batch dimension (first dimension).
+     *
+     * @param index The integer index to select along the first dimension.
+     * @return A new TensorMatHyperDual object representing the selected slice.
+     * @throws std::out_of_range if the index is out of bounds.
+     */
+    TensorMatHyperDual index(int index) const {
+        // Validate the index range
+        if (index < 0 || index >= this->r.size(0)) {
+            throw std::out_of_range("Index out of bounds for the first dimension of TensorMatHyperDual.");
+        }
+
+        // Index the real, dual, and hyperdual parts
         auto real = this->r.index({index});
         auto dual = this->d.index({index});
         auto hyper = this->h.index({index});
+
+        // Return the selected slice as a new TensorMatHyperDual object
         return TensorMatHyperDual(real, dual, hyper);
     }
 
+    /**
+     * Index into the TensorMatHyperDual object using a boolean mask.
+     *
+     * This method extracts the elements of the real, dual, and hyperdual parts
+     * of the TensorMatHyperDual object based on a boolean mask. The mask must
+     * match the shape of the first dimension (batch dimension) of the object.
+     *
+     * @param mask A boolean torch::Tensor used for indexing.
+     * @return A new TensorMatHyperDual object containing the indexed elements.
+     * @throws std::invalid_argument if the mask shape is incompatible.
+     */
+    TensorMatHyperDual index(const torch::Tensor& mask) const {
+        // Validate that the mask is a boolean tensor
+        if (mask.scalar_type() != torch::kBool) {
+            throw std::invalid_argument("The mask must be a boolean tensor.");
+        }
 
-    TensorMatHyperDual index(const torch::Tensor& mask) {
+        // Validate that the mask matches the size of the first dimension
+        if (mask.sizes() != this->r.sizes().slice(0, 1).vec()) {
+            throw std::invalid_argument("The mask must match the size of the first dimension of TensorMatHyperDual.");
+        }
+
+        // Perform indexing on the real, dual, and hyperdual parts
         auto real = r.index({mask});
         auto dual = d.index({mask});
         auto hyper = h.index({mask});
+
+        // Return a new TensorMatHyperDual object with the indexed components
         return TensorMatHyperDual(real, dual, hyper);
     }
 
+    /**
+     * Index into the TensorMatHyperDual object using a vector of TensorIndex objects.
+     *
+     * This method performs advanced indexing on the real, dual, and hyperdual parts
+     * of the TensorMatHyperDual object using a vector of torch::indexing::TensorIndex.
+     * The indexing operation allows for slicing, masking, or selecting specific elements.
+     *
+     * @param indices A vector of torch::indexing::TensorIndex specifying the indexing.
+     * @return A new TensorMatHyperDual object containing the indexed components.
+     * @throws std::invalid_argument if the indexing fails or is incompatible.
+     */
+    TensorMatHyperDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
+        try {
+            // Perform indexing on the real, dual, and hyperdual parts
+            auto real = r.index(indices);
+            auto dual = d.index(indices);
+            auto hyper = h.index(indices);
 
-    TensorMatHyperDual index(const std::vector<TensorIndex>& index) {
-        auto real = r.index(index);
-        auto dual = d.index(index);
-        auto hyper = h.index(index);
-        return TensorMatHyperDual(real, dual, hyper);
+            // Return a new TensorMatHyperDual object with the indexed components
+            return TensorMatHyperDual(real, dual, hyper);
+        } catch (const std::exception& e) {
+            throw std::invalid_argument(std::string("Indexing failed: ") + e.what());
+        }
     }
 
+    /**
+     * Enable or disable gradient computation for the TensorMatHyperDual object.
+     *
+     * This method sets the `requires_grad` attribute for the real, dual, and hyperdual
+     * tensors of the TensorMatHyperDual object. It allows toggling the gradient tracking
+     * behavior for all components.
+     *
+     * @param req_grad A boolean value indicating whether gradients should be tracked.
+     */
     void requires_grad_(bool req_grad) {
         r.requires_grad_(req_grad);
         d.requires_grad_(req_grad);
         h.requires_grad_(req_grad);
     }
 
-    void backward() {
-        r.backward();
-        d.backward();
-        h.backward();
+    /**
+     * Compute gradients for the TensorMatHyperDual object.
+     *
+     * This method calls the `backward()` function on the real, dual, and hyperdual tensors.
+     * It ensures that gradient computation is only triggered for tensors with `requires_grad` enabled.
+     *
+     * @throws std::runtime_error if any tensor has more than one element and no gradient is specified.
+     */
+    void backward(const torch::optional<torch::Tensor>& grad_r = {}, 
+                const torch::optional<torch::Tensor>& grad_d = {}, 
+                const torch::optional<torch::Tensor>& grad_h = {}) {
+        // Check if gradients are required
+        if (r.requires_grad()) {
+            if (grad_r) {
+                r.backward(grad_r.value());
+            } else if (r.numel() == 1) {
+                r.backward();
+            } else {
+                throw std::runtime_error("Gradient for 'r' must be specified when it has more than one element.");
+            }
+        }
+
+        if (d.requires_grad()) {
+            if (grad_d) {
+                d.backward(grad_d.value());
+            } else if (d.numel() == 1) {
+                d.backward();
+            } else {
+                throw std::runtime_error("Gradient for 'd' must be specified when it has more than one element.");
+            }
+        }
+
+        if (h.requires_grad()) {
+            if (grad_h) {
+                h.backward(grad_h.value());
+            } else if (h.numel() == 1) {
+                h.backward();
+            } else {
+                throw std::runtime_error("Gradient for 'h' must be specified when it has more than one element.");
+            }
+        }
     }
+
+
 
 
     /**
@@ -3475,7 +4168,13 @@ public:
         return TensorHyperDual(std::move(r), std::move(d1 + d2), std::move(h));
     }
 
-
+    /**
+     * Static member function to perform einsum on two TensorDual objects
+     * Note this is more limited than the torch.einsum function
+     * as it only supports two arguments
+     * @param arg The einsum string specifying the operation.
+     * @param first The first TensorDual object.
+     */
     static TensorMatHyperDual einsum(const std::string& arg, 
                                      const TensorMatHyperDual& first, 
                                      const torch::Tensor& second) {
@@ -3499,7 +4198,15 @@ public:
         return TensorMatHyperDual(std::move(r), std::move(d), std::move(h));
     }
 
-
+    /**
+     * Static member function to perform einsum on two TensorDual objects
+     * Note this is more limited than the torch.einsum function
+     * as it only supports two arguments
+     * @param arg The einsum string specifying the operation.
+     * @param first The first TensorDual object.
+     * @param second The second TensorDual object.
+     * @return A new TensorDual object representing the result of the einsum operation.
+     */
     static TensorMatHyperDual einsum(const std::string& arg, 
                                      const TensorHyperDual& first, 
                                      const TensorMatHyperDual& second) {
@@ -3529,7 +4236,16 @@ public:
 
         return TensorMatHyperDual(std::move(r), std::move(d1r2 + r1d2), std::move(h));
     }
-
+    
+    /**
+     * Static member function to perform einsum on two TensorDual objects
+     * Note this is more limited than the torch.einsum function
+     * as it only supports two arguments
+     * @param arg The einsum string specifying the operation.
+     * @param first The first TensorDual object.
+     * @param second The second TensorDual object.
+     * @return A new TensorDual object representing the result of the einsum operation.
+     */
     static TensorMatHyperDual einsum(const std::string& arg, 
                                      const torch::Tensor& first, 
                                      const TensorMatHyperDual& second) {
@@ -3555,7 +4271,16 @@ public:
     }
 
 
-
+    /**
+     * Static member function to perform einsum on two TensorDual objects
+     * Note this is more limited than the torch.einsum function
+     * as it only supports two arguments
+     * @param arg The einsum string specifying the operation.
+     * @param first The first TensorDual object.
+     * @param second The second TensorDual object.
+     * @return A new TensorDual object representing the result of the einsum operation.
+     * @throws std::invalid_argument if the dimensions of the two objects are incompatible.
+     */
     static TensorMatHyperDual einsum(const std::string& arg, 
                                      const TensorMatHyperDual& first, 
                                      const TensorMatHyperDual& second) {
@@ -3586,51 +4311,155 @@ public:
                                   std::move(2*d1d2.unsqueeze(-1) + h1r2 + r1h2));
     }
 
+    /**
+     * In-place assignment to the TensorMatHyperDual object using a mask and a TensorHyperDual value.
+     *
+     * This method updates the elements of the real, dual, and hyperdual parts of the
+     * TensorMatHyperDual object in-place, using a boolean mask and values from a
+     * TensorHyperDual object. The mask determines which elements to update.
+     *
+     * @param mask A boolean torch::Tensor specifying the elements to update.
+     * @param value A TensorHyperDual object whose values will be assigned to the masked elements.
+     * @throws std::invalid_argument if the mask or value dimensions are incompatible.
+     */
     void index_put_(const torch::Tensor& mask, const TensorHyperDual& value) {
+        // Validate that the mask is a boolean tensor
+        if (mask.scalar_type() != torch::kBool) {
+            throw std::invalid_argument("The mask must be a boolean tensor.");
+        }
+
+        // Validate that the dimensions of the value match the broadcasted dimensions of the masked elements
+        if (value.r.sizes() != this->r.sizes().slice(1).vec() ||
+            value.d.sizes() != this->d.sizes().slice(1).vec() ||
+            value.h.sizes() != this->h.sizes().slice(1).vec()) {
+            throw std::invalid_argument("The value dimensions must match the broadcasted dimensions of the masked elements.");
+        }
+
+        // Perform in-place updates on the real, dual, and hyperdual parts
         this->r.index_put_({mask}, value.r.squeeze());
         this->d.index_put_({mask}, value.d.squeeze());
         this->h.index_put_({mask}, value.h.squeeze());
     }
 
+    /**
+     * In-place assignment to the TensorMatHyperDual object using a TensorIndex mask and a TensorHyperDual value.
+     *
+     * This method updates the elements of the real, dual, and hyperdual parts of the
+     * TensorMatHyperDual object in-place, using a TensorIndex mask and values from a
+     * TensorHyperDual object.
+     *
+     * @param mask A TensorIndex specifying the elements to update.
+     * @param value A TensorHyperDual object whose values will be assigned to the masked elements.
+     * @throws std::invalid_argument if the mask or value dimensions are incompatible.
+     */
+    void index_put_(const torch::indexing::TensorIndex& mask, const TensorHyperDual& value) {
+        // Ensure that the value dimensions are compatible
+        if (value.r.dim() != this->r.dim() - 1 || 
+            value.d.dim() != this->d.dim() - 1 || 
+            value.h.dim() != this->h.dim() - 1) {
+            throw std::invalid_argument("The value dimensions must be compatible with the TensorMatHyperDual structure.");
+        }
 
-    void index_put_(const TensorIndex& mask, const TensorHyperDual& value) {
+        // Perform in-place updates on the real, dual, and hyperdual parts
         this->r.index_put_({mask}, value.r.squeeze());
         this->d.index_put_({mask}, value.d.squeeze());
         this->h.index_put_({mask}, value.h.squeeze());
     }
 
+    /**
+     * In-place assignment to the TensorMatHyperDual object using a vector of TensorIndex and a TensorMatHyperDual value.
+     *
+     * This method updates the elements of the real, dual, and hyperdual parts of the
+     * TensorMatHyperDual object in-place using a vector of TensorIndex and values from
+     * another TensorMatHyperDual object.
+     *
+     * @param mask A vector of TensorIndex specifying the elements to update.
+     * @param value A TensorMatHyperDual object whose values will be assigned to the masked elements.
+     * @throws std::invalid_argument if the mask or value dimensions are incompatible.
+     */
+    void index_put_(const std::vector<torch::indexing::TensorIndex>& mask, const TensorMatHyperDual& value) {
+        // Validate that the dimensions of the value match the expected shape for the masked elements
+        auto r_masked_shape = this->r.index(mask).sizes();
+        if (value.r.sizes() != r_masked_shape || 
+            value.d.sizes() != this->d.index(mask).sizes() || 
+            value.h.sizes() != this->h.index(mask).sizes()) {
+            throw std::invalid_argument("The value dimensions must match the shape of the selected elements in TensorMatHyperDual.");
+        }
 
-    void index_put_(const std::vector<TensorIndex>& mask, const TensorHyperDual& value) {
+        // Perform in-place updates on the real, dual, and hyperdual parts
         this->r.index_put_(mask, value.r);
         this->d.index_put_(mask, value.d);
         this->h.index_put_(mask, value.h);
     }
 
-    void index_put_(const std::vector<TensorIndex>& mask, const TensorMatHyperDual& value) {
-        this->r.index_put_(mask, value.r);
-        this->d.index_put_(mask, value.d);  
-        this->h.index_put_(mask, value.h);
+    /**
+     * In-place assignment to the TensorMatHyperDual object using a vector of TensorIndex and a scalar value.
+     *
+     * This method updates the elements of the real part of the TensorMatHyperDual object
+     * with a scalar value while setting the corresponding dual and hyperdual parts to zero.
+     *
+     * @param mask A vector of TensorIndex specifying the elements to update.
+     * @param value A scalar value (double) to assign to the real part.
+     */
+    void index_put_(const std::vector<torch::indexing::TensorIndex>& mask, const double& value) {
+        // Update the real part with the scalar value
+        this->r.index_put_({mask}, value);
+
+        // Set the corresponding dual and hyperdual parts to zero
+        this->d.index_put_({mask}, 0.0);
+        this->h.index_put_({mask}, 0.0);
     }
 
     
+    /**
+     * In-place assignment to the TensorMatHyperDual object using a vector of TensorIndex and a torch::Tensor value.
+     *
+     * This method updates the elements of the real part of the TensorMatHyperDual object
+     * using a given torch::Tensor value, while setting the corresponding dual and hyperdual
+     * parts to zero.
+     *
+     * @param mask A vector of TensorIndex specifying the elements to update.
+     * @param value A torch::Tensor specifying the values to assign to the real part.
+     * @throws std::invalid_argument if the dimensions of the value tensor do not match the selected elements.
+     */
+    void index_put_(const std::vector<torch::indexing::TensorIndex>& mask, const torch::Tensor& value) {
+        // Validate that the value tensor's dimensions match the shape of the selected elements
+        auto r_masked_shape = this->r.index(mask).sizes();
+        if (value.sizes() != r_masked_shape) {
+            throw std::invalid_argument("The value tensor's dimensions must match the shape of the selected elements in the real part.");
+        }
 
-    void index_put_(const std::vector<TensorIndex>& mask, const double& value) {
+        // Update the real part with the given tensor value
         this->r.index_put_({mask}, value);
+
+        // Set the corresponding dual and hyperdual parts to zero
         this->d.index_put_({mask}, 0.0);
         this->h.index_put_({mask}, 0.0);
     }
 
-    void index_put_(const std::vector<TensorIndex>& mask, const torch::Tensor& value) {
-        this->r.index_put_({mask}, value);
-        this->d.index_put_({mask}, 0.0);
-        this->h.index_put_({mask}, 0.0);
-    }
-
-
+    /**
+     * Convert a TensorHyperDual to a TensorMatHyperDual by adding a singleton dimension.
+     *
+     * This method takes a TensorHyperDual object and creates a TensorMatHyperDual object
+     * by unsqueezing a specified dimension in the real, dual, and hyperdual parts.
+     *
+     * @param x The TensorHyperDual object to be converted.
+     * @param dim The dimension to unsqueeze (add a singleton dimension).
+     * @return A TensorMatHyperDual object with the specified dimension unsqueezed.
+     * @throws std::invalid_argument if the dimension is out of range.
+     */
     static TensorMatHyperDual unsqueeze(const TensorHyperDual& x, int dim) {
+        // Validate that the dimension is within the valid range for unsqueezing
+        if (dim < 0 || dim > x.r.dim()) {
+            throw std::invalid_argument("Dimension out of range for unsqueeze operation.");
+        }
+
+        // Unsqueeze the real, dual, and hyperdual parts
         auto r = x.r.unsqueeze(dim);
         auto d = x.d.unsqueeze(dim);
         auto h = x.h.unsqueeze(dim);
+
+        // Create and return a TensorMatHyperDual object
         return TensorMatHyperDual(r, d, h);
     }
 
