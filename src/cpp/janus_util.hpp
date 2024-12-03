@@ -221,6 +221,33 @@ namespace janus {
     }
   }
 
+
+    /**
+     * @brief Check if two tensors are broadcast-compatible.
+     *
+     * This function checks if two tensors' shapes can be broadcast together according to PyTorch's broadcasting rules.
+     *
+     * @param sizes1 The shape of the first tensor.
+     * @param sizes2 The shape of the second tensor.
+     * @return True if the tensors are broadcast-compatible; otherwise, false.
+     */
+    bool are_broadcast_compatible(const torch::IntArrayRef& sizes1, const torch::IntArrayRef& sizes2) {
+        auto it1 = sizes1.rbegin(); // Reverse iterator for sizes1
+        auto it2 = sizes2.rbegin(); // Reverse iterator for sizes2
+
+        // Compare dimensions from the trailing end
+        while (it1 != sizes1.rend() && it2 != sizes2.rend()) {
+            if (*it1 != *it2 && *it1 != 1 && *it2 != 1) {
+                return false; // Not broadcast-compatible
+            }
+            ++it1;
+            ++it2;
+        }
+
+        // If we haven't exited early, the tensors are broadcast-compatible
+        return true;
+    }
+
   // Function to compute Tucker decomposition (HOSVD)
   void tuckerDecomposition(const torch::Tensor& tensor,
                          torch::Tensor& core,
