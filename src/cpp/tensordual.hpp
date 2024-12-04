@@ -8755,9 +8755,8 @@ TensorMatDual ger(const TensorDual& x, const TensorDual& y) {
     return TensorMatDual(r, d1 + d2);
 }
 
-TensorDual defaultTensorDual = TensorDual::createZero(torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kFloat64)), 1);
 
-
+}
 
 
 
