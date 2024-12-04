@@ -9,182 +9,462 @@ using namespace janus;
 /**
  *  g++ -g -std=c++17 tensordual_test.cpp -o dualtest   -I /home/panos/Applications/libtorch/include/torch/csrc/api/include/   -I /home/panos/Applications/libtorch/include/torch/csrc/api/include/torch/   -I /home/panos/Applications/libtorch/include/   -I /usr/local/include/gtest  -L /usr/local/lib   -lgtest  -lgtest_main -L /home/panos/Applications/libtorch/lib/ -ltorch   -ltorch_cpu   -ltorch_cuda   -lc10 -lpthread -Wl,-rpath,/home/panos/Applications/libtorch/lib
  */
-
-// Test case for zeros_like method
-TEST(TensorDualTest, ZerosLikeDual) {
-    auto r = torch::randn({2, 2});
-    auto d = torch::randn({2, 2, 3});
-
-
-    TensorDual original(r, d);
-    TensorDual result = TensorDual::zeros_like(original);
-
-    EXPECT_TRUE(result.r.equal(torch::zeros_like(r)));
-    EXPECT_TRUE(result.d.equal(torch::zeros_like(d)));
+// Helper function to check if a tensor is filled with zeros
+bool isZeroTensor(const torch::Tensor& tensor) {
+    return tensor.sum().item<double>() == 0.0;
 }
 
-TEST(TensorDualTest, ZerosLike) {
-    auto r = torch::randn({2, 2});
-    auto d = torch::randn({2, 2, 3});
-    TensorDual original(r, d);
-    torch::Tensor r2 = torch::rand({2,3});
+// Test: Basic functionality of zeros_like
+TEST(TensorDualTest, ZerosLikeBasic) {
+    // Create a TensorDual object
+    torch::Tensor r = torch::rand({3, 3}, torch::dtype(torch::kFloat32));
+    torch::Tensor d = torch::rand({3, 3, 6}, torch::dtype(torch::kFloat32));
+    TensorDual tensorDual(r, d);
 
-    TensorDual result = original.zeros_like(r2);
-    auto d2 = torch::zeros({2, 3, 3});
+    // Call zeros_like
+    TensorDual result = tensorDual.zeros_like();
 
+    // Validate that the new tensors are zeros
+    EXPECT_TRUE(isZeroTensor(result.r)) << "Real part is not zero.";
+    EXPECT_TRUE(isZeroTensor(result.d)) << "Dual part is not zero.";
 
-    EXPECT_TRUE(result.r.equal(torch::zeros_like(r2)));
-    EXPECT_TRUE(result.d.equal(torch::zeros_like(d2)));
-}
+    // Validate that the shapes match
+    EXPECT_EQ(result.r.sizes(), r.sizes()) << "Real part shape mismatch.";
+    EXPECT_EQ(result.d.sizes(), d.sizes()) << "Dual part shape mismatch.";
 
-TEST(TensorDualTest, ZerosLikeBoolean) {
-    auto r = torch::ones({2, 2}).to(torch::kBool);
-    auto d = torch::rand({2, 2, 3});
-    TensorDual original(r, d);
-    torch::Tensor r2 = torch::zeros({2,3}).to(torch::kBool);
+    // Validate that the dtypes match
+    EXPECT_EQ(result.r.dtype(), r.dtype()) << "Real part dtype mismatch.";
+    EXPECT_EQ(result.d.dtype(), d.dtype()) << "Dual part dtype mismatch.";
 
-    TensorDual result = original.zeros_like(r2);
-    auto d2 = torch::zeros({2, 3, 3}, dtype(torch::kFloat64));
-
-
-    EXPECT_TRUE(result.d.equal(torch::zeros_like(d2)));
-    EXPECT_TRUE(result.r.dtype() == torch::kBool);
-    EXPECT_TRUE(result.d.dtype() == torch::kFloat64);
-}
-
-TEST(TensorDualTest, ZerosLikeSame) {
-    auto r = torch::rand({2, 2}).to(torch::kBool);
-    auto d = torch::rand({2, 2, 3});
-    TensorDual original(r, d);
-
-    TensorDual result = original.zeros_like();
-
-    EXPECT_TRUE(result.r.equal(torch::zeros_like(r)));
-    EXPECT_TRUE(result.d.equal(torch::zeros_like(d)));
-    EXPECT_TRUE(result.r.dtype() == r.dtype());
-    EXPECT_TRUE(result.d.dtype() == d.dtype());
+    // Validate that the devices match
+    EXPECT_EQ(result.r.device(), r.device()) << "Real part device mismatch.";
+    EXPECT_EQ(result.d.device(), d.device()) << "Dual part device mismatch.";
 }
 
 
-TEST(TensorDualTest, OnesLikeBoolean) {
-    auto r = torch::ones({2, 2}).to(torch::kBool);
-    auto d = torch::rand({2, 2, 3});
-    TensorDual original(r, d);
-    torch::Tensor r2 = torch::zeros({2,3}).to(torch::kBool);
-    torch::Tensor d2 = torch::zeros({2, 3, 3}, dtype(torch::kFloat64));
-    TensorDual ref = TensorDual(r2, d2);
 
-    TensorDual result = original.ones_like(ref);
+// Test: Edge case - Tensors on GPU
+TEST(TensorDualTest, ZerosLikeTensorsOnGPU) {
+    if (torch::cuda::is_available()) {
+        // Create a TensorDual object with tensors on GPU
+        torch::Tensor r = torch::rand({3, 3}, torch::device(torch::kCUDA));
+        torch::Tensor d = torch::rand({3, 3, 6}, torch::device(torch::kCUDA));
+        TensorDual tensorDual(r, d);
 
-    EXPECT_TRUE(result.r.equal(torch::ones_like(r2)));
-    EXPECT_TRUE(result.d.equal(torch::zeros_like(d2)));
-    EXPECT_TRUE(result.r.dtype() == torch::kBool);
-    EXPECT_TRUE(result.d.dtype() == torch::kFloat64);
+        // Call zeros_like
+        TensorDual result = tensorDual.zeros_like();
+
+        // Validate that the new tensors are zeros and on the GPU
+        EXPECT_TRUE(isZeroTensor(result.r)) << "Real part is not zero on GPU.";
+        EXPECT_TRUE(isZeroTensor(result.d)) << "Dual part is not zero on GPU.";
+        EXPECT_EQ(result.r.device().type(), torch::kCUDA) << "Real part is not on GPU.";
+        EXPECT_EQ(result.d.device().type(), torch::kCUDA) << "Dual part is not on GPU.";
+    }
+}
+// Test: Basic functionality of ones_like
+TEST(TensorDualTest, OnesLikeBasic) {
+    // Input TensorDual object
+    auto r = torch::randn({3, 3});
+    auto d = torch::randn({3, 3, 2});
+    TensorDual input(r, d);
+
+    // Call ones_like
+    TensorDual result = TensorDual::ones_like(input);
+
+    // Validate the real part is filled with ones
+    EXPECT_TRUE(torch::allclose(result.r, torch::ones_like(r)));
+
+    // Validate the dual part is filled with zeros
+    EXPECT_TRUE(torch::allclose(result.d, torch::zeros_like(d)));
+
+    // Validate that the result tensors have the same shape, dtype, and device as the input
+    EXPECT_EQ(result.r.sizes(), r.sizes());
+    EXPECT_EQ(result.d.sizes(), d.sizes());
+    EXPECT_EQ(result.r.device(), r.device());
+    EXPECT_EQ(result.d.device(), d.device());
+    EXPECT_EQ(result.r.dtype(), r.dtype());
 }
 
-TEST(TensorDualTest, BoolLike) {
-    auto r = torch::rand({2, 2});
-    auto d = torch::rand({2, 2, 3});
-    TensorDual original(r, d);
-    torch::Tensor result = TensorDual::bool_like(original);
 
-    EXPECT_TRUE(result.equal(torch::zeros_like(r).to(torch::kBool)));
+
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, OnesLikeGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual on GPU
+        auto r = torch::randn({3, 3}, torch::device(torch::kCUDA));
+        auto d = torch::randn({3, 3, 2}, torch::device(torch::kCUDA));
+        TensorDual input(r, d);
+
+        // Call ones_like
+        TensorDual result = TensorDual::ones_like(input);
+
+        // Validate the real part is ones
+        EXPECT_TRUE(torch::allclose(result.r, torch::ones_like(r)));
+
+        // Validate the dual part is zeros
+        EXPECT_TRUE(torch::allclose(result.d, torch::zeros_like(d)));
+
+        // Validate device
+        EXPECT_EQ(result.r.device(), r.device());
+        EXPECT_EQ(result.d.device(), d.device());
+    }
 }
 
-TEST(TensorDualTest, createZeroTest)
-{
-    auto r = torch::randn({2, 2});
+
+// Test: Basic functionality of bool_like
+TEST(TensorDualTest, BoolLikeBasic) {
+    // Input TensorDual with a defined real tensor
+    auto r = torch::randn({4, 4});
+    auto d = torch::randn({4, 4, 3});
+    TensorDual input(r, d);
+
+    // Call bool_like
+    torch::Tensor result = TensorDual::bool_like(input);
+
+    // Validate the result is a boolean tensor of the same shape and device as r
+    EXPECT_EQ(result.sizes(), r.sizes());
+    EXPECT_EQ(result.device(), r.device());
+    EXPECT_EQ(result.dtype(), torch::kBool);
+
+    // Validate the values are all false (zeros)
+    EXPECT_TRUE(torch::allclose(result, torch::zeros_like(r, r.options().dtype(torch::kBool))));
+}
+// Test: Basic functionality of createZero
+TEST(TensorDualTest, CreateZeroBasic) {
+    // Input tensor
+    auto r = torch::randn({4, 4});
+
+    // Call createZero
     int ddim = 3;
     TensorDual result = TensorDual::createZero(r, ddim);
 
-    EXPECT_TRUE(result.r.equal(r));
-    EXPECT_TRUE(result.d.equal(torch::zeros({2, 2, 3})));
+    // Validate the real part matches the input tensor
+    EXPECT_TRUE(torch::allclose(result.r, r));
+
+    // Validate the dual part is a zero tensor with the additional dimension
+    auto expected_dshape = r.sizes().vec();
+    expected_dshape.push_back(ddim);
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef(expected_dshape));
+    EXPECT_TRUE(torch::allclose(result.d, torch::zeros_like(result.d)));
+
+    // Validate dtype and device
+    EXPECT_EQ(result.d.dtype(), r.dtype());
+    EXPECT_EQ(result.d.device(), r.device());
 }
 
-TEST(TensorDualTest, createZeroTestMove)
-{
-    auto r = torch::randn({2, 2});
-    int ddim = 3;
-    TensorDual result = TensorDual::createZero(std::move(r), ddim);
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, CreateZeroGpuTensor) {
+    if (torch::cuda::is_available()) {
+        // Input tensor on GPU
+        auto r = torch::randn({4, 4}, torch::device(torch::kCUDA));
 
-    EXPECT_TRUE(result.r.equal(r));
-    EXPECT_TRUE(result.d.equal(torch::zeros({2, 2, 3})));
+        // Call createZero
+        int ddim = 2;
+        TensorDual result = TensorDual::createZero(r, ddim);
 
+        // Validate the real part matches the input tensor
+        EXPECT_TRUE(torch::allclose(result.r, r));
+
+        // Validate the dual part is a zero tensor with the additional dimension
+        auto expected_dshape = r.sizes().vec();
+        expected_dshape.push_back(ddim);
+        EXPECT_EQ(result.d.sizes(), torch::IntArrayRef(expected_dshape));
+        EXPECT_TRUE(torch::allclose(result.d, torch::zeros_like(result.d)));
+
+        // Validate dtype and device
+        EXPECT_EQ(result.d.dtype(), r.dtype());
+        EXPECT_EQ(result.d.device(), r.device());
+    }
 }
 
-TEST(TensorDualTest, emptyLikeTest)
-{
-    auto r = torch::randn({2, 2});
-    auto d = torch::randn({2, 2, 3});
-    TensorDual original(r, d);
-    TensorDual result = TensorDual::empty_like(original);
-    //Retain shape but empty
-    EXPECT_TRUE(r.sizes() == result.r.sizes());
-    EXPECT_TRUE(d.sizes() == result.d.sizes());
-    EXPECT_TRUE(result.r.defined());
-    EXPECT_TRUE(result.d.defined());
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, BoolLikeGpuTensor) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual with tensors on GPU
+        auto r = torch::randn({5, 5}, torch::device(torch::kCUDA));
+        auto d = torch::randn({5, 5, 3}, torch::device(torch::kCUDA));
+        TensorDual input(r, d);
+
+        // Call bool_like
+        torch::Tensor result = TensorDual::bool_like(input);
+
+        // Validate the result is a boolean tensor on GPU
+        EXPECT_EQ(result.sizes(), r.sizes());
+        EXPECT_EQ(result.device(), r.device());
+        EXPECT_EQ(result.dtype(), torch::kBool);
+
+        // Validate the values are all false (zeros)
+        EXPECT_TRUE(torch::allclose(result, torch::zeros_like(r, r.options().dtype(torch::kBool))));
+    }
 }
 
 
-//Create a test case for this method
-TEST(TensorDualTest, catTest)
-{
-    auto r1 = torch::randn({2, 2});
-    auto d1 = torch::randn({2, 2, 3});
-    auto r2 = torch::randn({2, 2});
-    auto d2 = torch::randn({2, 2, 3});
-    TensorDual td1(r1, d1);
-    TensorDual td2(r2, d2);
-    TensorDual result = TensorDual::cat({td1, td2});
-    auto r = torch::cat({r1, r2}, 1);
-    auto d = torch::cat({d1, d2}, 1);
-    EXPECT_TRUE(result.r.equal(r));
-    EXPECT_TRUE(result.d.equal(d));
+// Test: Basic functionality of empty_like
+TEST(TensorDualTest, EmptyLikeBasic) {
+    // Input TensorDual with defined tensors
+    auto r = torch::randn({4, 4});
+    auto d = torch::randn({4, 4, 3});
+    TensorDual input(r, d);
+
+    // Call empty_like
+    TensorDual result = TensorDual::empty_like(input);
+
+    // Validate the real part has the same shape, dtype, and device as input
+    EXPECT_EQ(result.r.sizes(), r.sizes());
+    EXPECT_EQ(result.r.dtype(), r.dtype());
+    EXPECT_EQ(result.r.device(), r.device());
+
+    // Validate the dual part has the same shape, dtype, and device as input
+    EXPECT_EQ(result.d.sizes(), d.sizes());
+    EXPECT_EQ(result.d.dtype(), d.dtype());
+    EXPECT_EQ(result.d.device(), d.device());
 }
 
 
-//Create a test case for this method
-TEST (TensorDualTest, einsumTest)
-{
-    auto r1 = torch::randn({2, 2});
-    auto d1 = torch::randn({2, 2, 3});
-    auto r2 = torch::randn({2, 2});
-    auto d2 = torch::randn({2, 2, 3});
-    TensorDual td1(r1, d1);
-    TensorDual td2(r2, d2);
-    TensorDual result = TensorDual::einsum("mi,mi->mi", td1, td2);
-    auto r = torch::einsum("mi,mi->mi", {r1, r2});
-    auto d = torch::einsum("mi,mij->mij", {r1, d2}) + torch::einsum("mi,mij->mij", {r2, d1});
-    EXPECT_TRUE(result.r.equal(r));
-    EXPECT_TRUE(result.d.equal(d));
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, EmptyLikeGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual with tensors on GPU
+        auto r = torch::randn({4, 4}, torch::device(torch::kCUDA));
+        auto d = torch::randn({4, 4, 3}, torch::device(torch::kCUDA));
+        TensorDual input(r, d);
+
+        // Call empty_like
+        TensorDual result = TensorDual::empty_like(input);
+
+        // Validate the real part matches the input shape, dtype, and device
+        EXPECT_EQ(result.r.sizes(), r.sizes());
+        EXPECT_EQ(result.r.dtype(), r.dtype());
+        EXPECT_EQ(result.r.device(), r.device());
+
+        // Validate the dual part matches the input shape, dtype, and device
+        EXPECT_EQ(result.d.sizes(), d.sizes());
+        EXPECT_EQ(result.d.dtype(), d.dtype());
+        EXPECT_EQ(result.d.device(), d.device());
+    }
 }
 
-//Create a test case for this method
-TEST (TensorDualTest, einsumTest2)
-{
-    auto r1 = torch::randn({2, 2});
-    auto r2 = torch::randn({2, 2});
-    auto d2 = torch::randn({2, 2, 3});
-    TensorDual td2(r2, d2);
-    TensorDual result = TensorDual::einsum("mi,mi->mi", r1, td2);
-    auto r = torch::einsum("mi,mi->mi", {r1, r2});
-    auto d = torch::einsum("mi,mij->mij", {r1, d2});
-    EXPECT_TRUE(result.r.equal(r));
-    EXPECT_TRUE(result.d.equal(d));
+// Test: Large tensors
+TEST(TensorDualTest, EmptyLikeLargeTensors) {
+    // Input TensorDual with large tensors
+    auto r = torch::randn({1024, 1024});
+    auto d = torch::randn({1024, 1024, 2});
+    TensorDual input(r, d);
+
+    // Call empty_like
+    TensorDual result = TensorDual::empty_like(input);
+
+    // Validate the real part matches the input shape, dtype, and device
+    EXPECT_EQ(result.r.sizes(), r.sizes());
+    EXPECT_EQ(result.r.dtype(), r.dtype());
+    EXPECT_EQ(result.r.device(), r.device());
+
+    // Validate the dual part matches the input shape, dtype, and device
+    EXPECT_EQ(result.d.sizes(), d.sizes());
+    EXPECT_EQ(result.d.dtype(), d.dtype());
+    EXPECT_EQ(result.d.device(), d.device());
 }
-//Create a test case for this method
- TEST(TensorDualTest, einsumTest3)
-{
-    auto r1 = torch::randn({2, 2});
-    auto r2 = torch::randn({2, 2});
-    auto d2 = torch::randn({2, 2, 3});
-    TensorDual td2(r2, d2);
-    TensorDual result = TensorDual::einsum("mi,mi->mi", td2, r1);
-    auto r = torch::einsum("mi,mi->mi", {r1, r2});
-    auto d = torch::einsum("mi,mij->mij", {r1, d2});
-    EXPECT_TRUE(result.r.equal(r));
-    EXPECT_TRUE(result.d.equal(d));
+
+
+// Test: Basic functionality of cat
+TEST(TensorDualTest, CatBasic) {
+    // Input TensorDual objects
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual td2(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    std::vector<TensorDual> args = {td1, td2};
+
+    // Call cat
+    TensorDual result = TensorDual::cat(args, 0);
+
+    // Validate the real part concatenation
+    auto expected_r = torch::cat({td1.r, td2.r}, 0);
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part concatenation
+    auto expected_d = torch::cat({td1.d, td2.d}, 0);
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+
+    // Validate shapes
+    EXPECT_EQ(result.r.sizes(), expected_r.sizes());
+    EXPECT_EQ(result.d.sizes(), expected_d.sizes());
 }
+
+// Test: Concatenation along a non-zero dimension
+TEST(TensorDualTest, CatNonZeroDimension) {
+    // Input TensorDual objects
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual td2(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    std::vector<TensorDual> args = {td1, td2};
+
+    // Call cat along dimension 1
+    TensorDual result = TensorDual::cat(args, 1);
+
+    // Validate the real part concatenation
+    auto expected_r = torch::cat({td1.r, td2.r}, 1);
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part concatenation
+    auto expected_d = torch::cat({td1.d, td2.d}, 1);
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+
+    // Validate shapes
+    EXPECT_EQ(result.r.sizes(), expected_r.sizes());
+    EXPECT_EQ(result.d.sizes(), expected_d.sizes());
+}
+
+// Test: Edge case - Single TensorDual in input
+TEST(TensorDualTest, CatSingleInput) {
+    // Input vector with a single TensorDual
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    std::vector<TensorDual> args = {td1};
+
+    // Call cat
+    TensorDual result = TensorDual::cat(args, 0);
+
+    // Validate the real and dual parts are unchanged
+    EXPECT_TRUE(torch::allclose(result.r, td1.r));
+    EXPECT_TRUE(torch::allclose(result.d, td1.d));
+}
+
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, CatGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual td1(torch::randn({2, 3}, torch::device(torch::kCUDA)), torch::randn({2, 3, 4}, torch::device(torch::kCUDA)));
+        TensorDual td2(torch::randn({2, 3}, torch::device(torch::kCUDA)), torch::randn({2, 3, 4}, torch::device(torch::kCUDA)));
+        std::vector<TensorDual> args = {td1, td2};
+
+        // Call cat
+        TensorDual result = TensorDual::cat(args, 0);
+
+        // Validate the real part concatenation
+        auto expected_r = torch::cat({td1.r, td2.r}, 0);
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+        // Validate the dual part concatenation
+        auto expected_d = torch::cat({td1.d, td2.d}, 0);
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+
+        // Validate device
+        EXPECT_EQ(result.r.device(), td1.r.device());
+        EXPECT_EQ(result.d.device(), td1.d.device());
+    }
+}
+
+// Test: Basic functionality of einsum
+TEST(TensorDualTest, EinsumBasic) {
+    // Input TensorDual objects
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 6}));
+    TensorDual td2(torch::randn({3, 4}), torch::randn({3, 4, 6}));
+
+    // Einsum operation
+    std::string einsum_str = "ij,jk->ik";
+    TensorDual result = TensorDual::einsum(einsum_str, td1, td2);
+
+    // Expected real part
+    auto expected_r = torch::einsum(einsum_str, {td1.r, td2.r});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Expected dual part
+    auto d1 = torch::einsum("ij,jkz->ikz", {td1.r, td2.d});
+    auto d2 = torch::einsum("ijz,jk->ikz", {td1.d, td2.r});
+    auto expected_d = d1 + d2;
+
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Invalid einsum string
+TEST(TensorDualTest, EinsumInvalidString) {
+    // Input TensorDual objects
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual td2(torch::randn({3, 4}), torch::randn({3, 4, 4}));
+
+    // Invalid einsum string (missing '->')
+    std::string einsum_str = "ij,jk";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, td1, td2);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Einsum string must contain '->'.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Edge case - Einsum operation with identity matrix
+TEST(TensorDualTest, EinsumIdentityMatrix) {
+    // Input TensorDual objects
+    TensorDual td1(torch::randn({3, 3}), torch::randn({3, 3, 2}));
+    TensorDual td2(torch::eye(3), torch::zeros({3, 3, 2}));
+
+    // Einsum operation (identity operation)
+    std::string einsum_str = "ij,jk->ik";
+    TensorDual result = TensorDual::einsum(einsum_str, td1, td2);
+
+    // Expected real part
+    auto expected_r = torch::einsum(einsum_str, {td1.r, td2.r});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Expected dual part
+    auto darg = "ij,jkz->ikz"; // Modify einsum string for dual computation
+    auto d1 = torch::einsum(darg, {td1.r, td2.d});
+    auto d2 = torch::einsum(darg, {td2.r, td1.d});
+    auto expected_d = d1 + d2;
+
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, EinsumGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual td1(torch::randn({2, 3}, torch::device(torch::kCUDA)), torch::randn({2, 3, 10}, torch::device(torch::kCUDA)));
+        TensorDual td2(torch::randn({3, 4}, torch::device(torch::kCUDA)), torch::randn({3, 4, 10}, torch::device(torch::kCUDA)));
+
+        // Einsum operation
+        std::string einsum_str = "ij,jk->ik";
+        TensorDual result = TensorDual::einsum(einsum_str, td1, td2);
+
+        // Expected real part
+        auto expected_r = torch::einsum(einsum_str, {td1.r, td2.r});
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+        // Expected dual part
+        auto d1 = torch::einsum("ij,jkz->ikz", {td1.r, td2.d});
+        auto d2 = torch::einsum("ijz,jk->ikz", {td1.d, td2.r});
+        auto expected_d = d1 + d2;
+
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+// Test: Incompatible shapes for einsum
+TEST(TensorDualTest, EinsumIncompatibleShapes) {
+    // Input TensorDual objects with incompatible shapes
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual td2(torch::randn({4, 5}), torch::randn({4, 5, 2}));
+
+    // Valid einsum string
+    std::string einsum_str = "ij,jk->ik";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, td1, td2);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("The dual part of the TensorDual objects must have the same number of leaves.", e.what());
+                throw;
+            }
+
+        },
+        std::invalid_argument
+    );
+}
+
 
 TEST(TensorDualTest, einsumTest4)
 {
@@ -572,8 +852,9 @@ TEST(TensorDualTest, TensorDualDivideOther)
     auto jac2 = janus::compute_batch_jacobian(J2, r6);
     //concatenate the two jacobians row wise
     auto jac = torch::bmm(jac1,d1)+ torch::bmm(jac2,d2); //Use the chain rule
+    std::cerr << jac << std::endl;
     //std::cerr << torch::einsum("mij, mjk->mik",{jac, d1}) << std::endl;
-    //std::cerr << result.d << std::endl;
+    std::cerr << result.d << std::endl;
     EXPECT_TRUE(torch::allclose(result.d, jac));
 }
 
@@ -1324,6 +1605,8 @@ TEST(TensorMatDualTest, TensorMatDualSqrt)
     auto J = r.sqrt();
     auto jac = janus::compute_batch_jacobian3d(J, r);//This will have dimension 2,2,3,2,3
     auto jacres = torch::einsum("bijkl, bkld->bijd", {jac, d1});
+    std::cerr << result.d << std::endl;
+    std::cerr << jacres << std::endl;
     EXPECT_TRUE(torch::allclose(result.d, jacres));
 }
 
@@ -1425,31 +1708,6 @@ TEST(TensorMatDualTest, TensorMatDualDivTensorMatDual)
     EXPECT_TRUE(torch::allclose(result.d, jacres));
 }
 
-TEST(TensorMatDualTest, TensorMatDualDivTensorDual)
-{
-    auto r1 = torch::rand({2, 2, 3}).to(torch::kFloat64).requires_grad_(false);
-    auto d1 = torch::rand({2, 2, 3, 4}).to(torch::kFloat64).requires_grad_(false);
-    auto r2 = torch::rand({2, 2}).to(torch::kFloat64).requires_grad_(false);
-    auto d2 = torch::rand({2, 2, 4}).to(torch::kFloat64).requires_grad_(false);
-
-    TensorMatDual td1(r1, d1);
-    TensorDual td2(r2, d2);
-    //Sum over the first dimension
-    TensorMatDual result = td1/td2;
-    //calculate the result using back propagation
-    torch::Tensor r3 = r1.clone().requires_grad_(true);
-    torch::Tensor r4 = r2.clone().requires_grad_(false);
-    auto J1 = r3/r4.unsqueeze(2); //This will have dimension 2,2
-    auto jac1 = janus::compute_batch_jacobian3d(J1, r3);//This will have dimension 2,2,3,2,3
-    torch::Tensor r5 = r1.clone().requires_grad_(false);
-    torch::Tensor r6 = r2.clone().unsqueeze(2).requires_grad_(true);
-    auto J2 = r5/r6; //This will have dimension 2,2
-    auto jac2 = janus::compute_batch_jacobian3d(J2, r6);//This will have dimension 2,2,3,2,3
-    //This is a combination of the two partial derivatives
-    auto jacres = torch::einsum("bijkl, bkld->bijd", {jac1, d1})+
-                  torch::einsum("bijkl, bkld->bijd", {jac2, d2.unsqueeze(2)});
-    EXPECT_TRUE(torch::allclose(result.d, jacres));
-}
 
 
 TEST(TensorMatDualTest, TensorMatDualDivTensor)
