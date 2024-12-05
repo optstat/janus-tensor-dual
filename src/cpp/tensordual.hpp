@@ -815,6 +815,8 @@ public:
      * This static method extends the torch.einsum function to operate on a vector of TensorDual objects.
      * It computes the einsum for the real and dual parts of the tensors, handling dual dimensions 
      * by reserving "z" as an implied dimension.
+     * The limitation in the vectorized einsum is that the dual part of each tensor 
+     * must have the same number of leaves.
      * 
      * @param arg The einsum string specifying the operation (must include "->" and cannot contain "z").
      * @param tensors A vector of TensorDual objects (must not be empty, and all elements must be valid).
@@ -876,6 +878,7 @@ public:
                     "z->" + 
                     arg.substr(posa + 2) + "z";
             }
+            std::cerr << darg << std::endl;
 
             // Accumulate the dual computation
             d = d + torch::einsum(darg, r_tensorsc);

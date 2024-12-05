@@ -465,6 +465,482 @@ TEST(TensorDualTest, EinsumIncompatibleShapes) {
     );
 }
 
+// Test: Basic functionality of einsum with Tensor and TensorDual
+TEST(TensorDualTest, EinsumTensorAndTensorDualBasic) {
+    // Input Tensor and TensorDual
+    torch::Tensor first = torch::randn({2, 3});
+    TensorDual second(torch::randn({3, 4}), torch::randn({3, 4, 5}));
+
+    // Einsum operation
+    std::string einsum_str = "ij,jk->ik";
+    TensorDual result = TensorDual::einsum(einsum_str, first, second);
+
+    // Expected real part
+    auto expected_r = torch::einsum(einsum_str, {first, second.r});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Expected dual part
+    auto darg = "ij,jkz->ikz"; // Modify einsum string for dual computation
+    auto expected_d = torch::einsum(darg, {first, second.d});
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Invalid einsum string
+TEST(TensorDualTest, EinsumTensorAndTensorDualInvalidString) {
+    // Input Tensor and TensorDual
+    torch::Tensor first = torch::randn({2, 3});
+    TensorDual second(torch::randn({3, 4}), torch::randn({3, 4, 5}));
+
+    // Invalid einsum string (missing '->')
+    std::string einsum_str = "ij,jk";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, first, second);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Einsum string must contain '->'.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: Edge case - Einsum operation with identity matrix
+TEST(TensorDualTest, EinsumTensorAndTensorDualIdentityMatrix) {
+    // Input Tensor and TensorDual
+    torch::Tensor first = torch::eye(3); // Identity matrix
+    TensorDual second(torch::randn({3, 3}), torch::randn({3, 3, 2}));
+
+    // Einsum operation
+    std::string einsum_str = "ij,jk->ik";
+    TensorDual result = TensorDual::einsum(einsum_str, first, second);
+
+    // Expected real part
+    auto expected_r = torch::einsum(einsum_str, {first, second.r});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Expected dual part
+    auto darg = "ij,jkz->ikz"; // Modify einsum string for dual computation
+    auto expected_d = torch::einsum(darg, {first, second.d});
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, EinsumTensorAndTensorDualGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input Tensor and TensorDual on GPU
+        torch::Tensor first = torch::randn({2, 3}, torch::device(torch::kCUDA));
+        TensorDual second(
+            torch::randn({3, 4}, torch::device(torch::kCUDA)),
+            torch::randn({3, 4, 5}, torch::device(torch::kCUDA))
+        );
+
+        // Einsum operation
+        std::string einsum_str = "ij,jk->ik";
+        TensorDual result = TensorDual::einsum(einsum_str, first, second);
+
+        // Expected real part
+        auto expected_r = torch::einsum(einsum_str, {first, second.r});
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+        // Expected dual part
+        auto darg = "ij,jkz->ikz"; // Modify einsum string for dual computation
+        auto expected_d = torch::einsum(darg, {first, second.d});
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+// Test: Incompatible shapes for einsum
+TEST(TensorDualTest, EinsumTensorAndTensorDualIncompatibleShapes) {
+    // Input Tensor and TensorDual with incompatible shapes
+    torch::Tensor first = torch::randn({2, 3});
+    TensorDual second(torch::randn({4, 5}), torch::randn({4, 5, 6}));
+
+    // Valid einsum string
+    std::string einsum_str = "ij,jk->ik";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, first, second);
+            } catch (const c10::Error& e) {
+                // Torch throws a c10::Error for incompatible shapes
+                SUCCEED();
+                throw;
+            }
+        },
+        c10::Error
+    );
+}
+
+
+// Test: Basic functionality of einsum with TensorDual and Tensor
+TEST(TensorDualTest, EinsumTensorDualAndTensorBasic) {
+    // Input TensorDual and Tensor
+    TensorDual first(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor second = torch::randn({3, 4});
+
+    // Einsum operation
+    std::string einsum_str = "ij,jk->ik";
+    TensorDual result = TensorDual::einsum(einsum_str, first, second);
+
+    // Expected real part
+    auto expected_r = torch::einsum(einsum_str, {first.r, second});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Expected dual part
+    auto darg = "ijz,jk->ikz"; // Modify einsum string for dual computation
+    auto expected_d = torch::einsum(darg, {first.d, second});
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Invalid einsum string
+TEST(TensorDualTest, EinsumTensorDualAndTensorInvalidString) {
+    // Input TensorDual and Tensor
+    TensorDual first(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor second = torch::randn({3, 4});
+
+    // Invalid einsum string (missing ',' or '->')
+    std::string einsum_str = "ij jk";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, first, second);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Einsum string must contain ',' and '->' in the correct order.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+
+// Test: Edge case - Einsum operation with identity matrix
+TEST(TensorDualTest, EinsumTensorDualAndTensorIdentityMatrix) {
+    // Input TensorDual and Tensor
+    TensorDual first(torch::randn({3, 3}), torch::randn({3, 3, 2}));
+    torch::Tensor second = torch::eye(3); // Identity matrix
+
+    // Einsum operation
+    std::string einsum_str = "ij,jk->ik";
+    TensorDual result = TensorDual::einsum(einsum_str, first, second);
+
+    // Expected real part
+    auto expected_r = torch::einsum(einsum_str, {first.r, second});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Expected dual part
+    auto darg = "ijz,jk->ikz"; // Modify einsum string for dual computation
+    auto expected_d = torch::einsum(darg, {first.d, second});
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, EinsumTensorDualAndTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual and Tensor on GPU
+        TensorDual first(
+            torch::randn({2, 3}, torch::device(torch::kCUDA)),
+            torch::randn({2, 3, 4}, torch::device(torch::kCUDA))
+        );
+        torch::Tensor second = torch::randn({3, 4}, torch::device(torch::kCUDA));
+
+        // Einsum operation
+        std::string einsum_str = "ij,jk->ik";
+        TensorDual result = TensorDual::einsum(einsum_str, first, second);
+
+        // Expected real part
+        auto expected_r = torch::einsum(einsum_str, {first.r, second});
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+        // Expected dual part
+        auto darg = "ijz,jk->ikz"; // Modify einsum string for dual computation
+        auto expected_d = torch::einsum(darg, {first.d, second});
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+// Test: Incompatible shapes for einsum
+TEST(TensorDualTest, EinsumTensorDualAndTensorIncompatibleShapes) {
+    // Input TensorDual and Tensor with incompatible shapes
+    TensorDual first(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor second = torch::randn({5, 6});
+
+    // Valid einsum string
+    std::string einsum_str = "ij,jk->ik";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, first, second);
+            } catch (const c10::Error& e) {
+                // Torch throws a c10::Error for incompatible shapes
+                SUCCEED();
+                throw;
+            }
+        },
+        c10::Error
+    );
+}
+
+
+// Test: Basic functionality of generalized einsum
+TEST(TensorDualTest, GeneralizedEinsumBasic) {
+    // Input TensorDual objects
+    //They have to be the same shape
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 10}));
+    TensorDual td2(torch::randn({2, 3}), torch::randn({2, 3, 10}));
+    TensorDual td3(torch::randn({2, 3}), torch::randn({2, 3, 10}));
+    std::vector<TensorDual> tensors = {td1, td2, td3};
+
+    // Einsum operation
+    std::string einsum_str = "mi,mi,mi->mi";
+    TensorDual result = TensorDual::einsum(einsum_str, tensors);
+
+    // Validate the real part
+    auto expected_r = torch::einsum(einsum_str, {td1.r, td2.r, td3.r});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    auto darg1 = "miz,mi,mi->miz";
+    auto d1 = torch::einsum(darg1, {td1.d, td2.r, td3.r});
+
+    auto darg2 = "mi,miz,mi->miz";
+    auto d2 = torch::einsum(darg2, {td1.r, td2.d, td3.r});
+
+    auto darg3 = "mi,mi,miz->miz";
+    auto d3 = torch::einsum(darg3, {td1.r, td2.r, td3.d});
+
+    auto expected_d = d1 + d2 + d3;
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Invalid einsum string - Missing '->'
+TEST(TensorDualTest, GeneralizedEinsumInvalidStringMissingArrow) {
+    // Input TensorDual objects
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual td2(torch::randn({3, 4}), torch::randn({3, 4, 5}));
+    std::vector<TensorDual> tensors = {td1, td2};
+
+    // Invalid einsum string
+    std::string einsum_str = "ij,jk";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, tensors);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Einsum string must contain '->'.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Invalid einsum string - Contains 'z'
+TEST(TensorDualTest, GeneralizedEinsumInvalidStringContainsZ) {
+    // Input TensorDual objects
+    TensorDual td1(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual td2(torch::randn({3, 4}), torch::randn({3, 4, 5}));
+    std::vector<TensorDual> tensors = {td1, td2};
+
+    // Invalid einsum string
+    std::string einsum_str = "ijz,jk->ik";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, tensors);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Character 'z' is reserved for dual dimensions and cannot appear in the einsum string.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Empty input vector
+TEST(TensorDualTest, GeneralizedEinsumEmptyInput) {
+    // Empty input tensor vector
+    std::vector<TensorDual> tensors;
+
+    // Valid einsum string
+    std::string einsum_str = "ij,jk->ik";
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::einsum(einsum_str, tensors);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Input vector `tensors` must not be empty.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: Device-specific tensors (e.g., GPU)
+TEST(TensorDualTest, GeneralizedEinsumGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual td1(
+            torch::randn({2, 3}, torch::device(torch::kCUDA)),
+            torch::randn({2, 3, 4}, torch::device(torch::kCUDA))
+        );
+        TensorDual td2(
+            torch::randn({2, 3}, torch::device(torch::kCUDA)),
+            torch::randn({2, 3, 4}, torch::device(torch::kCUDA))
+        );
+        std::vector<TensorDual> tensors = {td1, td2};
+
+        // Einsum operation
+        std::string einsum_str = "mi,mi->mi";
+        TensorDual result = TensorDual::einsum(einsum_str, tensors);
+
+        // Validate the real part
+        auto expected_r = torch::einsum(einsum_str, {td1.r, td2.r});
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+        // Validate the dual part
+        auto darg1 = "miz,mi->miz";
+        auto d1 = torch::einsum(darg1, {td1.d, td2.r});
+
+        auto darg2 = "mi,miz->miz";
+        auto d2 = torch::einsum(darg2, {td1.r, td2.d});
+
+        auto expected_d = d1 + d2;
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of where
+TEST(TensorDualTest, WhereBasic) {
+    // Input condition tensor
+    auto cond = torch::tensor({{1, 0}, {0, 1}}, torch::kBool);
+
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}),
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}),
+                 torch::tensor({{{10.0, 20.0}, {30.0, 40.0}}, {{50.0, 60.0}, {70.0, 80.0}}}));
+
+    // Perform where operation
+    TensorDual result = TensorDual::where(cond, x, y);
+
+    // Expected real and dual parts
+    auto expected_r = torch::where(cond, x.r, y.r);
+    auto expected_d = torch::where(cond.unsqueeze(2).expand_as(x.d), x.d, y.d);
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Condition tensor with broadcasting
+TEST(TensorDualTest, WhereConditionBroadcasting) {
+    // Input condition tensor (1D)
+    auto cond = torch::tensor({1, 0}, torch::kBool);
+
+    // Input TensorDual objects
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+
+    // Perform where operation
+    TensorDual result = TensorDual::where(cond, x, y);
+
+    // Broadcasted condition tensors
+    auto condr = cond.unsqueeze(1).expand_as(x.r);
+    auto condd = cond.unsqueeze(1).unsqueeze(2).expand_as(x.d);
+
+    // Expected real and dual parts
+    auto expected_r = torch::where(condr, x.r, y.r);
+    auto expected_d = torch::where(condd, x.d, y.d);
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Condition tensor with too many dimensions
+TEST(TensorDualTest, WhereConditionTooManyDimensions) {
+    // Input condition tensor with excessive dimensions
+    auto cond = torch::randn({1, 1, 0}, torch::kBool);
+
+    // Input TensorDual objects
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    TensorDual y(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::where(cond, x, y);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Condition tensor has too many dimensions.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, WhereGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input condition tensor
+        auto cond = torch::tensor({{1, 0}, {0, 1}}, torch::kBool).to(torch::kCUDA);
+
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 2}, torch::kCUDA), torch::randn({2, 2, 3}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 2}, torch::kCUDA), torch::randn({2, 2, 3}, torch::kCUDA));
+
+        // Perform where operation
+        TensorDual result = TensorDual::where(cond, x, y);
+
+        // Expected real and dual parts
+        auto expected_r = torch::where(cond, x.r, y.r);
+        auto expected_d = torch::where(cond.unsqueeze(2).expand_as(x.d), x.d, y.d);
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+// Test: Mismatched shapes
+TEST(TensorDualTest, WhereShapeMismatch) {
+    // Input condition tensor
+    auto cond = torch::tensor({{1, 0}}, torch::kBool);
+
+    // Input TensorDual objects with mismatched shapes
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 3}));
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual::where(cond, x, y);
+            } catch (const c10::Error& e) {
+                SUCCEED();
+                throw;
+            }
+        },
+        c10::Error
+    );
+}
+
+
 
 TEST(TensorDualTest, einsumTest4)
 {
