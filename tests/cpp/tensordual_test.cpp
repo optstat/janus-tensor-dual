@@ -940,7 +940,2993 @@ TEST(TensorDualTest, WhereShapeMismatch) {
     );
 }
 
+// Test: Basic functionality of sum
+TEST(TensorDualTest, SumBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}),
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
 
+    // Perform sum along dimension 1
+    TensorDual result = TensorDual::sum(x);
+
+    // Expected real and dual parts
+    auto expected_r = torch::sum(x.r, /*dim=*/1, /*keepdim=*/true);
+    auto expected_d = torch::sum(x.d, /*dim=*/1, /*keepdim=*/true);
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Sum along default dimension
+TEST(TensorDualTest, SumDefaultDimension) {
+    // Input TensorDual object
+    TensorDual x(torch::randn({3, 4}), torch::randn({3, 4, 5}));
+
+    // Perform sum along the default dimension (1)
+    TensorDual result = TensorDual::sum(x);
+
+    // Expected real and dual parts
+    auto expected_r = torch::sum(x.r, /*dim=*/1, /*keepdim=*/true);
+    auto expected_d = torch::sum(x.d, /*dim=*/1, /*keepdim=*/true);
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, SumGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform sum along dimension 1
+        TensorDual result = TensorDual::sum(x);
+
+        // Expected real and dual parts
+        auto expected_r = torch::sum(x.r, /*dim=*/1, /*keepdim=*/true);
+        auto expected_d = torch::sum(x.d, /*dim=*/1, /*keepdim=*/true);
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+// Test: Sum with high-dimensional tensors
+TEST(TensorDualTest, SumHighDimensionalTensors) {
+    // Input TensorDual object with high-dimensional tensors
+    TensorDual x(torch::randn({100, 10000}), torch::randn({100, 10000, 10}));
+
+    // Perform sum along dimension 3
+    TensorDual result = TensorDual::sum(x);
+
+    // Expected real and dual parts
+    auto expected_r = torch::sum(x.r, /*dim=*/1, /*keepdim=*/true);
+    auto expected_d = torch::sum(x.d, /*dim=*/1, /*keepdim=*/true);
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Basic functionality of normL2
+TEST(TensorDualTest, NormL2Basic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{3.0, 4.0}, {6.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+
+    // Perform normL2 operation
+    TensorDual result = x.normL2();
+
+    // Expected real part (L2 norm along dimension 1)
+    auto expected_r = torch::norm(x.r, 2, /*dim=*/1, /*keepdim=*/true);
+
+    // Avoid division by zero
+    auto expected_r_clamped = expected_r.clamp_min(1e-12);
+
+    // Compute gradient with respect to the real part
+    auto grad_r = x.r / expected_r_clamped;
+
+    // Expected dual part
+    auto expected_d = torch::einsum("mi,mij->mj", {grad_r, x.d}).unsqueeze(1);
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: L2 norm with zero tensor
+TEST(TensorDualTest, NormL2ZeroTensor) {
+    // Input TensorDual object with zero tensors
+    TensorDual x(torch::zeros({2, 2}), torch::zeros({2, 2, 3}));
+
+    // Perform normL2 operation
+    TensorDual result = x.normL2();
+
+    // Expected real part (L2 norm is clamped to 1e-12)
+    auto expected_r = torch::zeros({2, 1}).clamp_min(1e-12);
+
+    // Expected dual part (all zeros since input dual part is zero)
+    auto expected_d = torch::zeros({2, 1, 3});
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, NormL2HighDimensionalTensors) {
+    // Input TensorDual object with high-dimensional tensors
+    TensorDual x(torch::randn({3, 5}), torch::randn({3, 5, 4}));
+
+    // Perform normL2 operation
+    TensorDual result = x.normL2();
+
+    // Expected real part (L2 norm along dimension 1)
+    auto expected_r = torch::norm(x.r, 2, /*dim=*/1, /*keepdim=*/true);
+
+    // Avoid division by zero
+    auto expected_r_clamped = expected_r.clamp_min(1e-12);
+
+    // Compute gradient with respect to the real part
+    auto grad_r = x.r / expected_r_clamped;
+
+    // Expected dual part
+    auto expected_d = torch::einsum("mi,mij->mj", {grad_r, x.d}).unsqueeze(1);
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, NormL2GpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform normL2 operation
+        TensorDual result = x.normL2();
+
+        // Expected real part (L2 norm along dimension 1)
+        auto expected_r = torch::norm(x.r, 2, /*dim=*/1, /*keepdim=*/true);
+
+        // Avoid division by zero
+        auto expected_r_clamped = expected_r.clamp_min(1e-12);
+
+        // Compute gradient with respect to the real part
+        auto grad_r = x.r / expected_r_clamped;
+
+        // Expected dual part
+        auto expected_d = torch::einsum("mi,mij->mj", {grad_r, x.d}).unsqueeze(1);
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of unary negation operator
+TEST(TensorDualTest, UnaryNegationBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, -2.0}, {3.0, -4.0}}), 
+                 torch::tensor({{{1.0, -2.0}, {3.0, -4.0}}, {{5.0, -6.0}, {7.0, -8.0}}}));
+
+    // Perform unary negation
+    TensorDual result = -x;
+
+    // Expected negated real and dual parts
+    auto expected_r = -x.r;
+    auto expected_d = -x.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Unary negation on zero tensors
+TEST(TensorDualTest, UnaryNegationZeroTensor) {
+    // Input TensorDual object with zero tensors
+    TensorDual x(torch::zeros({2, 2}), torch::zeros({2, 2, 3}));
+
+    // Perform unary negation
+    TensorDual result = -x;
+
+    // Expected negated real and dual parts (still zeros)
+    auto expected_r = torch::zeros({2, 2});
+    auto expected_d = torch::zeros({2, 2, 3});
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+// Test: Unary negation on high-dimensional tensors
+TEST(TensorDualTest, UnaryNegationHighDimensionalTensors) {
+    // Input TensorDual object with high-dimensional tensors
+    TensorDual x(torch::randn({3, 4}), torch::randn({3, 4, 5}));
+
+    // Perform unary negation
+    TensorDual result = -x;
+
+    // Expected negated real and dual parts
+    auto expected_r = -x.r;
+    auto expected_d = -x.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, UnaryNegationGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform unary negation
+        TensorDual result = -x;
+
+        // Expected negated real and dual parts
+        auto expected_r = -x.r;
+        auto expected_d = -x.d;
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of clone
+TEST(TensorDualTest, CloneBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+
+    // Clone the TensorDual
+    TensorDual cloned = x.clone();
+
+    // Validate that the cloned object is equal to the original
+    EXPECT_TRUE(torch::allclose(cloned.r, x.r));
+    EXPECT_TRUE(torch::allclose(cloned.d, x.d));
+
+    // Validate that the cloned object is independent of the original
+    cloned.r.add_(1.0);
+    cloned.d.add_(1.0);
+
+    EXPECT_FALSE(torch::allclose(cloned.r, x.r));
+    EXPECT_FALSE(torch::allclose(cloned.d, x.d));
+}
+
+// Test: Clone zero TensorDual
+TEST(TensorDualTest, CloneZeroTensor) {
+    // Input TensorDual object with zero tensors
+    TensorDual x(torch::zeros({2, 2}), torch::zeros({2, 2, 3}));
+
+    // Clone the TensorDual
+    TensorDual cloned = x.clone();
+
+    // Validate that the cloned object is equal to the original
+    EXPECT_TRUE(torch::allclose(cloned.r, x.r));
+    EXPECT_TRUE(torch::allclose(cloned.d, x.d));
+
+    // Validate that the cloned object is independent of the original
+    cloned.r.add_(1.0);
+    cloned.d.add_(1.0);
+
+    EXPECT_FALSE(torch::allclose(cloned.r, x.r));
+    EXPECT_FALSE(torch::allclose(cloned.d, x.d));
+}
+
+
+// Test: Clone high-dimensional TensorDual
+TEST(TensorDualTest, CloneHighDimensionalTensors) {
+    // Input TensorDual object with high-dimensional tensors
+    TensorDual x(torch::randn({100, 100}), torch::randn({100,100,1000}));
+
+    // Clone the TensorDual
+    TensorDual cloned = x.clone();
+
+    // Validate that the cloned object is equal to the original
+    EXPECT_TRUE(torch::allclose(cloned.r, x.r));
+    EXPECT_TRUE(torch::allclose(cloned.d, x.d));
+
+    // Validate that the cloned object is independent of the original
+    cloned.r.add_(1.0);
+    cloned.d.add_(1.0);
+
+    EXPECT_FALSE(torch::allclose(cloned.r, x.r));
+    EXPECT_FALSE(torch::allclose(cloned.d, x.d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, CloneGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Clone the TensorDual
+        TensorDual cloned = x.clone();
+
+        // Validate that the cloned object is equal to the original
+        EXPECT_TRUE(torch::allclose(cloned.r, x.r));
+        EXPECT_TRUE(torch::allclose(cloned.d, x.d));
+
+        // Validate that the cloned object is independent of the original
+        cloned.r.add_(1.0);
+        cloned.d.add_(1.0);
+
+        EXPECT_FALSE(torch::allclose(cloned.r, x.r));
+        EXPECT_FALSE(torch::allclose(cloned.d, x.d));
+    }
+}
+
+
+// Test: Basic functionality of addition operator
+TEST(TensorDualTest, AdditionBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                 torch::tensor({{{10.0, 20.0}, {30.0, 40.0}}, {{50.0, 60.0}, {70.0, 80.0}}}));
+
+    // Perform addition
+    TensorDual result = x + y;
+
+    // Expected real and dual parts
+    auto expected_r = x.r + y.r;
+    auto expected_d = x.d + y.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Addition with zero TensorDual
+TEST(TensorDualTest, AdditionZeroTensor) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual zero(torch::zeros({2, 2}), torch::zeros({2, 2, 2}));
+
+    // Perform addition
+    TensorDual result = x + zero;
+
+    // Expected real and dual parts
+    auto expected_r = x.r;
+    auto expected_d = x.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, AdditionDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x + y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Real and dual tensors of both TensorDual objects must have the same shape.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, AdditionHighDimensionalTensors) {
+    // Input TensorDual objects with high-dimensional tensors
+    TensorDual x(torch::randn({3, 4000}), torch::randn({3, 4000, 10}));
+    TensorDual y(torch::randn({3, 4000}), torch::randn({3, 4000, 10}));
+
+    // Perform addition
+    TensorDual result = x + y;
+
+    // Expected real and dual parts
+    auto expected_r = x.r + y.r;
+    auto expected_d = x.d + y.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AdditionGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform addition
+        TensorDual result = x + y;
+
+        // Expected real and dual parts
+        auto expected_r = x.r + y.r;
+        auto expected_d = x.d + y.d;
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+
+// Test: Basic functionality of addition with torch::Tensor
+TEST(TensorDualTest, AdditionWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{10.0, 20.0}, {30.0, 40.0}});
+
+    // Perform addition
+    TensorDual result = x + other;
+
+    // Expected real and dual parts
+    auto expected_r = x.r + other;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Addition with zero tensor
+TEST(TensorDualTest, AdditionWithZeroTensor) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::zeros({2, 2});
+
+    // Perform addition
+    TensorDual result = x + other;
+
+    // Expected real and dual parts
+    auto expected_r = x.r;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, AdditionWithUndefinedTensor) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x + other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot add TensorDual with an undefined tensor.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, AdditionWithTensorDimensionMismatch) {
+    // Input TensorDual object and mismatched torch::Tensor
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor other = torch::randn({3, 2});
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x + other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: The other tensor must have the same shape as the real part of the TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, AdditionWithTensorHighDimensional) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::randn({3, 4000}), torch::randn({3, 4000, 6}));
+    torch::Tensor other = torch::randn({3, 4000});
+
+    // Perform addition
+    TensorDual result = x + other;
+
+    // Expected real and dual parts
+    auto expected_r = x.r + other;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AdditionWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object and torch::Tensor on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform addition
+        TensorDual result = x + other;
+
+        // Expected real and dual parts
+        auto expected_r = x.r + other;
+        auto expected_d = x.d.clone();
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of addition with scalar
+TEST(TensorDualTest, AdditionWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 10.0;
+
+    // Perform addition
+    TensorDual result = x + scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r + scalar;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Addition with zero scalar
+TEST(TensorDualTest, AdditionWithZeroScalar) {
+    // Input TensorDual object and zero scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 0.0;
+
+    // Perform addition
+    TensorDual result = x + scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r; // Unchanged real part
+    auto expected_d = x.d.clone(); // Unchanged dual part
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Addition with a negative scalar
+TEST(TensorDualTest, AdditionWithNegativeScalar) {
+    // Input TensorDual object and negative scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = -5.0;
+
+    // Perform addition
+    TensorDual result = x + scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r + scalar;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Addition with a high-dimensional TensorDual
+TEST(TensorDualTest, AdditionWithScalarHighDimensional) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::randn({3, 4000}), torch::randn({3, 4000, 5}));
+    double scalar = 3.5;
+
+    // Perform addition
+    TensorDual result = x + scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r + scalar;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AdditionWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 7.0;
+
+        // Perform addition
+        TensorDual result = x + scalar;
+
+        // Expected real and dual parts
+        auto expected_r = x.r + scalar;
+        auto expected_d = x.d.clone();
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of subtraction with torch::Tensor
+TEST(TensorDualTest, SubtractionWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+
+    // Perform subtraction
+    TensorDual result = x - other;
+
+    // Expected real and dual parts
+    auto expected_r = x.r - other;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Subtraction with zero tensor
+TEST(TensorDualTest, SubtractionWithZeroTensor) {
+    // Input TensorDual object and zero torch::Tensor
+    TensorDual x(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::zeros({2, 2});
+
+    // Perform subtraction
+    TensorDual result = x - other;
+
+    // Expected real and dual parts
+    auto expected_r = x.r;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, SubtractionWithUndefinedTensor) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x - other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot subtract an undefined tensor from TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Broadcasting compatibility
+TEST(TensorDualTest, SubtractionWithBroadcasting) {
+    // Input TensorDual object and a broadcastable torch::Tensor
+    TensorDual x(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({10.0});
+
+    // Perform subtraction
+    TensorDual result = x - other;
+
+    // Expected real and dual parts
+    auto expected_r = x.r - other;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, SubtractionWithTensorHighDimensional) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::randn({3, 4000}), torch::randn({3, 4000, 6}));
+    torch::Tensor other = torch::randn({3, 4000});
+
+    // Perform subtraction
+    TensorDual result = x - other;
+
+    // Expected real and dual parts
+    auto expected_r = x.r - other;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+// Test: Basic functionality of subtraction with a scalar
+TEST(TensorDualTest, SubtractionWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 5.0;
+
+    // Perform subtraction
+    TensorDual result = x - scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r - scalar;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Subtraction with zero scalar
+TEST(TensorDualTest, SubtractionWithZeroScalar) {
+    // Input TensorDual object and zero scalar
+    TensorDual x(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 0.0;
+
+    // Perform subtraction
+    TensorDual result = x - scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Subtraction with a negative scalar
+TEST(TensorDualTest, SubtractionWithNegativeScalar) {
+    // Input TensorDual object and negative scalar
+    TensorDual x(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = -5.0;
+
+    // Perform subtraction
+    TensorDual result = x - scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r - scalar;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Subtraction with high-dimensional tensors
+TEST(TensorDualTest, SubtractionWithScalarHighDimensional) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::randn({3, 10000}), torch::randn({3, 10000, 6}));
+    double scalar = 2.5;
+
+    // Perform subtraction
+    TensorDual result = x - scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r - scalar;
+    auto expected_d = x.d.clone();
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Subtraction with GPU tensors
+TEST(TensorDualTest, SubtractionWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 7.0;
+
+        // Perform subtraction
+        TensorDual result = x - scalar;
+
+        // Expected real and dual parts
+        auto expected_r = x.r - scalar;
+        auto expected_d = x.d.clone();
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, SubtractionWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object and torch::Tensor on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform subtraction
+        TensorDual result = x - other;
+
+        // Expected real and dual parts
+        auto expected_r = x.r - other;
+        auto expected_d = x.d.clone();
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of contiguous
+TEST(TensorDualTest, ContiguousBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}).transpose(0, 1), 
+                 torch::randn({2, 2, 3}).permute({1, 0, 2}));
+
+    // Validate that the input tensors are not contiguous
+    EXPECT_FALSE(x.r.is_contiguous());
+    EXPECT_FALSE(x.d.is_contiguous());
+
+    // Perform contiguous operation
+    TensorDual result = x.contiguous();
+
+    // Validate that the resulting tensors are contiguous
+    EXPECT_TRUE(result.r.is_contiguous());
+    EXPECT_TRUE(result.d.is_contiguous());
+
+    // Validate that the data is unchanged
+    EXPECT_TRUE(torch::allclose(result.r, x.r));
+    EXPECT_TRUE(torch::allclose(result.d, x.d));
+}
+
+// Test: Already contiguous tensors
+TEST(TensorDualTest, ContiguousAlreadyContiguous) {
+    // Input TensorDual object with already contiguous tensors
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+
+    // Validate that the input tensors are already contiguous
+    EXPECT_TRUE(x.r.is_contiguous());
+    EXPECT_TRUE(x.d.is_contiguous());
+
+    // Perform contiguous operation
+    TensorDual result = x.contiguous();
+
+    // Validate that the resulting tensors are still contiguous
+    EXPECT_TRUE(result.r.is_contiguous());
+    EXPECT_TRUE(result.d.is_contiguous());
+
+    // Validate that the data is unchanged
+    EXPECT_TRUE(torch::allclose(result.r, x.r));
+    EXPECT_TRUE(torch::allclose(result.d, x.d));
+}
+
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, ContiguousHighDimensionalTensors) {
+    // Input TensorDual object with high-dimensional tensors
+    TensorDual x(torch::randn({10000,2}).permute({1,0}), 
+                 torch::randn({10000,2,5}).permute({1,0,2}));
+
+    // Validate that the input tensors are not contiguous
+    EXPECT_FALSE(x.r.is_contiguous());
+    EXPECT_FALSE(x.d.is_contiguous());
+
+    // Perform contiguous operation
+    TensorDual result = x.contiguous();
+
+    // Validate that the resulting tensors are contiguous
+    EXPECT_TRUE(result.r.is_contiguous());
+    EXPECT_TRUE(result.d.is_contiguous());
+
+    // Validate that the data is unchanged
+    EXPECT_TRUE(torch::allclose(result.r, x.r));
+    EXPECT_TRUE(torch::allclose(result.d, x.d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, ContiguousGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU with non-contiguous tensors
+        TensorDual x(torch::randn({3, 2}, torch::kCUDA).transpose(0, 1), 
+                     torch::randn({4, 3, 2}, torch::kCUDA).permute({2, 1, 0}));
+
+        // Validate that the input tensors are not contiguous
+        EXPECT_FALSE(x.r.is_contiguous());
+        EXPECT_FALSE(x.d.is_contiguous());
+
+        // Perform contiguous operation
+        TensorDual result = x.contiguous();
+
+        // Validate that the resulting tensors are contiguous
+        EXPECT_TRUE(result.r.is_contiguous());
+        EXPECT_TRUE(result.d.is_contiguous());
+
+        // Validate that the data is unchanged
+        EXPECT_TRUE(torch::allclose(result.r, x.r));
+        EXPECT_TRUE(torch::allclose(result.d, x.d));
+    }
+}
+
+
+// Test: Basic functionality of multiplication operator
+TEST(TensorDualTest, MultiplicationTensorDualBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                 torch::tensor({{{10.0, 20.0}, {30.0, 40.0}}, {{50.0, 60.0}, {70.0, 80.0}}}));
+
+    // Perform multiplication
+    TensorDual result = x * y;
+
+    // Expected real and dual parts
+    auto expected_r = x.r * y.r;
+    auto expected_d = y.r.unsqueeze(-1) * x.d + x.r.unsqueeze(-1) * y.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Multiplication with zero TensorDual
+TEST(TensorDualTest, MultiplicationTensorDualWithZeroTensorDual) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual zero(torch::zeros({2, 2}), torch::zeros({2, 2, 2}));
+
+    // Perform multiplication
+    TensorDual result = x * zero;
+
+    // Expected real and dual parts
+    auto expected_r = x.r * zero.r;  // Should be zeros
+    auto expected_d = zero.r.unsqueeze(-1) * x.d + x.r.unsqueeze(-1) * zero.d; // Should be zeros
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, MultiplicationTensorDualDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x * y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Real and dual tensors must have the same shape for multiplication.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, MultiplicationTensorDualHighDimensionalTensors) {
+    // Input TensorDual objects with high-dimensional tensors
+    TensorDual x(torch::randn({3, 10000}), torch::randn({3, 10000, 5}));
+    TensorDual y(torch::randn({3, 10000}), torch::randn({3, 10000, 5}));
+
+    // Perform multiplication
+    TensorDual result = x * y;
+
+    // Expected real and dual parts
+    auto expected_r = x.r * y.r;
+    auto expected_d = y.r.unsqueeze(-1) * x.d + x.r.unsqueeze(-1) * y.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, MultiplicationTensorDualGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform multiplication
+        TensorDual result = x * y;
+
+        // Expected real and dual parts
+        auto expected_r = x.r * y.r;
+        auto expected_d = y.r.unsqueeze(-1) * x.d + x.r.unsqueeze(-1) * y.d;
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of multiplication with torch::Tensor
+TEST(TensorDualTest, MultiplicationWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{10.0, 20.0}, {30.0, 40.0}});
+
+    // Perform multiplication
+    TensorDual result = x * other;
+
+    // Expected real and dual parts
+    auto expected_r = other * x.r;
+    auto scaled_other = other.unsqueeze(-1);
+    auto expected_d = scaled_other * x.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Multiplication with zero tensor
+TEST(TensorDualTest, MultiplicationWithZeroTensor) {
+    // Input TensorDual object and zero torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::zeros({2, 2});
+
+    // Perform multiplication
+    TensorDual result = x * other;
+
+    // Expected real and dual parts
+    auto expected_r = other * x.r;  // Should be zeros
+    auto scaled_other = other.unsqueeze(-1);  // Should be zeros
+    auto expected_d = scaled_other * x.d;  // Should be zeros
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, MultiplicationWithUndefinedTensor) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x * other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot multiply: Input tensor is undefined.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, MultiplicationWithTensorDimensionMismatch) {
+    // Input TensorDual object and mismatched torch::Tensor
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor other = torch::randn({3, 2});
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x * other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, MultiplicationWithTensorHighDimensional) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::randn({3, 40000}), torch::randn({3, 40000, 5}));
+    torch::Tensor other = torch::randn({3, 40000});
+
+    // Perform multiplication
+    TensorDual result = x * other;
+
+    // Expected real and dual parts
+    auto expected_r = other * x.r;
+    auto scaled_other = other.unsqueeze(-1);
+    auto expected_d = scaled_other * x.d;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, MultiplicationWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and torch::Tensor
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform multiplication
+        TensorDual result = x * other;
+
+        // Expected real and dual parts
+        auto expected_r = other * x.r;
+        auto scaled_other = other.unsqueeze(-1);
+        auto expected_d = scaled_other * x.d;
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of scalar multiplication
+TEST(TensorDualTest, ScalarMultiplicationBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 2.0;
+
+    // Perform scalar multiplication
+    TensorDual result = x * scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r * scalar;
+    auto expected_d = x.d * scalar;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Multiplication with zero scalar
+TEST(TensorDualTest, ScalarMultiplicationZero) {
+    // Input TensorDual object and zero scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 0.0;
+
+    // Perform scalar multiplication
+    TensorDual result = x * scalar;
+
+    // Expected real and dual parts (both zero)
+    auto expected_r = x.r * scalar; // Should be zeros
+    auto expected_d = x.d * scalar; // Should be zeros
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Multiplication with a negative scalar
+TEST(TensorDualTest, ScalarMultiplicationNegative) {
+    // Input TensorDual object and negative scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = -3.0;
+
+    // Perform scalar multiplication
+    TensorDual result = x * scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r * scalar;
+    auto expected_d = x.d * scalar;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: Multiplication with high-dimensional tensors
+TEST(TensorDualTest, ScalarMultiplicationHighDimensional) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::randn({3, 50000}), torch::randn({3, 50000, 50}));
+    double scalar = 2.5;
+
+    // Perform scalar multiplication
+    TensorDual result = x * scalar;
+
+    // Expected real and dual parts
+    auto expected_r = x.r * scalar;
+    auto expected_d = x.d * scalar;
+
+    // Validate the result
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, ScalarMultiplicationGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 4.0;
+
+        // Perform scalar multiplication
+        TensorDual result = x * scalar;
+
+        // Expected real and dual parts
+        auto expected_r = x.r * scalar;
+        auto expected_d = x.d * scalar;
+
+        // Validate the result
+        EXPECT_TRUE(torch::allclose(result.r, expected_r));
+        EXPECT_TRUE(torch::allclose(result.d, expected_d));
+    }
+}
+
+
+// Test: Basic functionality of less-than-or-equal-to operator
+TEST(TensorDualTest, LessThanOrEqualBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 3.0}, {5.0, 7.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{2.0, 3.0}, {4.0, 8.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x <= y;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {false, true}});
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements less-than-or-equal
+TEST(TensorDualTest, LessThanOrEqualAllTrue) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x <= y;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater-than
+TEST(TensorDualTest, LessThanOrEqualAllFalse) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{9.0, 10.0}, {11.0, 12.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x <= y;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, LessThanOrEqualDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x <= y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Real tensors must have the same shape for comparison.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, LessThanOrEqualHighDimensional) {
+    // Input TensorDual objects with high-dimensional tensors
+    TensorDual x(torch::randn({3, 4000}), torch::randn({3, 4000, 5}));
+    TensorDual y(torch::randn({3, 4000}), torch::randn({3, 4000, 5}));
+
+    // Perform comparison
+    torch::Tensor result = x <= y;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r <= y.r)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, LessThanOrEqualGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform comparison
+        torch::Tensor result = x <= y;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r <= y.r)).item<bool>());
+    }
+}
+
+
+// Test: Basic functionality of equality operator
+TEST(TensorDualTest, EqualityBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{1.0, 0.0}, {3.0, 5.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x == y;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, false}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements equal
+TEST(TensorDualTest, EqualityAllTrue) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{9.0, 8.0}, {7.0, 6.0}}, {{5.0, 4.0}, {3.0, 2.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x == y;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements not equal
+TEST(TensorDualTest, EqualityAllFalse) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x == y;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, EqualityDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x == y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Real tensors must have the same shape for comparison.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, EqualityHighDimensional) {
+    // Input TensorDual objects with high-dimensional tensors
+    TensorDual x(torch::randn({3, 4000}), torch::randn({3, 4000, 5}));
+    TensorDual y(torch::randn({3, 4000}), torch::randn({3, 4000, 5}));
+
+    // Perform comparison
+    torch::Tensor result = x == y;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r == y.r)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, EqualityGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform comparison
+        torch::Tensor result = x == y;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r == y.r)).item<bool>());
+    }
+}
+
+
+
+// Test: Basic functionality of less-than-or-equal-to operator with torch::Tensor
+TEST(TensorDualTest, LessThanOrEqualWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 3.0}, {5.0, 7.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{2.0, 3.0}, {6.0, 8.0}});
+
+    // Perform comparison
+    torch::Tensor result = x <= other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {true, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements less-than-or-equal
+TEST(TensorDualTest, LessThanOrEqualWithTensorAllTrue) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{5.0, 6.0}, {7.0, 8.0}});
+
+    // Perform comparison
+    torch::Tensor result = x <= other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater-than
+TEST(TensorDualTest, LessThanOrEqualWithTensorAllFalse) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{9.0, 10.0}, {11.0, 12.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{5.0, 6.0}, {7.0, 8.0}});
+
+    // Perform comparison
+    torch::Tensor result = x <= other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Broadcasting compatibility
+TEST(TensorDualTest, LessThanOrEqualWithTensorBroadcasting) {
+    // Input TensorDual object and a broadcastable torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 3.0}, {5.0, 7.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({5.0});
+
+    // Perform comparison
+    torch::Tensor result = x <= other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, LessThanOrEqualWithTensorUndefined) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x <= other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot compare: Input tensor is undefined.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, LessThanOrEqualWithTensorHighDimensional) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::randn({3, 10000}), torch::randn({3, 10000, 5}));
+    torch::Tensor other = torch::randn({3, 10000});
+
+    // Perform comparison
+    torch::Tensor result = x <= other;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r <= other)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, LessThanOrEqualWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and torch::Tensor
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform comparison
+        torch::Tensor result = x <= other;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r <= other)).item<bool>());
+    }
+}
+
+
+// Test: Basic functionality of less-than-or-equal-to operator with a scalar
+TEST(TensorDualTest, LessThanOrEqualWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 3.0}, {5.0, 7.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 5.0;
+
+    // Perform comparison
+    torch::Tensor result = x <= scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements less-than-or-equal
+TEST(TensorDualTest, LessThanOrEqualWithScalarAllTrue) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 10.0;
+
+    // Perform comparison
+    torch::Tensor result = x <= scalar;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater-than
+TEST(TensorDualTest, LessThanOrEqualWithScalarAllFalse) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{11.0, 12.0}, {13.0, 14.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 10.0;
+
+    // Perform comparison
+    torch::Tensor result = x <= scalar;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, LessThanOrEqualWithScalarHighDimensional) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::randn({3, 100000}), torch::randn({3, 100000, 6}));
+    float scalar = 0.5;
+
+    // Perform comparison
+    torch::Tensor result = x <= scalar;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r <= scalar)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, LessThanOrEqualWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 1.0;
+
+        // Perform comparison
+        torch::Tensor result = x <= scalar;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r <= scalar)).item<bool>());
+    }
+}
+
+// Test: Integer scalar comparison
+TEST(TensorDualTest, LessThanOrEqualWithScalarInteger) {
+    // Input TensorDual object and integer scalar
+    TensorDual x(torch::tensor({{1.0, 3.0}, {5.0, 7.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    int scalar = 5;
+
+    // Perform comparison
+    torch::Tensor result = x <= scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+// Test: Basic functionality of greater-than operator
+TEST(TensorDualTest, GreaterThanBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{3.0, 7.0}, {5.0, 2.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{1.0, 5.0}, {5.0, 3.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x > y;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {false, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater
+TEST(TensorDualTest, GreaterThanAllTrue) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x > y;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements greater
+TEST(TensorDualTest, GreaterThanAllFalse) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x > y;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, GreaterThanDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x > y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Real tensors must have the same shape for comparison.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, GreaterThanHighDimensional) {
+    // Input TensorDual objects with high-dimensional tensors
+    TensorDual x(torch::randn({3, 40000}), torch::randn({3, 40000, 5}));
+    TensorDual y(torch::randn({3, 40000}), torch::randn({3, 40000, 5}));
+
+    // Perform comparison
+    torch::Tensor result = x > y;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r > y.r)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, GreaterThanGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform comparison
+        torch::Tensor result = x > y;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r > y.r)).item<bool>());
+    }
+}
+
+
+// Test: Basic functionality of greater-than operator with torch::Tensor
+TEST(TensorDualTest, GreaterThanWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{3.0, 7.0}, {5.0, 2.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{1.0, 5.0}, {5.0, 3.0}});
+
+    // Perform comparison
+    torch::Tensor result = x > other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {false, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater
+TEST(TensorDualTest, GreaterThanWithTensorAllTrue) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+
+    // Perform comparison
+    torch::Tensor result = x > other;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements greater
+TEST(TensorDualTest, GreaterThanWithTensorAllFalse) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{5.0, 6.0}, {7.0, 8.0}});
+
+    // Perform comparison
+    torch::Tensor result = x > other;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, GreaterThanWithTensorUndefined) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x > other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot compare: Input tensor is undefined.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, GreaterThanWithTensorDimensionMismatch) {
+    // Input TensorDual object and torch::Tensor with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor other = torch::randn({3, 2});
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x > other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, GreaterThanWithTensorHighDimensional) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::randn({3, 400}), torch::randn({3, 400, 5}));
+    torch::Tensor other = torch::randn({3, 400});
+
+    // Perform comparison
+    torch::Tensor result = x > other;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r > other)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, GreaterThanWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and torch::Tensor
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform comparison
+        torch::Tensor result = x > other;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r > other)).item<bool>());
+    }
+}
+
+
+
+// Test: Basic functionality of greater-than operator with a scalar
+TEST(TensorDualTest, GreaterThanWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 5.0}, {3.0, 7.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 4.0;
+
+    // Perform comparison
+    torch::Tensor result = x > scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{false, true}, {false, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater
+TEST(TensorDualTest, GreaterThanWithScalarAllTrue) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{6.0, 7.0}, {8.0, 9.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 5.0;
+
+    // Perform comparison
+    torch::Tensor result = x > scalar;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements greater
+TEST(TensorDualTest, GreaterThanWithScalarAllFalse) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 5.0;
+
+    // Perform comparison
+    torch::Tensor result = x > scalar;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, GreaterThanWithScalarHighDimensional) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::randn({3, 4000}), torch::randn({3, 4000, 5}));
+    float scalar = 0.0;
+
+    // Perform comparison
+    torch::Tensor result = x > scalar;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r > scalar)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, GreaterThanWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 0.5;
+
+        // Perform comparison
+        torch::Tensor result = x > scalar;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r > scalar)).item<bool>());
+    }
+}
+
+// Test: Integer scalar comparison
+TEST(TensorDualTest, GreaterThanWithScalarInteger) {
+    // Input TensorDual object and integer scalar
+    TensorDual x(torch::tensor({{2.0, 4.0}, {6.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    int scalar = 5;
+
+    // Perform comparison
+    torch::Tensor result = x > scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{false, false}, {true, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+
+// Test: Basic functionality of less-than operator
+TEST(TensorDualTest, LessThanBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 5.0}, {3.0, 7.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{3.0, 5.0}, {5.0, 6.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x < y;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, false}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements less
+TEST(TensorDualTest, LessThanAllTrue) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x < y;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements less
+TEST(TensorDualTest, LessThanAllFalse) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x < y;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, LessThanDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x < y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Real tensors must have the same shape for comparison.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, LessThanHighDimensional) {
+    // Input TensorDual objects with high-dimensional tensors
+    TensorDual x(torch::randn({3, 4000}), torch::randn({3, 4000, 6}));
+    TensorDual y(torch::randn({3, 4000}), torch::randn({3, 4000, 6}));
+
+    // Perform comparison
+    torch::Tensor result = x < y;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r < y.r)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, LessThanGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform comparison
+        torch::Tensor result = x < y;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r < y.r)).item<bool>());
+    }
+}
+
+
+// Test: Basic functionality of less-than operator with torch::Tensor
+TEST(TensorDualTest, LessThanWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{3.0, 7.0}, {5.0, 2.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{5.0, 5.0}, {6.0, 6.0}});
+
+    // Perform comparison
+    torch::Tensor result = x < other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, false}, {true, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements less
+TEST(TensorDualTest, LessThanWithTensorAllTrue) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{5.0, 5.0}, {5.0, 5.0}});
+
+    // Perform comparison
+    torch::Tensor result = x < other;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements less
+TEST(TensorDualTest, LessThanWithTensorAllFalse) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+
+    // Perform comparison
+    torch::Tensor result = x < other;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, LessThanWithTensorUndefined) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x < other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot compare: Input tensor is undefined.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, LessThanWithTensorDimensionMismatch) {
+    // Input TensorDual object and torch::Tensor with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor other = torch::randn({3, 2});
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x < other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, LessThanWithTensorHighDimensional) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::randn({3, 500}), torch::randn({3, 500, 6}));
+    torch::Tensor other = torch::randn({3, 500});
+
+    // Perform comparison
+    torch::Tensor result = x < other;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r < other)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, LessThanWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and torch::Tensor
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform comparison
+        torch::Tensor result = x < other;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r < other)).item<bool>());
+    }
+}
+
+
+// Test: Basic functionality of less-than operator with a scalar
+TEST(TensorDualTest, LessThanWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 5.0}, {3.0, 7.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 4.0;
+
+    // Perform comparison
+    torch::Tensor result =  x < scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, false}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements less
+TEST(TensorDualTest, LessThanWithScalarAllTrue) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 10.0;
+
+    // Perform comparison
+    torch::Tensor result = x < scalar;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements less
+TEST(TensorDualTest, LessThanWithScalarAllFalse) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{11.0, 12.0}, {13.0, 14.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 10.0;
+
+    // Perform comparison
+    torch::Tensor result = x < scalar;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, LessThanWithScalarHighDimensional) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::randn({3, 400}), torch::randn({3, 400, 6}));
+    float scalar = 0.0;
+
+    // Perform comparison
+    torch::Tensor result = x < scalar;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r < scalar)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, LessThanWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 0.5;
+
+        // Perform comparison
+        torch::Tensor result = x < scalar;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r < scalar)).item<bool>());
+    }
+}
+
+// Test: Integer scalar comparison
+TEST(TensorDualTest, LessThanWithScalarInteger) {
+    // Input TensorDual object and integer scalar
+    TensorDual x(torch::tensor({{2.0, 4.0}, {6.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    int scalar = 5;
+
+    // Perform comparison
+    torch::Tensor result = x < scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {false, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+// Test: Basic functionality of greater-than-or-equal-to operator
+TEST(TensorDualTest, GreaterThanOrEqualBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{3.0, 5.0}, {7.0, 2.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{3.0, 4.0}, {7.0, 5.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x >= y;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater or equal
+TEST(TensorDualTest, GreaterThanOrEqualAllTrue) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{6.0, 7.0}, {8.0, 9.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{6.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x >= y;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements greater or equal
+TEST(TensorDualTest, GreaterThanOrEqualAllFalse) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x >= y;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, GreaterThanOrEqualDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x >= y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Real tensors must have the same shape for comparison.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: High-dimensional tensors
+TEST(TensorDualTest, GreaterThanOrEqualHighDimensional) {
+    // Input TensorDual objects with high-dimensional tensors
+    TensorDual x(torch::randn({3, 5000}), torch::randn({3, 5000, 6}));
+    TensorDual y(torch::randn({3, 5000}), torch::randn({3, 5000, 6}));
+
+    // Perform comparison
+    torch::Tensor result = x >= y;
+
+    // Validate the result
+    EXPECT_TRUE(torch::all(result == (x.r >= y.r)).item<bool>());
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, GreaterThanOrEqualGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform comparison
+        torch::Tensor result = x >= y;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r >= y.r)).item<bool>());
+    }
+}
+
+
+// Test: Basic functionality of greater-than-or-equal-to operator with torch::Tensor
+TEST(TensorDualTest, GreaterThanOrEqualWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{3.0, 7.0}, {5.0, 2.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{3.0, 5.0}, {6.0, 2.0}});
+
+    // Perform comparison
+    torch::Tensor result = x >= other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {false, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater or equal
+TEST(TensorDualTest, GreaterThanOrEqualWithTensorAllTrue) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{6.0, 7.0}, {8.0, 9.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{6.0, 6.0}, {7.0, 8.0}});
+
+    // Perform comparison
+    torch::Tensor result = x >= other;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements greater or equal
+TEST(TensorDualTest, GreaterThanOrEqualWithTensorAllFalse) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{5.0, 6.0}, {7.0, 8.0}});
+
+    // Perform comparison
+    torch::Tensor result = x >= other;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, GreaterThanOrEqualWithTensorUndefined) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x >= other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot compare: Input tensor is undefined.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, GreaterThanOrEqualWithTensorDimensionMismatch) {
+    // Input TensorDual object and torch::Tensor with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor other = torch::randn({3, 2});
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x >= other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, GreaterThanOrEqualWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and torch::Tensor
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform comparison
+        torch::Tensor result = x >= other;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r >= other)).item<bool>());
+    }
+}
+
+// Test: Basic functionality of greater-than-or-equal-to operator with a scalar
+TEST(TensorDualTest, GreaterThanOrEqualWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{3.0, 7.0}, {5.0, 2.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 4.0;
+
+    // Perform comparison
+    torch::Tensor result = x >= scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{false, true}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements greater or equal
+TEST(TensorDualTest, GreaterThanOrEqualWithScalarAllTrue) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 4.0;
+
+    // Perform comparison
+    torch::Tensor result = x >= scalar;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements greater or equal
+TEST(TensorDualTest, GreaterThanOrEqualWithScalarAllFalse) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 5.0;
+
+    // Perform comparison
+    torch::Tensor result = x >= scalar;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, GreaterThanOrEqualWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 0.5;
+
+        // Perform comparison
+        torch::Tensor result = x >= scalar;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r >= scalar)).item<bool>());
+    }
+}
+
+// Test: Integer scalar comparison
+TEST(TensorDualTest, GreaterThanOrEqualWithScalarInteger) {
+    // Input TensorDual object and integer scalar
+    TensorDual x(torch::tensor({{2.0, 4.0}, {6.0, 8.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    int scalar = 4;
+
+    // Perform comparison
+    torch::Tensor result = x >= scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{false, true}, {true, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Basic functionality of equality operator with torch::Tensor
+TEST(TensorDualTest, EqualityWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{1.0, 3.0}, {3.0, 4.0}});
+
+    // Perform comparison
+    torch::Tensor result = x == other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, false}, {true, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements equal
+TEST(TensorDualTest, EqualityWithTensorAllTrue) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 1.0}, {1.0, 1.0}}), 
+                 torch::tensor({{{0.0, 0.0}, {0.0, 0.0}}, {{0.0, 0.0}, {0.0, 0.0}}}));
+    torch::Tensor other = torch::tensor({{1.0, 1.0}, {1.0, 1.0}});
+
+    // Perform comparison
+    torch::Tensor result = x == other;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements equal
+TEST(TensorDualTest, EqualityWithTensorAllFalse) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{5.0, 6.0}, {7.0, 8.0}});
+
+    // Perform comparison
+    torch::Tensor result = x == other;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, EqualityWithTensorUndefined) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x == other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot compare: Input tensor is undefined.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, EqualityWithTensorDimensionMismatch) {
+    // Input TensorDual object and torch::Tensor with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor other = torch::randn({3, 2});
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x == other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, EqualityWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and torch::Tensor
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform comparison
+        torch::Tensor result = x == other;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r == other)).item<bool>());
+    }
+}
+
+
+
+// Test: Basic functionality of equality operator with a scalar
+TEST(TensorDualTest, EqualityWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 3.0;
+
+    // Perform comparison
+    torch::Tensor result = x == scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{false, false}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements equal to scalar
+TEST(TensorDualTest, EqualityWithScalarAllTrue) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{2.0, 2.0}, {2.0, 2.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 2.0;
+
+    // Perform comparison
+    torch::Tensor result = x == scalar;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements equal to scalar
+TEST(TensorDualTest, EqualityWithScalarAllFalse) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 5.0;
+
+    // Perform comparison
+    torch::Tensor result = x == scalar;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, EqualityWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 0.0;
+
+        // Perform comparison
+        torch::Tensor result = x == scalar;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r == scalar)).item<bool>());
+    }
+}
+
+// Test: Integer scalar comparison
+TEST(TensorDualTest, EqualityWithScalarInteger) {
+    // Input TensorDual object and integer scalar
+    TensorDual x(torch::tensor({{1, 2}, {3, 4}}, torch::kInt32), 
+                 torch::tensor({{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}}, torch::kInt32));
+    int scalar = 3;
+
+    // Perform comparison
+    torch::Tensor result = x == scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{false, false}, {true, false}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+// Test: Basic functionality of inequality operator
+TEST(TensorDualTest, InequalityBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{1.0, 3.0}, {3.0, 5.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x != y;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{false, true}, {false, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements different
+TEST(TensorDualTest, InequalityAllTrue) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{5.0, 6.0}, {7.0, 8.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x != y;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements different
+TEST(TensorDualTest, InequalityAllFalse) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, {{6.0, 7.0}, {8.0, 9.0}}}));
+
+    // Perform comparison
+    torch::Tensor result = x != y;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, InequalityDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x != y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Real tensors must have the same shape for comparison.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, InequalityGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform comparison
+        torch::Tensor result = x != y;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r != y.r)).item<bool>());
+    }
+}
+
+
+
+// Test: Basic functionality of inequality operator with torch::Tensor
+TEST(TensorDualTest, InequalityWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{1.0, 3.0}, {3.0, 5.0}});
+
+    // Perform comparison
+    torch::Tensor result = x != other;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{false, true}, {false, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements different
+TEST(TensorDualTest, InequalityWithTensorAllTrue) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{5.0, 6.0}, {7.0, 8.0}});
+
+    // Perform comparison
+    torch::Tensor result = x != other;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements different
+TEST(TensorDualTest, InequalityWithTensorAllFalse) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+
+    // Perform comparison
+    torch::Tensor result = x != other;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: Undefined torch::Tensor
+TEST(TensorDualTest, InequalityWithTensorUndefined) {
+    // Input TensorDual object and undefined torch::Tensor
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+    torch::Tensor other;
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x != other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Cannot compare: Input tensor is undefined.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, InequalityWithTensorDimensionMismatch) {
+    // Input TensorDual object and torch::Tensor with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor other = torch::randn({3, 2});
+
+    EXPECT_THROW(
+        {
+            try {
+                torch::Tensor result = x != other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, InequalityWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and torch::Tensor
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform comparison
+        torch::Tensor result = x != other;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r != other)).item<bool>());
+    }
+}
 
 TEST(TensorDualTest, einsumTest4)
 {

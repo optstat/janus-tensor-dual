@@ -933,7 +933,7 @@ public:
     }
 
     /**
-     * @brief Compute the sum of a TensorDual object along a specified dimension.
+     * @brief Compute the sum of a TensorDual object along the non batch dimension.
      * 
      * This static method computes the sum along the specified dimension for both the real (`r`)
      * and dual (`d`) parts of the TensorDual object. The result is returned as a new TensorDual object.
@@ -943,19 +943,35 @@ public:
      * @return A new TensorDual object with the sum computed along the specified dimension.
      * @throws std::invalid_argument If the input TensorDual is not well-formed.
      */
-    static TensorDual sum(const TensorDual& x, int64_t dim = 1) {
-        // Validate input TensorDual
-        if (!x.r.defined() || !x.d.defined()) {
-            throw std::invalid_argument("Input TensorDual must have defined real and dual tensors.");
-        }
+    static TensorDual sum(const TensorDual& x) {
 
         // Compute the sum along the specified dimension
-        auto r = torch::sum(x.r, /*dim=*/dim, /*keepdim=*/true);
-        auto d = torch::sum(x.d, /*dim=*/dim, /*keepdim=*/true);
+        auto r = torch::sum(x.r, /*dim=*/1, /*keepdim=*/true);
+        auto d = torch::sum(x.d, /*dim=*/1, /*keepdim=*/true);
 
         // Return the result as a new TensorDual
         return TensorDual(r, d);
     }
+
+    /**
+     * @brief Compute the sum of the current TensorDual object along the non batch dimension.
+     * 
+     * This method computes the sum along the specified dimension for both the real (`r`)
+     * and dual (`d`) parts of the TensorDual object. The result is returned as a new TensorDual object.
+     * 
+     * @param x The input TensorDual object (must have defined real and dual tensors).
+     * @return A new TensorDual object with the sum computed along the specified dimension.
+     */
+    TensorDual sum() {
+
+        // Compute the sum along the specified dimension
+        auto r = torch::sum(this->r, /*dim=*/1, /*keepdim=*/true);
+        auto d = torch::sum(this->d, /*dim=*/1, /*keepdim=*/true);
+
+        // Return the result as a new TensorDual
+        return TensorDual(r, d);
+    }
+
 
     /**
      * @brief Compute the L2 norm of the real part of the TensorDual and propagate it to the dual part.
@@ -989,29 +1005,6 @@ public:
     }
 
 
-    /**
-     * @brief Compute the sum of the TensorDual object along a specified dimension.
-     * 
-     * This method computes the sum along the specified dimension for both the real (`r`) and dual (`d`)
-     * parts of the TensorDual object. The result retains the reduced dimension using `unsqueeze`.
-     * 
-     * @param dim The dimension along which to compute the sum (default is 1).
-     * @return A new TensorDual object with the sum computed along the specified dimension.
-     * @throws std::invalid_argument If the TensorDual object is not well-formed.
-     */
-    TensorDual sum(int64_t dim = 1) {
-        // Validate input tensors
-        if (!r.defined() || !d.defined()) {
-            throw std::invalid_argument("TensorDual object must have defined real and dual tensors.");
-        }
-
-        // Compute the sum along the specified dimension and retain the dimension
-        auto real = torch::sum(r, /*dim=*/dim, /*keepdim=*/true);
-        auto dual = torch::sum(d, /*dim=*/dim, /*keepdim=*/true);
-
-        // Return the result as a new TensorDual
-        return TensorDual(real, dual);
-    }
 
     /**
      * @brief Create a deep copy of the TensorDual object.
