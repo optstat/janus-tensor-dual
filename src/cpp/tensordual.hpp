@@ -1715,6 +1715,10 @@ public:
      * @throws std::invalid_argument If the input tensor cannot be broadcast to match `r`.
      */
     TensorDual operator/(const torch::Tensor& other) const {
+        //Validate tensor dimensions
+        if (r.sizes() != other.sizes()) {
+            throw std::invalid_argument("Dimension mismatch: The input tensor must have the same shape as the real part of the TensorDual.");
+        }
         // Adjust dimensions if needed to make `other` broadcast-compatible
         auto othere = other.dim() != this->r.dim() ? other.unsqueeze(1) : other;
 
@@ -1742,7 +1746,6 @@ public:
      * 
      * @param scalar The scalar value to divide by.
      * @return A new TensorDual object representing the division result.
-     * @throws std::invalid_argument If the scalar value is zero.
      */
     TensorDual operator/(double scalar) {
         // Check for division by zero
@@ -1750,7 +1753,7 @@ public:
         auto safe_scalar = torch::sign(tscalar) * tscalar.abs().clamp_min(1e-12);
 
         // Perform element-wise division
-        return TensorDual(this->r / tscalar, this->d / tscalar);
+        return TensorDual(this->r / safe_scalar, this->d / safe_scalar);
     }
     /**
      * @brief Gathers elements along a specified dimension for both the real (`r`) and dual (`d`) parts of the TensorDual.
@@ -1770,7 +1773,7 @@ public:
         }
 
         // Validate index tensor compatibility
-        if (index.dim() >= r.dim()) {
+        if (index.dim() > r.dim()) {
             throw std::invalid_argument("Index tensor dimensions are incompatible with the target tensor.");
         }
 
@@ -1804,7 +1807,7 @@ public:
         }
 
         // Validate index tensor compatibility
-        if (index.dim() >= r.dim()) {
+        if (index.dim() > r.dim()) {
             throw std::invalid_argument("Index tensor dimensions are incompatible with the target tensor.");
         }
 
@@ -1812,9 +1815,10 @@ public:
         if (r.sizes() != src.r.sizes() || d.sizes() != src.d.sizes()) {
             throw std::invalid_argument("Source TensorDual must have the same shape as the target TensorDual.");
         }
-
+        std::cerr << "index: " << index << std::endl;
         // Expand the index tensor for the dual part
-        auto index_expanded = index.unsqueeze(-1);
+        auto index_expanded = index.unsqueeze(-1).expand({-1, -1, d.size(2)});
+        std::cerr << "index_expanded: " << index_expanded << std::endl;
 
         // Scatter elements for the real and dual parts
         auto r_scattered = r.scatter(dim, index, src.r);

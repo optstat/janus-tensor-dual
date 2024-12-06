@@ -3928,6 +3928,601 @@ TEST(TensorDualTest, InequalityWithTensorGpuTensors) {
     }
 }
 
+
+// Test: Basic functionality of inequality operator with a scalar
+TEST(TensorDualTest, InequalityWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 3.0;
+
+    // Perform comparison
+    torch::Tensor result = x != scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {false, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: All elements different from scalar
+TEST(TensorDualTest, InequalityWithScalarAllTrue) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 5.0;
+
+    // Perform comparison
+    torch::Tensor result = x != scalar;
+
+    // Expected boolean tensor (all true)
+    torch::Tensor expected = torch::ones_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+// Test: No elements different from scalar
+TEST(TensorDualTest, InequalityWithScalarAllFalse) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{3.0, 3.0}, {3.0, 3.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 3.0;
+
+    // Perform comparison
+    torch::Tensor result = x != scalar;
+
+    // Expected boolean tensor (all false)
+    torch::Tensor expected = torch::zeros_like(x.r, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, InequalityWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 0.0;
+
+        // Perform comparison
+        torch::Tensor result = x != scalar;
+
+        // Validate the result
+        EXPECT_TRUE(torch::all(result == (x.r != scalar)).item<bool>());
+    }
+}
+
+// Test: Integer scalar comparison
+TEST(TensorDualTest, InequalityWithScalarInteger) {
+    // Input TensorDual object and integer scalar
+    TensorDual x(torch::tensor({{1, 2}, {3, 4}}, torch::kInt32), 
+                 torch::tensor({{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}}, torch::kInt32));
+    int scalar = 3;
+
+    // Perform comparison
+    torch::Tensor result = x != scalar;
+
+    // Expected boolean tensor
+    torch::Tensor expected = torch::tensor({{true, true}, {false, true}}, torch::kBool);
+
+    // Validate the result
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+// Test: Basic functionality of division operator
+TEST(TensorDualTest, DivisionBasic) {
+    // Input TensorDual objects
+    TensorDual x(torch::randn({2, 2}).to(torch::kFloat64), 
+                 torch::randn({2, 2, 3}).to(torch::kFloat64)); 
+    TensorDual y(torch::randn({2, 2}).to(torch::kFloat64), 
+                 torch::randn({2, 2, 3}).to(torch::kFloat64));
+
+    // Perform division
+    TensorDual result = x / y;
+
+    // Expected results
+    auto expected_r = x.r/y.r;
+    auto expected_d = torch::einsum("mij,mi->mij", {x.d, 1.0 / y.r}) + 
+                      torch::einsum("mi,mij->mij", {-x.r / (y.r * y.r), y.d });
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-8));
+
+    // Validate the dual part
+    std::cerr << result.d << std::endl;
+    std::cerr << expected_d << std::endl;
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-8));
+}
+
+// Test: Division with zeros in the denominator
+TEST(TensorDualTest, DivisionWithZeros) {
+    // Input TensorDual objects
+    TensorDual x(torch::tensor({{4.0, 6.0}, {8.0, 10.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    TensorDual y(torch::tensor({{0.0, 3.0}, {4.0, 5.0}}), 
+                 torch::tensor({{{0.5, 1.0}, {1.5, 2.0}}, {{2.5, 3.0}, {3.5, 4.0}}}));
+
+    // Perform division
+    TensorDual result = x / y;
+
+    // Ensure clamped behavior (safe division by zero is handled correctly)
+    auto safe_r_y = torch::sign(y.r) * y.r.abs().clamp_min(1e-12);
+    auto expected_r = x.r / safe_r_y;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+}
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, DivisionDimensionMismatch) {
+    // Input TensorDual objects with mismatched dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x / y;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: Tensors in TensorDual must have the same shape for division.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, DivisionGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual objects on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        TensorDual y(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform division
+        TensorDual result = x / y;
+
+        // Compute expected real part
+        auto safe_r_y = torch::sign(y.r) * y.r.abs().clamp_min(1e-12);
+        auto expected_r = x.r / safe_r_y;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+    }
+}
+
+
+
+// Test: Basic functionality of division operator with torch::Tensor
+TEST(TensorDualTest, DivisionWithTensorBasic) {
+    // Input TensorDual object and torch::Tensor
+    TensorDual x(torch::tensor({{4.0, 6.0}, {8.0, 10.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{2.0, 5.0}, {3.0, 2.0}});
+
+    // Perform division
+    TensorDual result = x / other;
+
+    // Expected results
+    auto expected_r = x.r / other;
+    auto expected_d = x.d / other.unsqueeze(-1);
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Division with zeros in the denominator
+TEST(TensorDualTest, DivisionWithTensorZeros) {
+    // Input TensorDual object and torch::Tensor with zeros
+    TensorDual x(torch::tensor({{4.0, 6.0}, {8.0, 10.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    torch::Tensor other = torch::tensor({{0.0, 5.0}, {3.0, 2.0}});
+
+    // Perform division
+    TensorDual result = x / other;
+
+    // Ensure safe division behavior
+    auto safe_other = torch::sign(other) * other.abs().clamp_min(1e-12);
+    auto expected_r = x.r / safe_other;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+}
+
+
+// Test: Dimension mismatch
+TEST(TensorDualTest, DivisionWithTensorDimensionMismatch) {
+    // Input TensorDual object and torch::Tensor with incompatible dimensions
+    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
+    torch::Tensor other = torch::randn({3, 2});
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x / other;
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dimension mismatch: The input tensor must have the same shape as the real part of the TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, DivisionWithTensorGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and torch::Tensor
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        torch::Tensor other = torch::randn({2, 3}, torch::kCUDA);
+
+        // Perform division
+        TensorDual result = x / other;
+
+        // Compute expected real part
+        auto safe_other = torch::sign(other) * other.abs().clamp_min(1e-12);
+        auto expected_r = x.r / safe_other;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of division operator with a scalar
+TEST(TensorDualTest, DivisionWithScalarBasic) {
+    // Input TensorDual object and scalar
+    TensorDual x(torch::tensor({{4.0, 6.0}, {8.0, 10.0}}), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}));
+    double scalar = 2.0;
+
+    // Perform division
+    TensorDual result = x / scalar;
+
+    // Expected results
+    auto expected_r = torch::tensor({{2.0, 3.0}, {4.0, 5.0}});
+    auto expected_d = torch::tensor({
+        {{0.5, 1.0}, {1.5, 2.0}},
+        {{2.5, 3.0}, {3.5, 4.0}}
+    });
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Division by a negative scalar
+TEST(TensorDualTest, DivisionWithScalarNegative) {
+    // Input TensorDual object and negative scalar
+    TensorDual x(torch::tensor({{4.0, -6.0}, {-8.0, 10.0}}), 
+                 torch::tensor({{{1.0, -2.0}, {-3.0, 4.0}}, {{5.0, -6.0}, {-7.0, 8.0}}}));
+    double scalar = -2.0;
+
+    // Perform division
+    TensorDual result = x / scalar;
+
+    // Expected results
+    auto expected_r = torch::tensor({{-2.0, 3.0}, {4.0, -5.0}});
+    auto expected_d = torch::tensor({
+        {{-0.5, 1.0}, {1.5, -2.0}},
+        {{-2.5, 3.0}, {3.5, -4.0}}
+    });
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Division by a very small scalar
+TEST(TensorDualTest, DivisionWithScalarSmallValue) {
+    // Input TensorDual object and small scalar
+    TensorDual x(torch::tensor({{4.0, 6.0}, {8.0, 10.0}}).to(torch::kFloat64), 
+                 torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}}).to(torch::kFloat64));
+    double scalar = 1e-14;
+
+    // Perform division
+    TensorDual result = x / scalar;
+
+    // Ensure safe scalar handling
+    auto safe_scalar = torch::sign(torch::tensor(scalar)) * torch::tensor(scalar).abs().clamp_min(1e-12);
+    auto expected_r = x.r / safe_scalar;
+    auto expected_d = x.d / safe_scalar;
+
+    // Validate the real part
+    std::cerr << result.r << std::endl;
+    std::cerr << expected_r << std::endl;
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-4));
+
+    // Validate the dual part
+    std::cerr << result.d << std::endl;
+    std::cerr << expected_d << std::endl;
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-4));
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, DivisionWithScalarGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU and scalar
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+        double scalar = 3.0;
+
+        // Perform division
+        TensorDual result = x / scalar;
+
+        // Expected results
+        auto expected_r = x.r / scalar;
+        auto expected_d = x.d / scalar;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of gather
+TEST(TensorDualTest, GatherBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 1.1}, {2.0, 2.1}}, {{3.0, 3.1}, {4.0, 4.1}}}));
+
+    // Index tensor
+    torch::Tensor index = torch::tensor({{0, 1}, {1, 0}});
+
+    // Perform gather operation along dimension 1
+    TensorDual result = x.gather(1, index);
+
+    // Expected results
+    auto expected_r = torch::tensor({{1.0, 2.0}, {4.0, 3.0}});
+    auto expected_d = torch::tensor({{{1.0, 1.1}, {2.0, 2.1}}, {{4.0, 4.1}, {3.0, 3.1}}});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Gather along dimension 0
+TEST(TensorDualTest, GatherAlongDim0) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 1.1}, {2.0, 2.1}}, {{3.0, 3.1}, {4.0, 4.1}}}));
+
+    // Index tensor
+    torch::Tensor index = torch::tensor({{1, 0}, {0, 1}});
+
+    // Perform gather operation along dimension 0
+    TensorDual result = x.gather(0, index);
+
+    // Expected results
+    auto expected_r = torch::tensor({{3.0, 2.0}, {1.0, 4.0}});
+    auto expected_d = torch::tensor({{{3.0, 3.1}, {2.0, 2.1}}, {{1.0, 1.1}, {4.0, 4.1}}});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Invalid dimension
+TEST(TensorDualTest, GatherInvalidDimension) {
+    // Input TensorDual object
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+
+    // Invalid dimension
+    int64_t invalid_dim = 3;
+
+    // Index tensor
+    torch::Tensor index = torch::tensor({{0, 1}, {1, 0}});
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.gather(invalid_dim, index);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Invalid dimension: 'dim' must be within the range of the tensor dimensions.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Invalid index tensor dimensions
+TEST(TensorDualTest, GatherInvalidIndexDimensions) {
+    // Input TensorDual object
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+
+    // Invalid index tensor dimensions
+    torch::Tensor index = torch::randn({3, 2, 1});
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.gather(1, index);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Index tensor dimensions are incompatible with the target tensor.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, GatherGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Index tensor
+        torch::Tensor index = torch::tensor({{0, 1}, {1, 2}}, torch::kCUDA);
+
+        // Perform gather operation along dimension 1
+        TensorDual result = x.gather(1, index);
+
+        // Validate shapes
+        EXPECT_EQ(result.r.sizes(), index.sizes());
+        EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 2, 4}));
+    }
+}
+
+
+
+// Test: Basic functionality of scatter
+TEST(TensorDualTest, ScatterBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{1.0, 1.1}, {2.0, 2.1}}, {{3.0, 3.1}, {4.0, 4.1}}}));
+
+    // Source TensorDual
+    TensorDual src(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                   torch::tensor({{{10.0, 11.0}, {20.0, 21.0}}, {{30.0, 31.0}, {40.0, 41.0}}}));
+
+    // Index tensor
+    torch::Tensor index = torch::tensor({{0, 1}, {1, 0}});
+
+    // Perform scatter operation along dimension 1
+    TensorDual result = x.scatter(1, index, src);
+
+    // Expected results
+    auto expected_r = torch::tensor({{10.0, 20.0}, {40.0, 30.0}});
+    auto expected_d = torch::tensor({{{10.0, 11.0}, {20.0, 21.0}}, {{40.0, 41.0}, {30.0, 31.0}}});
+    std::cerr << "result.r" << result.r << std::endl;
+    std::cerr << "expected_r" << expected_r << std::endl;
+    std::cerr << "result.d" << result.d << std::endl;
+    std::cerr << "expected_d" << expected_d << std::endl;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Scatter along dimension 0
+TEST(TensorDualTest, ScatterAlongDim0) {
+    // Input TensorDual object
+    TensorDual x(torch::zeros({2, 2}), torch::zeros({2, 2, 3}));
+
+    // Source TensorDual
+    TensorDual src(torch::tensor({{10.0, 20.0}, {30.0, 40.0}}), 
+                   torch::tensor({{{10.0, 11.0, 12.0}, {20.0, 21.0, 22.0}}, {{30.0, 31.0, 32.0}, {40.0, 41.0, 42.0}}}));
+
+    // Index tensor
+    torch::Tensor index = torch::tensor({{1, 0}, {0, 1}});
+
+    // Perform scatter operation along dimension 0
+    TensorDual result = x.scatter(0, index, src);
+
+    // Expected results
+    auto expected_r = torch::tensor({{30.0, 20.0}, {10.0, 40.0}});
+    auto expected_d = torch::tensor({{{30.0, 31.0, 32.0}, {20.0, 21.0, 22.0}}, 
+                                     {{10.0, 11.0, 12.0}, {40.0, 41.0, 42.0}}});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Invalid dimension
+TEST(TensorDualTest, ScatterInvalidDimension) {
+    // Input TensorDual object
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+
+    // Source TensorDual
+    TensorDual src(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+
+    // Invalid dimension
+    int64_t invalid_dim = 3;
+
+    // Index tensor
+    torch::Tensor index = torch::randn({2, 2}).to(torch::kLong);
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.scatter(invalid_dim, index, src);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Invalid dimension: 'dim' must be within the range of the tensor dimensions.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Invalid source TensorDual dimensions
+TEST(TensorDualTest, ScatterInvalidSourceDimensions) {
+    // Input TensorDual object
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 2, 3}));
+
+    // Source TensorDual with mismatched dimensions
+    TensorDual src(torch::randn({3, 2}), torch::randn({3, 2, 3}));
+
+    // Index tensor
+    torch::Tensor index = torch::randn({2, 2}).to(torch::kLong);
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.scatter(1, index, src);
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Source TensorDual must have the same shape as the target TensorDual.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, ScatterGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::zeros({2, 3}, torch::kCUDA), torch::zeros({2, 3, 4}, torch::kCUDA));
+
+        // Source TensorDual
+        TensorDual src(torch::tensor({{10.0, 20.0, 30.0}, {40.0, 50.0, 60.0}}, torch::kCUDA), 
+                       torch::tensor({{{10.0, 11.0, 12.0, 13.0}, {20.0, 21.0, 22.0, 23.0}, {30.0, 31.0, 32.0, 33.0}}, 
+                                      {{40.0, 41.0, 42.0, 43.0}, {50.0, 51.0, 52.0, 53.0}, {60.0, 61.0, 62.0, 63.0}}}, torch::kCUDA));
+
+        // Index tensor
+        torch::Tensor index = torch::tensor({{0, 2, 1}, {2, 1, 0}}, torch::kCUDA);
+
+        // Perform scatter operation along dimension 1
+        TensorDual result = x.scatter(1, index, src);
+
+        // Validate shapes
+        EXPECT_EQ(result.r.sizes(), x.r.sizes());
+        EXPECT_EQ(result.d.sizes(), x.d.sizes());
+    }
+}
+
+
 TEST(TensorDualTest, einsumTest4)
 {
     auto r1 = torch::randn({2, 2});
