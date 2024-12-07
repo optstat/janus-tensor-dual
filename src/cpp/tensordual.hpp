@@ -162,9 +162,6 @@ public:
         if (r.device() != d.device()) {
             throw std::runtime_error("Real and dual tensors must reside on the same device.");
         }
-        if (r.dtype() != d.dtype()) {
-            throw std::runtime_error("Real and dual tensors must have the same dtype.");
-        }
         this->r = r;
         this->d = d;
         this->dtype = torch::typeMetaToScalarType(r.dtype());
@@ -2266,6 +2263,9 @@ public:
         return TensorDual(r_atanh, d);
     }
 
+
+
+
     /**
      * @brief Computes the exponential (exp) of a TensorDual object.
      * 
@@ -2343,14 +2343,15 @@ public:
      * @throws std::invalid_argument If the dimensions of `d` are incompatible with `r`.
      */
     TensorDual sqrt() const {
-        // Validate that all real values are >= 0
-        if (!torch::all(r >= 0).item<bool>()) {
-            throw std::domain_error("Square root is only defined for non-negative real numbers.");
-        }
 
         // Validate dimensions of the dual part
         if (r.dim() + 1 != d.dim() || r.sizes() != d.sizes().slice(0, r.dim())) {
             throw std::invalid_argument("Dual part dimensions are incompatible with the real part.");
+        }
+        TensorDual res;
+        //If there are any negative values in the real part convert the dual number to complex
+        if (!torch::all(r >= 0).item<bool>()) {
+            res = complex();
         }
 
         // Compute the square root of the real part
@@ -2666,9 +2667,18 @@ public:
      * @return A new TensorDual object with the imaginary parts of the original real and dual components.
      */
     TensorDual imag() const {
+        torch::Tensor imag_r, imag_d;
         // Extract the imaginary part of the real and dual tensors
-        auto imag_r = torch::imag(r);
-        auto imag_d = torch::imag(d);
+        if (!r.is_complex()) {
+            imag_r = torch::zeros_like(r);
+        } else {
+            imag_r = torch::imag(r);
+        }
+        if (!d.is_complex()) {
+            imag_d = torch::zeros_like(d);
+        } else {
+            imag_d = torch::imag(d);
+        }
 
         // Return a new TensorDual object with the imaginary parts
         return TensorDual(imag_r, imag_d);
@@ -2752,10 +2762,6 @@ public:
             throw std::invalid_argument("Mask must be a boolean tensor.");
         }
 
-        // Validate that the mask has the same shape as the real tensor
-        if (mask.sizes() != r.sizes()) {
-            throw std::invalid_argument("Mask must have the same shape as the real tensor.");
-        }
 
         // Index the real and dual tensors using the mask
         auto indexed_r = r.index({mask});
@@ -2798,16 +2804,6 @@ public:
         // Validate that the mask is a boolean tensor
         if (mask.dtype() != torch::kBool) {
             throw std::invalid_argument("Mask must be a boolean tensor.");
-        }
-
-        // Validate that the mask matches the shape of the real tensor
-        if (mask.sizes() != r.sizes()) {
-            throw std::invalid_argument("Mask must have the same shape as the real tensor.");
-        }
-
-        // Validate that the value TensorDual has compatible shapes
-        if (value.r.sizes() != r.sizes() || value.d.sizes() != d.sizes()) {
-            throw std::invalid_argument("Shapes of value TensorDual components must match the target tensors.");
         }
 
         // Perform the in-place update for the real and dual components

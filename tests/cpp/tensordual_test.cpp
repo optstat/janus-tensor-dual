@@ -4523,6 +4523,2770 @@ TEST(TensorDualTest, ScatterGpuTensors) {
 }
 
 
+// Test: Basic functionality of reciprocal
+TEST(TensorDualTest, ReciprocalBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{2.0, 4.0}, {1.0, 0.5}}), 
+                 torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}}));
+
+    // Perform reciprocal operation
+    TensorDual result = x.reciprocal();
+
+    // Expected results
+    auto expected_r = torch::tensor({{0.5, 0.25}, {1.0, 2.0}});
+    auto rrec_squared = expected_r.unsqueeze(-1) * expected_r.unsqueeze(-1);
+    auto expected_d = -rrec_squared * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Reciprocal with negative values
+TEST(TensorDualTest, ReciprocalNegativeValues) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-2.0, -4.0}, {-1.0, -0.5}}), 
+                 torch::tensor({{{0.1, -0.2}, {0.3, -0.4}}, {{-0.5, 0.6}, {-0.7, 0.8}}}));
+
+    // Perform reciprocal operation
+    TensorDual result = x.reciprocal();
+
+    // Expected results
+    auto expected_r = torch::tensor({{-0.5, -0.25}, {-1.0, -2.0}});
+    auto rrec_squared = expected_r.unsqueeze(-1) * expected_r.unsqueeze(-1);
+    auto expected_d = -rrec_squared * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Reciprocal with small values
+TEST(TensorDualTest, ReciprocalSmallValues) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1e-10, 1e-8}, {1e-6, 1e-4}}), 
+                 torch::randn({2, 2, 3}));
+
+    // Perform reciprocal operation
+    TensorDual result = x.reciprocal();
+
+    // Ensure small values are clamped
+    auto r_safe = torch::sign(x.r) * x.r.abs().clamp_min(1e-12);
+    auto expected_r = r_safe.reciprocal();
+    auto rrec_squared = expected_r.unsqueeze(-1) * expected_r.unsqueeze(-1);
+    auto expected_d = -rrec_squared * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+
+// Test: GPU tensors
+TEST(TensorDualTest, ReciprocalGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform reciprocal operation
+        TensorDual result = x.reciprocal();
+
+        // Expected results
+        auto r_safe = torch::sign(x.r) * x.r.abs().clamp_min(1e-12);
+        auto expected_r = r_safe.reciprocal();
+        auto rrec_squared = expected_r.unsqueeze(-1) * expected_r.unsqueeze(-1);
+        auto expected_d = -rrec_squared * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+
+// Test: Basic functionality of square
+TEST(TensorDualTest, SquareBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0}, {3.0, 4.0}}), 
+                 torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}}));
+
+    // Perform square operation
+    TensorDual result = x.square();
+
+    // Expected results
+    auto expected_r = torch::tensor({{1.0, 4.0}, {9.0, 16.0}});
+    auto expected_d = 2 * x.r.unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Square with negative values
+TEST(TensorDualTest, SquareNegativeValues) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, -2.0}, {-3.0, -4.0}}), 
+                 torch::tensor({{{0.1, -0.2}, {0.3, -0.4}}, {{-0.5, 0.6}, {-0.7, 0.8}}}));
+
+    // Perform square operation
+    TensorDual result = x.square();
+
+    // Expected results
+    auto expected_r = torch::tensor({{1.0, 4.0}, {9.0, 16.0}});
+    auto expected_d = 2 * x.r.unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, SquareIncompatibleDimensions) {
+    // Input TensorDual object with incompatible dual dimensions
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 3, 2}));
+
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.square();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, SquareGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform square operation
+        TensorDual result = x.square();
+
+        // Expected results
+        auto expected_r = x.r.square();
+        auto expected_d = 2 * x.r.unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of sin
+TEST(TensorDualTest, SinBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{0.0, M_PI / 2}, {M_PI, 3 * M_PI / 2}}), 
+                 torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}}));
+
+    // Perform sine operation
+    TensorDual result = x.sin();
+
+    // Expected results
+    auto expected_r = torch::sin(x.r);
+    auto expected_d = torch::cos(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Zero values
+TEST(TensorDualTest, SinZeroValues) {
+    // Input TensorDual object with zero real part
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform sine operation
+    TensorDual result = x.sin();
+
+    // Expected results
+    auto expected_r = torch::zeros_like(x.r); // sin(0) = 0
+    auto expected_d = torch::ones_like(x.d) * x.d; // cos(0) = 1
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values
+TEST(TensorDualTest, SinNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-M_PI / 6, -M_PI / 4}, {-M_PI / 3, -M_PI / 2}}), 
+                 torch::randn({2, 2, 3}));
+
+    // Perform sine operation
+    TensorDual result = x.sin();
+
+    // Expected results
+    auto expected_r = torch::sin(x.r);
+    auto expected_d = torch::cos(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, SinIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.sin();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, SinGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform sine operation
+        TensorDual result = x.sin();
+
+        // Expected results
+        auto expected_r = torch::sin(x.r);
+        auto expected_d = torch::cos(x.r).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of cos
+TEST(TensorDualTest, CosBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{0.0, M_PI / 2}, {M_PI, 3 * M_PI / 2}}), 
+                 torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}}));
+
+    // Perform cosine operation
+    TensorDual result = x.cos();
+
+    // Expected results
+    auto expected_r = torch::cos(x.r);
+    auto expected_d = -torch::sin(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Zero values
+TEST(TensorDualTest, CosZeroValues) {
+    // Input TensorDual object with zero real part
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform cosine operation
+    TensorDual result = x.cos();
+
+    // Expected results
+    auto expected_r = torch::ones_like(x.r); // cos(0) = 1
+    auto expected_d = -torch::zeros_like(x.d); // -sin(0) = 0
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values
+TEST(TensorDualTest, CosNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-M_PI / 6, -M_PI / 4}, {-M_PI / 3, -M_PI / 2}}), 
+                 torch::randn({2, 2, 3}));
+
+    // Perform cosine operation
+    TensorDual result = x.cos();
+
+    // Expected results
+    auto expected_r = torch::cos(x.r);
+    auto expected_d = -torch::sin(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, CosIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.cos();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, CosGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform cosine operation
+        TensorDual result = x.cos();
+
+        // Expected results
+        auto expected_r = torch::cos(x.r);
+        auto expected_d = -torch::sin(x.r).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of tan
+TEST(TensorDualTest, TanBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{0.0, M_PI / 4}, {M_PI / 6, -M_PI / 4}}), 
+                 torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}}));
+
+    // Perform tangent operation
+    TensorDual result = x.tan();
+
+    // Expected results
+    auto expected_r = torch::tan(x.r);
+    auto expected_d = torch::pow(torch::cos(x.r), -2).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Zero values
+TEST(TensorDualTest, TanZeroValues) {
+    // Input TensorDual object with zero real part
+    TensorDual x(torch::zeros({2, 2}), torch::zeros({2, 2, 3}));
+    //The dual part must be the unit matrix
+    x.d = torch::eye(2).unsqueeze(2).expand({2, 2, 3});
+
+    // Perform tangent operation
+    TensorDual result = x.tan();
+
+    // Expected results
+    auto expected_r = torch::zeros_like(x.r); // tan(0) = 0
+    auto expected_d = torch::eye(2).unsqueeze(2).expand({2, 2, 3}); // sec^2(0) = 1
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values
+TEST(TensorDualTest, TanNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-M_PI / 6, -M_PI / 4}, {-M_PI / 3, -M_PI / 2}}), 
+                 torch::randn({2, 2, 3}));
+
+    // Perform tangent operation
+    TensorDual result = x.tan();
+
+    // Expected results
+    auto expected_r = torch::tan(x.r);
+    auto expected_d = torch::pow(torch::cos(x.r), -2).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, TanIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::randn({2, 2}), torch::randn({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.tan();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Near singularities
+TEST(TensorDualTest, TanSingularities) {
+    // Input TensorDual object near singularity (pi/2 + n*pi)
+    TensorDual x(torch::tensor({{M_PI / 2 - 1e-6, -M_PI / 2 + 1e-6}}), 
+                 torch::ones({1, 2, 3}));
+    std::cerr << "x.d" << x.d << std::endl;
+
+    // Perform tangent operation
+    TensorDual result = x.tan();
+
+    // Expected results
+    auto expected_r = torch::tan(x.r);
+    auto expected_d = torch::pow(torch::cos(x.r), -2).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, TanGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform tangent operation
+        TensorDual result = x.tan();
+
+        // Expected results
+        auto expected_r = torch::tan(x.r);
+        auto expected_d = torch::pow(torch::cos(x.r), -2).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of asin
+TEST(TensorDualTest, AsinBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, -0.5, 0.0, 0.5, 1.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}, {0.4}, {0.5}}}));
+
+    // Perform arcsine operation
+    TensorDual result = x.asin();
+
+    // Expected results
+    auto expected_r = torch::asin(x.r);
+    auto expected_d = (1 / torch::sqrt(1 - torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge values [-1, 1]
+TEST(TensorDualTest, AsinEdgeValues) {
+    // Input TensorDual object with edge values
+    TensorDual x(torch::tensor({{-1.0, 1.0}}), torch::tensor({{{0.1}, {0.2}}}));
+
+    // Perform arcsine operation
+    TensorDual result = x.asin();
+
+    // Expected results
+    auto expected_r = torch::asin(x.r);
+    auto expected_d = (1 / torch::sqrt(1 - torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Values outside domain
+TEST(TensorDualTest, AsinOutOfDomain) {
+    // Input TensorDual object with values outside domain [-1, 1]
+    TensorDual x(torch::tensor({{-1.5, 2.0}}), torch::randn({1, 2, 3}));
+
+    // Expect domain_error exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.asin();
+            } catch (const std::domain_error& e) {
+                EXPECT_STREQ("Real part out of domain: arcsine is only defined for values in the range [-1, 1].", e.what());
+                throw;
+            }
+        },
+        std::domain_error
+    );
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, AsinIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.asin();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AsinGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::rand({2, 3}, torch::kCUDA) * 2 - 1, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform arcsine operation
+        TensorDual result = x.asin();
+
+        // Expected results
+        auto expected_r = torch::asin(x.r);
+        auto expected_d = (1 / torch::sqrt(1 - torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of acos
+TEST(TensorDualTest, AcosBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, -0.5, 0.0, 0.5, 1.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}, {0.4}, {0.5}}}));
+
+    // Perform arccosine operation
+    TensorDual result = x.acos();
+
+    // Expected results
+    auto expected_r = torch::acos(x.r);
+    auto expected_d = (-1 / torch::sqrt(1 - torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge values [-1, 1]
+TEST(TensorDualTest, AcosEdgeValues) {
+    // Input TensorDual object with edge values
+    TensorDual x(torch::tensor({{-1.0, 1.0}}), torch::tensor({{{0.1}, {0.2}}}));
+
+    // Perform arccosine operation
+    TensorDual result = x.acos();
+
+    // Expected results
+    auto expected_r = torch::acos(x.r);
+    auto expected_d = (-1 / torch::sqrt(1 - torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Values outside domain
+TEST(TensorDualTest, AcosOutOfDomain) {
+    // Input TensorDual object with values outside domain [-1, 1]
+    TensorDual x(torch::tensor({{-1.5, 2.0}}), torch::randn({1, 2, 3}));
+
+    // Expect domain_error exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.acos();
+            } catch (const std::domain_error& e) {
+                EXPECT_STREQ("Real part out of domain: arccosine is only defined for values in the range [-1, 1].", e.what());
+                throw;
+            }
+        },
+        std::domain_error
+    );
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, AcosIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.acos();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AcosGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::rand({2, 3}, torch::kCUDA) * 2 - 1, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform arccosine operation
+        TensorDual result = x.acos();
+
+        // Expected results
+        auto expected_r = torch::acos(x.r);
+        auto expected_d = (-1 / torch::sqrt(1 - torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of atan
+TEST(TensorDualTest, AtanBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, 0.0, 1.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform arctangent operation
+    TensorDual result = x.atan();
+
+    // Expected results
+    auto expected_r = torch::atan(x.r);
+    auto expected_d = (1 / (1 + torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Zero values
+TEST(TensorDualTest, AtanZeroValues) {
+    // Input TensorDual object with zero real part
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform arctangent operation
+    TensorDual result = x.atan();
+
+    // Expected results
+    auto expected_r = torch::atan(x.r); // atan(0) = 0
+    auto expected_d = (1 / (1 + torch::pow(x.r, 2))).unsqueeze(-1) * x.d; // 1 / (1 + 0^2) = 1
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values
+TEST(TensorDualTest, AtanNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-2.0, -1.0}}), torch::randn({1, 2, 3}));
+
+    // Perform arctangent operation
+    TensorDual result = x.atan();
+
+    // Expected results
+    auto expected_r = torch::atan(x.r);
+    auto expected_d = (1 / (1 + torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Large values
+TEST(TensorDualTest, AtanLargeValues) {
+    // Input TensorDual object with large real values
+    TensorDual x(torch::tensor({{100.0, 1000.0}}), torch::randn({1, 2, 3}));
+
+    // Perform arctangent operation
+    TensorDual result = x.atan();
+
+    // Expected results
+    auto expected_r = torch::atan(x.r);
+    auto expected_d = (1 / (1 + torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, AtanIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.atan();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AtanGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::rand({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform arctangent operation
+        TensorDual result = x.atan();
+
+        // Expected results
+        auto expected_r = torch::atan(x.r);
+        auto expected_d = (1 / (1 + torch::pow(x.r, 2))).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of sinh
+TEST(TensorDualTest, SinhBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, 0.0, 1.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform hyperbolic sine operation
+    TensorDual result = x.sinh();
+
+    // Expected results
+    auto expected_r = torch::sinh(x.r);
+    auto expected_d = torch::cosh(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Zero values
+TEST(TensorDualTest, SinhZeroValues) {
+    // Input TensorDual object with zero real part
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform hyperbolic sine operation
+    TensorDual result = x.sinh();
+
+    // Expected results
+    auto expected_r = torch::sinh(x.r); // sinh(0) = 0
+    auto expected_d = torch::cosh(x.r).unsqueeze(-1) * x.d; // cosh(0) = 1
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values
+TEST(TensorDualTest, SinhNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-2.0, -1.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic sine operation
+    TensorDual result = x.sinh();
+
+    // Expected results
+    auto expected_r = torch::sinh(x.r);
+    auto expected_d = torch::cosh(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Large values
+TEST(TensorDualTest, SinhLargeValues) {
+    // Input TensorDual object with large real values
+    TensorDual x(torch::tensor({{100.0, -100.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic sine operation
+    TensorDual result = x.sinh();
+
+    // Expected results
+    auto expected_r = torch::sinh(x.r);
+    auto expected_d = torch::cosh(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, SinhIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.sinh();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, SinhGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform hyperbolic sine operation
+        TensorDual result = x.sinh();
+
+        // Expected results
+        auto expected_r = torch::sinh(x.r);
+        auto expected_d = torch::cosh(x.r).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of cosh
+TEST(TensorDualTest, CoshBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, 0.0, 1.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform hyperbolic cosine operation
+    TensorDual result = x.cosh();
+
+    // Expected results
+    auto expected_r = torch::cosh(x.r);
+    auto expected_d = torch::sinh(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Zero values
+TEST(TensorDualTest, CoshZeroValues) {
+    // Input TensorDual object with zero real part
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform hyperbolic cosine operation
+    TensorDual result = x.cosh();
+
+    // Expected results
+    auto expected_r = torch::cosh(x.r); // cosh(0) = 1
+    auto expected_d = torch::sinh(x.r).unsqueeze(-1) * x.d; // sinh(0) = 0
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values
+TEST(TensorDualTest, CoshNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-2.0, -1.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic cosine operation
+    TensorDual result = x.cosh();
+
+    // Expected results
+    auto expected_r = torch::cosh(x.r);
+    auto expected_d = torch::sinh(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Large values
+TEST(TensorDualTest, CoshLargeValues) {
+    // Input TensorDual object with large real values
+    TensorDual x(torch::tensor({{100.0, -100.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic cosine operation
+    TensorDual result = x.cosh();
+
+    // Expected results
+    auto expected_r = torch::cosh(x.r);
+    auto expected_d = torch::sinh(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, CoshIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.cosh();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, CoshGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform hyperbolic cosine operation
+        TensorDual result = x.cosh();
+
+        // Expected results
+        auto expected_r = torch::cosh(x.r);
+        auto expected_d = torch::sinh(x.r).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of tanh
+TEST(TensorDualTest, TanhBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, 0.0, 1.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform hyperbolic tangent operation
+    TensorDual result = x.tanh();
+
+    // Expected results
+    auto expected_r = torch::tanh(x.r);
+    auto expected_d = torch::pow(torch::cosh(x.r), -2).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Zero values
+TEST(TensorDualTest, TanhZeroValues) {
+    // Input TensorDual object with zero real part
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform hyperbolic tangent operation
+    TensorDual result = x.tanh();
+
+    // Expected results
+    auto expected_r = torch::tanh(x.r); // tanh(0) = 0
+    auto expected_d = torch::pow(torch::cosh(x.r), -2).unsqueeze(-1) * x.d; // sech^2(0) = 1
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values
+TEST(TensorDualTest, TanhNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-2.0, -1.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic tangent operation
+    TensorDual result = x.tanh();
+
+    // Expected results
+    auto expected_r = torch::tanh(x.r);
+    auto expected_d = torch::pow(torch::cosh(x.r), -2).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Large values
+TEST(TensorDualTest, TanhLargeValues) {
+    // Input TensorDual object with large real values
+    TensorDual x(torch::tensor({{10.0, -10.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic tangent operation
+    TensorDual result = x.tanh();
+
+    // Expected results
+    auto expected_r = torch::tanh(x.r);
+    auto expected_d = torch::pow(torch::cosh(x.r), -2).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, TanhIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.tanh();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, TanhGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform hyperbolic tangent operation
+        TensorDual result = x.tanh();
+
+        // Expected results
+        auto expected_r = torch::tanh(x.r);
+        auto expected_d = torch::pow(torch::cosh(x.r), -2).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+// Test: Basic functionality of asinh
+TEST(TensorDualTest, AsinhBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, 0.0, 1.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform hyperbolic arcsine operation
+    TensorDual result = x.asinh();
+
+    // Expected results
+    auto expected_r = torch::asinh(x.r);
+    auto expected_d = torch::pow(1 + torch::pow(x.r, 2), -0.5).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Zero values
+TEST(TensorDualTest, AsinhZeroValues) {
+    // Input TensorDual object with zero real part
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform hyperbolic arcsine operation
+    TensorDual result = x.asinh();
+
+    // Expected results
+    auto expected_r = torch::asinh(x.r); // asinh(0) = 0
+    auto expected_d = torch::pow(1 + torch::pow(x.r, 2), -0.5).unsqueeze(-1) * x.d; // f'(0) = 1
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values
+TEST(TensorDualTest, AsinhNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-2.0, -1.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic arcsine operation
+    TensorDual result = x.asinh();
+
+    // Expected results
+    auto expected_r = torch::asinh(x.r);
+    auto expected_d = torch::pow(1 + torch::pow(x.r, 2), -0.5).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Large values
+TEST(TensorDualTest, AsinhLargeValues) {
+    // Input TensorDual object with large real values
+    TensorDual x(torch::tensor({{100.0, -100.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic arcsine operation
+    TensorDual result = x.asinh();
+
+    // Expected results
+    auto expected_r = torch::asinh(x.r);
+    auto expected_d = torch::pow(1 + torch::pow(x.r, 2), -0.5).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, AsinhIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.asinh();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AsinhGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform hyperbolic arcsine operation
+        TensorDual result = x.asinh();
+
+        // Expected results
+        auto expected_r = torch::asinh(x.r);
+        auto expected_d = torch::pow(1 + torch::pow(x.r, 2), -0.5).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of acosh
+TEST(TensorDualTest, AcoshBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0, 3.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform hyperbolic arccosine operation
+    TensorDual result = x.acosh();
+
+    // Expected results
+    auto expected_r = torch::acosh(x.r);
+    auto expected_d = torch::pow(torch::pow(x.r, 2.0) - 1.0, -0.5).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge case with r = 1.0
+TEST(TensorDualTest, AcoshEdgeCase) {
+    // Input TensorDual object with r = 1.0
+    TensorDual x(torch::ones({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform hyperbolic arccosine operation
+    TensorDual result = x.acosh();
+
+    // Expected results
+    auto expected_r = torch::acosh(x.r);
+    auto expected_d = torch::pow(torch::pow(x.r, 2.0) - 1.0, -0.5).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values (invalid domain)
+TEST(TensorDualTest, AcoshNegativeValues) {
+    // Input TensorDual object with invalid real part
+    TensorDual x(torch::tensor({{0.5, -1.0}}), torch::randn({1, 2, 3}));
+
+    // Expect domain_error exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.acosh();
+            } catch (const std::domain_error& e) {
+                EXPECT_STREQ("All real elements passed to acosh must be >= 1.0.", e.what());
+                throw;
+            }
+        },
+        std::domain_error
+    );
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, AcoshIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2})+1.0, torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.acosh();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Large values
+TEST(TensorDualTest, AcoshLargeValues) {
+    // Input TensorDual object with large real values
+    TensorDual x(torch::tensor({{100.0, 200.0}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic arccosine operation
+    TensorDual result = x.acosh();
+
+    // Expected results
+    auto expected_r = torch::acosh(x.r);
+    auto expected_d = torch::pow(torch::pow(x.r, 2.0) - 1.0, -0.5).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AcoshGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::rand({2, 3}, torch::kCUDA) + 2.0, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform hyperbolic arccosine operation
+        TensorDual result = x.acosh();
+
+        // Expected results
+        auto expected_r = torch::acosh(x.r);
+        auto expected_d = torch::pow(torch::pow(x.r, 2.0) - 1.0, -0.5).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+// Test: Basic functionality of atanh
+TEST(TensorDualTest, AtanhBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-0.5, 0.0, 0.5}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform hyperbolic arctangent operation
+    TensorDual result = x.atanh();
+
+    // Expected results
+    auto expected_r = torch::atanh(x.r);
+    auto expected_d = torch::pow(1 - torch::pow(x.r, 2), -1).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge case with r = 0
+TEST(TensorDualTest, AtanhEdgeCaseZero) {
+    // Input TensorDual object with r = 0
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform hyperbolic arctangent operation
+    TensorDual result = x.atanh();
+
+    // Expected results
+    auto expected_r = torch::atanh(x.r); // atanh(0) = 0
+    auto expected_d = torch::pow(1 - torch::pow(x.r, 2), -1).unsqueeze(-1) * x.d; // f'(0) = 1
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Invalid domain (r > 1.0 or r < -1.0)
+TEST(TensorDualTest, AtanhInvalidDomain) {
+    // Input TensorDual object with invalid real values
+    TensorDual x(torch::tensor({{1.5, -1.5}}), torch::randn({1, 2, 3}));
+
+    // Expect domain_error exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.atanh();
+            } catch (const std::domain_error& e) {
+                EXPECT_STREQ("All real values must be between -1.0 and 1.0 for atanh.", e.what());
+                throw;
+            }
+        },
+        std::domain_error
+    );
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, AtanhIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.atanh();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Large negative values within the domain
+TEST(TensorDualTest, AtanhLargeNegativeValues) {
+    // Input TensorDual object with large negative values close to -1
+    TensorDual x(torch::tensor({{-0.99, -0.999}}), torch::randn({1, 2, 3}));
+
+    // Perform hyperbolic arctangent operation
+    TensorDual result = x.atanh();
+
+    // Expected results
+    auto expected_r = torch::atanh(x.r);
+    auto expected_d = torch::pow(1 - torch::pow(x.r, 2), -1).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AtanhGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::rand({2, 3}, torch::kCUDA) * 0.9, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform hyperbolic arctangent operation
+        TensorDual result = x.atanh();
+
+        // Expected results
+        auto expected_r = torch::atanh(x.r);
+        auto expected_d = torch::pow(1 - torch::pow(x.r, 2), -1).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of exp
+TEST(TensorDualTest, ExpBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-1.0, 0.0, 1.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform exponential operation
+    TensorDual result = x.exp();
+
+    // Expected results
+    auto expected_r = torch::exp(x.r);
+    auto expected_d = expected_r.unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge case with r = 0
+TEST(TensorDualTest, ExpEdgeCaseZero) {
+    // Input TensorDual object with r = 0
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform exponential operation
+    TensorDual result = x.exp();
+
+    // Expected results
+    auto expected_r = torch::exp(x.r); // exp(0) = 1
+    auto expected_d = expected_r.unsqueeze(-1) * x.d; // f'(0) = exp(0) * d = d
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Large values
+TEST(TensorDualTest, ExpLargeValues) {
+    // Input TensorDual object with large real values
+    TensorDual x(torch::tensor({{10.0, 20.0}}), torch::randn({1, 2, 3}));
+
+    // Perform exponential operation
+    TensorDual result = x.exp();
+
+    // Expected results
+    auto expected_r = torch::exp(x.r);
+    auto expected_d = expected_r.unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, ExpIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({1, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.exp();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, ExpGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform exponential operation
+        TensorDual result = x.exp();
+
+        // Expected results
+        auto expected_r = torch::exp(x.r);
+        auto expected_d = expected_r.unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+
+// Test: Basic functionality of log
+TEST(TensorDualTest, LogBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{1.0, 2.0, 3.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform natural logarithm operation
+    TensorDual result = x.log();
+
+    // Expected results
+    auto expected_r = torch::log(x.r);
+    auto expected_d = (1 / x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge case with r = 1
+TEST(TensorDualTest, LogEdgeCaseOne) {
+    // Input TensorDual object with r = 1
+    TensorDual x(torch::ones({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform natural logarithm operation
+    TensorDual result = x.log();
+
+    // Expected results
+    auto expected_r = torch::log(x.r); // log(1) = 0
+    auto expected_d = (1 / x.r).unsqueeze(-1) * x.d; // f'(1) = 1
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Invalid domain (r <= 0)
+TEST(TensorDualTest, LogInvalidDomain) {
+    // Input TensorDual object with invalid real values
+    TensorDual x(torch::tensor({{0.0, -1.0}}), torch::randn({2, 2, 3}));
+
+    // Expect domain_error exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.log();
+            } catch (const std::domain_error& e) {
+                EXPECT_STREQ("All real values must be greater than 0 for the natural logarithm.", e.what());
+                throw;
+            }
+        },
+        std::domain_error
+    );
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, LogIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.log();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Large positive values
+TEST(TensorDualTest, LogLargeValues) {
+    // Input TensorDual object with large real values
+    TensorDual x(torch::tensor({{100.0, 1000.0}}), torch::randn({1, 2, 3}));
+
+    // Perform natural logarithm operation
+    TensorDual result = x.log();
+
+    // Expected results
+    auto expected_r = torch::log(x.r);
+    auto expected_d = (1 / x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, LogGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA).abs() + 1.0, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform natural logarithm operation
+        TensorDual result = x.log();
+
+        // Expected results
+        auto expected_r = torch::log(x.r);
+        auto expected_d = (1 / x.r).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+
+// Test: Basic functionality of sqrt
+TEST(TensorDualTest, SqrtBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{4.0, 9.0, 16.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform square root operation
+    TensorDual result = x.sqrt();
+
+    // Expected results
+    auto expected_r = torch::sqrt(x.r);
+    auto expected_d = (0.5 / expected_r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge case with r = 1
+TEST(TensorDualTest, SqrtEdgeCaseOne) {
+    // Input TensorDual object with r = 1
+    TensorDual x(torch::ones({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform square root operation
+    TensorDual result = x.sqrt();
+
+    // Expected results
+    auto expected_r = torch::sqrt(x.r); // sqrt(1) = 1
+    auto expected_d = (0.5 / expected_r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values in real part
+TEST(TensorDualTest, SqrtNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-4.0, 9.0}}), torch::randn({1, 2, 3}));
+
+    // Expect that the `complex` conversion is invoked
+    EXPECT_NO_THROW({
+        TensorDual result = x.sqrt();
+    });
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, SqrtIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.sqrt();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, SqrtGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA).abs() + 1.0, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform square root operation
+        TensorDual result = x.sqrt();
+
+        // Expected results
+        auto expected_r = torch::sqrt(x.r);
+        auto expected_d = (0.5 / expected_r).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of abs
+TEST(TensorDualTest, AbsBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-4.0, 0.0, 5.0}}), 
+                 torch::tensor({{{0.1}, {0.2}, {0.3}}}));
+
+    // Perform absolute value operation
+    TensorDual result = x.abs();
+
+    // Expected results
+    auto expected_r = torch::abs(x.r);
+    auto expected_d = torch::sign(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge case with r = 0
+TEST(TensorDualTest, AbsEdgeCaseZero) {
+    // Input TensorDual object with r = 0
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform absolute value operation
+    TensorDual result = x.abs();
+
+    // Expected results
+    auto expected_r = torch::abs(x.r); // abs(0) = 0
+    auto expected_d = torch::sign(x.r).unsqueeze(-1) * x.d; // sign(0) = 0
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values in real part
+TEST(TensorDualTest, AbsNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-10.0, -20.0}}), torch::randn({1, 2, 3}));
+
+    // Perform absolute value operation
+    TensorDual result = x.abs();
+
+    // Expected results
+    auto expected_r = torch::abs(x.r);
+    auto expected_d = torch::sign(x.r).unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, AbsIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.abs();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, AbsGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA) * 2 - 1.0, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform absolute value operation
+        TensorDual result = x.abs();
+
+        // Expected results
+        auto expected_r = torch::abs(x.r);
+        auto expected_d = torch::sign(x.r).unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+
+// Test: Basic functionality of sign
+TEST(TensorDualTest, SignBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-4.0, 0.0, 5.0}}), torch::randn({1,3, 1}));
+
+    // Perform sign operation
+    TensorDual result = x.sign();
+
+    // Expected results
+    auto expected_r = torch::sign(x.r);
+    auto expected_d = torch::zeros_like(x.d);
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge case with r = 0
+TEST(TensorDualTest, SignEdgeCaseZero) {
+    // Input TensorDual object with r = 0
+    TensorDual x(torch::zeros({2, 2}), torch::randn({2, 2, 3}));
+
+    // Perform sign operation
+    TensorDual result = x.sign();
+
+    // Expected results
+    auto expected_r = torch::sign(x.r); // sign(0) = 0
+    auto expected_d = torch::zeros_like(x.d); // Dual part remains zero
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values in real part
+TEST(TensorDualTest, SignNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-10.0, -20.0}}), torch::randn({1, 2, 3}));
+
+    // Perform sign operation
+    TensorDual result = x.sign();
+
+    // Expected results
+    auto expected_r = torch::sign(x.r);
+    auto expected_d = torch::zeros_like(x.d);
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, SignIncompatibleDimensions) {
+    // Input TensorDual object with mismatched real and dual dimensions
+    TensorDual x(torch::rand({2, 2}), torch::rand({2, 3, 2}));
+
+    // Expect invalid_argument exception
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.sign();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, SignGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA) * 2 - 1.0, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform sign operation
+        TensorDual result = x.sign();
+
+        // Expected results
+        auto expected_r = torch::sign(x.r);
+        auto expected_d = torch::zeros_like(x.d);
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+
+// Test: Basic functionality of slog
+TEST(TensorDualTest, SlogBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-2.0, 1.0, 3.0}}), torch::randn({1, 3, 1}));
+
+    // Perform slog operation
+    TensorDual result = x.slog();
+
+    // Expected results
+    auto expected_r = torch::sign(x.r) * torch::log(torch::abs(x.r) + 1.0);
+    auto expected_d = x.d / (torch::abs(x.r) + 1.0).unsqueeze(-1);
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Edge case with positive values
+TEST(TensorDualTest, SlogPositiveValues) {
+    // Input TensorDual object with positive real values
+    TensorDual x(torch::tensor({{2.0, 4.0}}), torch::randn({1,2, 1}));
+
+    // Perform slog operation
+    TensorDual result = x.slog();
+
+    // Expected results
+    auto expected_r = torch::sign(x.r) * torch::log(torch::abs(x.r) + 1.0);
+    auto expected_d = x.d / (torch::abs(x.r) + 1.0).unsqueeze(-1);
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Negative values in real part
+TEST(TensorDualTest, SlogNegativeValues) {
+    // Input TensorDual object with negative real values
+    TensorDual x(torch::tensor({{-3.0, -5.0}}), torch::randn({1, 2, 1}));
+
+    // Perform slog operation
+    TensorDual result = x.slog();
+
+    // Expected results
+    auto expected_r = torch::sign(x.r) * torch::log(torch::abs(x.r) + 1.0);
+    auto expected_d = x.d / (torch::abs(x.r) + 1.0).unsqueeze(-1);
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Real part with values near zero
+TEST(TensorDualTest, SlogNearZero) {
+    // Input TensorDual object with real values near zero
+    TensorDual x(torch::tensor({{0.1, -0.2}}), torch::randn({1, 2, 1}));
+
+    // Perform slog operation
+    TensorDual result = x.slog();
+
+    // Expected results
+    auto expected_r = torch::sign(x.r) * torch::log(torch::abs(x.r) + 1.0);
+    auto expected_d = x.d / (torch::abs(x.r) + 1.0).unsqueeze(-1);
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Real part with zero (throws exception)
+TEST(TensorDualTest, SlogZeroRealPart) {
+    // Input TensorDual object with zero in the real part
+    TensorDual x(torch::tensor({{0.0, 2.0}}), torch::randn({1, 2, 1}));
+
+    // Expect std::domain_error
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.slog();
+            } catch (const std::domain_error& e) {
+                EXPECT_STREQ("slog is undefined for r = 0.", e.what());
+                throw;
+            }
+        },
+        std::domain_error
+    );
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, SlogIncompatibleDualDimensions) {
+    // Input TensorDual object with incompatible dual dimensions
+    TensorDual x(torch::rand({3, 4}), torch::rand({3, 5, 6}));
+
+    // Expect std::invalid_argument
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.slog();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, SlogGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA) * 2 - 1.0, torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform slog operation
+        TensorDual result = x.slog();
+
+        // Expected results
+        auto expected_r = torch::sign(x.r) * torch::log(torch::abs(x.r) + 1.0);
+        auto expected_d = x.d / (torch::abs(x.r) + 1.0).unsqueeze(-1);
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of softsigninv
+TEST(TensorDualTest, SoftsigninvBasic) {
+    // Input TensorDual object
+    TensorDual x(torch::tensor({{-0.5, 0.0, 0.5}}), torch::randn({1, 3, 1}));
+
+    // Perform softsigninv operation
+    TensorDual result = x.softsigninv();
+
+    // Expected results
+    auto softsigninv_r = x.r / (1.0 - torch::abs(x.r));
+    auto scaling_factor = (1.0 - torch::abs(x.r)).pow(-2);
+    auto expected_d = scaling_factor.unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, softsigninv_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+
+// Test: Edge case near boundaries
+TEST(TensorDualTest, SoftsigninvBoundaryCase) {
+    // Input TensorDual object with values near boundaries
+    TensorDual x(torch::tensor({{-0.999, 0.999}}), torch::randn({1, 2, 1}));
+
+    // Perform softsigninv operation
+    TensorDual result = x.softsigninv();
+
+    // Expected results
+    auto softsigninv_r = x.r / (1.0 - torch::abs(x.r));
+    auto scaling_factor = (1.0 - torch::abs(x.r)).pow(-2);
+    auto expected_d = scaling_factor.unsqueeze(-1) * x.d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, softsigninv_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, SoftsigninvIncompatibleDualDimensions) {
+    // Input TensorDual object with incompatible dual dimensions
+    TensorDual x(torch::rand({3, 4}), torch::rand({3, 5, 6}));
+
+    // Expect std::invalid_argument
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.softsigninv();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: Values exceeding |r| >= 1
+TEST(TensorDualTest, SoftsigninvOutOfDomain) {
+    // Input TensorDual object with |r| >= 1
+    TensorDual x(torch::tensor({{1.0, -1.1, 2.0}}), torch::randn({1, 3, 1}));
+
+    // Expect std::domain_error
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.softsigninv();
+            } catch (const std::domain_error& e) {
+                EXPECT_STREQ("softsigninv is only defined for |r| < 1.0.", e.what());
+                throw;
+            }
+        },
+        std::domain_error
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, SoftsigninvGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(torch::randn({2, 3}, torch::kCUDA).clamp(-0.8, 0.8), torch::randn({2, 3, 4}, torch::kCUDA));
+
+        // Perform softsigninv operation
+        TensorDual result = x.softsigninv();
+
+        // Expected results
+        auto softsigninv_r = x.r / (1.0 - torch::abs(x.r));
+        auto scaling_factor = (1.0 - torch::abs(x.r)).pow(-2);
+        auto expected_d = scaling_factor.unsqueeze(-1) * x.d;
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, softsigninv_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+
+// Test: Basic functionality of max
+TEST(TensorDualTest, MaxBasic) {
+    // Input TensorDual object
+    TensorDual x(
+        torch::tensor({{1.0, 3.0, 2.0}, {4.0, 2.0, 5.0}}),
+        torch::tensor({{{0.1}, {0.3}, {0.2}}, {{0.4}, {0.2}, {0.5}}})
+    );
+
+    // Perform max operation
+    TensorDual result = x.max();
+
+    // Expected results
+    auto max_r = torch::tensor({{3.0}, {5.0}});
+    auto max_d = torch::tensor({{{0.3}}, {{0.5}}});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, max_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, max_d, 1e-5));
+}
+
+
+// Test: Edge case with identical values
+TEST(TensorDualTest, MaxIdenticalValues) {
+    // Input TensorDual object
+    TensorDual x(
+        torch::tensor({{2.0, 2.0, 2.0}, {5.0, 5.0, 5.0}}),
+        torch::tensor({{{0.1}, {0.1}, {0.1}}, {{0.5}, {0.5}, {0.5}}})
+    );
+
+    // Perform max operation
+    TensorDual result = x.max();
+
+    // Expected results
+    auto max_r = torch::tensor({{2.0}, {5.0}});
+    auto max_d = torch::tensor({{{0.1}}, {{0.5}}});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, max_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, max_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, MaxIncompatibleDualDimensions) {
+    // Input TensorDual object with incompatible dimensions
+    TensorDual x(
+        torch::randn({3, 4}),
+        torch::randn({3, 5, 6})
+    );
+
+    // Expect std::invalid_argument
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.max();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, MaxGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(
+            torch::randn({2, 3}, torch::kCUDA),
+            torch::randn({2, 3, 4}, torch::kCUDA)
+        );
+
+        // Perform max operation
+        TensorDual result = x.max();
+
+        // Expected results
+        auto max_result = torch::max(x.r, /*dim=*/1, /*keepdim=*/true);
+        auto expected_r = std::get<0>(max_result);
+        auto max_indices = std::get<1>(max_result);
+        auto gather_indices = max_indices.unsqueeze(-1).expand({-1, -1, x.d.size(-1)});
+        auto expected_d = torch::gather(x.d, /*dim=*/1, gather_indices);
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+// Test: Basic functionality of min
+TEST(TensorDualTest, MinBasic) {
+    // Input TensorDual object
+    TensorDual x(
+        torch::tensor({{1.0, 3.0, 2.0}, {4.0, 2.0, 5.0}}),
+        torch::tensor({{{0.1}, {0.3}, {0.2}}, {{0.4}, {0.2}, {0.5}}})
+    );
+
+    // Perform min operation
+    TensorDual result = x.min();
+
+    // Expected results
+    auto min_r = torch::tensor({{1.0}, {2.0}});
+    auto min_d = torch::tensor({{{0.1}}, {{0.2}}});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, min_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, min_d, 1e-5));
+}
+
+
+// Test: Edge case with identical values
+TEST(TensorDualTest, MinIdenticalValues) {
+    // Input TensorDual object
+    TensorDual x(
+        torch::tensor({{2.0, 2.0, 2.0}, {5.0, 5.0, 5.0}}),
+        torch::tensor({{{0.1}, {0.1}, {0.1}}, {{0.5}, {0.5}, {0.5}}})
+    );
+
+    // Perform min operation
+    TensorDual result = x.min();
+
+    // Expected results
+    auto min_r = torch::tensor({{2.0}, {5.0}});
+    auto min_d = torch::tensor({{{0.1}}, {{0.5}}});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, min_r, 1e-5));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, min_d, 1e-5));
+}
+
+// Test: Incompatible dual dimensions
+TEST(TensorDualTest, MinIncompatibleDualDimensions) {
+    // Input TensorDual object with incompatible dimensions
+    TensorDual x(
+        torch::randn({3, 4}),
+        torch::randn({3, 5, 6})
+    );
+
+    // Expect std::invalid_argument
+    EXPECT_THROW(
+        {
+            try {
+                TensorDual result = x.min();
+            } catch (const std::invalid_argument& e) {
+                EXPECT_STREQ("Dual part dimensions are incompatible with the real part.", e.what());
+                throw;
+            }
+        },
+        std::invalid_argument
+    );
+}
+
+// Test: GPU tensors
+TEST(TensorDualTest, MinGpuTensors) {
+    if (torch::cuda::is_available()) {
+        // Input TensorDual object on GPU
+        TensorDual x(
+            torch::randn({2, 3}, torch::kCUDA),
+            torch::randn({2, 3, 4}, torch::kCUDA)
+        );
+
+        // Perform min operation
+        TensorDual result = x.min();
+
+        // Expected results
+        auto min_result = torch::min(x.r, /*dim=*/1, /*keepdim=*/true);
+        auto expected_r = std::get<0>(min_result);
+        auto min_indices = std::get<1>(min_result);
+        auto gather_indices = min_indices.unsqueeze(-1).expand({-1, -1, x.d.size(-1)});
+        auto expected_d = torch::gather(x.d, /*dim=*/1, gather_indices);
+
+        // Validate the real part
+        EXPECT_TRUE(torch::allclose(result.r, expected_r, 1e-5));
+
+        // Validate the dual part
+        EXPECT_TRUE(torch::allclose(result.d, expected_d, 1e-5));
+    }
+}
+
+
+
+// Test cases
+TEST(TensorDualTest, ComplexAlreadyComplexInputs) {
+    auto r = torch::complex(torch::tensor({{1.0, 2.0}}), torch::tensor({{3.0, 4.0}}));
+    auto d = torch::complex(torch::tensor({{{5.0, 6.0}, {4.0, 6.3}}}), torch::tensor({{{7.0, 8.0}, {2.0, 6.6}}}));
+    TensorDual td(r, d);
+    auto result = td.complex();
+
+    EXPECT_TRUE(result.r.is_complex());
+    EXPECT_TRUE(result.d.is_complex());
+    EXPECT_TRUE(torch::equal(result.r, r));
+    EXPECT_TRUE(torch::equal(result.d, d));
+}
+
+TEST(TensorDualTest, ComplexRealInputs) {
+    auto r = torch::tensor({{1.0, 2.0}});
+    auto d = torch::randn({1, 2, 2});
+    TensorDual td(r, d);
+    auto result = td.complex();
+
+    EXPECT_TRUE(result.r.is_complex());
+    EXPECT_TRUE(result.d.is_complex());
+    auto expected_r = torch::complex(r, torch::zeros_like(r));
+    auto expected_d = torch::complex(d, torch::zeros_like(d));
+    EXPECT_TRUE(torch::equal(result.r, expected_r));
+    EXPECT_TRUE(torch::equal(result.d, expected_d));
+}
+
+TEST(TensorDualTest, ComplexMixedInputs) {
+    auto r = torch::complex(torch::tensor({{1.0, 2.0}}), torch::tensor({{3.0, 4.0}})).to(torch::kFloat64);
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}}).to(torch::kFloat64);
+    TensorDual td(r, d);
+    auto result = td.complex();
+
+    EXPECT_TRUE(result.r.is_complex());
+    EXPECT_TRUE(result.d.is_complex());
+    auto expected_d = torch::complex(d, torch::zeros_like(d));
+    EXPECT_TRUE(torch::equal(result.r, r));
+    EXPECT_TRUE(torch::equal(result.d, expected_d));
+}
+
+
+TEST(TensorDualTest, ComplexDeviceCompatibility) {
+    if (torch::cuda::is_available()) {
+        auto r = torch::tensor({{1.0, 2.0}}, torch::device(torch::kCUDA));
+        auto d = torch::tensor({{{3.0, 4.0}, {2.0, 6.6}}}, torch::device(torch::kCUDA));
+        TensorDual td(r, d);
+        auto result = td.complex();
+
+        EXPECT_TRUE(result.r.is_complex());
+        EXPECT_TRUE(result.d.is_complex());
+        EXPECT_EQ(result.r.device(), r.device());
+        EXPECT_EQ(result.d.device(), d.device());
+    }
+}
+
+TEST(TensorDualTest, ComplexDtypeCompatibility) {
+    auto r = torch::tensor({{1.0, 2.0}}, torch::dtype(torch::kFloat64));
+    auto d = torch::tensor({{{3.0, 4.0}, {3.0, 6.0}}}, torch::dtype(torch::kFloat64));
+    TensorDual td(r, d);
+    auto result = td.complex();
+
+    EXPECT_TRUE(result.r.is_complex());
+    EXPECT_TRUE(result.d.is_complex());
+    EXPECT_EQ(result.r.dtype(), torch::kComplexDouble);
+    EXPECT_EQ(result.d.dtype(), torch::kComplexDouble);
+}
+
+
+
+// Test cases
+TEST(TensorDualTest, RealAlreadyRealInputs) {
+    auto r = torch::tensor({{1.0, 2.0}});
+    auto d = torch::tensor({{{3.0, 4.0}, {5.0, 6.0}}});
+    TensorDual td(r, d);
+    auto result = td.real();
+
+    EXPECT_TRUE(torch::equal(result.r, r));
+    EXPECT_TRUE(torch::equal(result.d, d));
+}
+
+TEST(TensorDualTest, RealComplexInputs) {
+    auto r = torch::complex(torch::tensor({{1.0, 2.0}}), torch::tensor({{3.0, 4.0}}));
+    auto d = torch::complex(torch::tensor({{{5.0, 6.0}, {2.0, 4.0}}}), torch::tensor({{{7.0, 8.0}, {3.0, 5.0}}}));
+    TensorDual td(r, d);
+    auto result = td.real();
+
+    auto expected_r = torch::tensor({{1.0, 2.0}});
+    auto expected_d = torch::tensor({{{5.0, 6.0}, {2.0, 4.0}}});
+    EXPECT_TRUE(torch::equal(result.r, expected_r));
+    EXPECT_TRUE(torch::equal(result.d, expected_d));
+}
+
+TEST(TensorDualTest, RealMixedInputs) {
+    auto r = torch::complex(torch::tensor({{1.0, 2.0}}), torch::tensor({{3.0, 4.0}})).to(torch::kFloat64);
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}}).to(torch::kFloat64);
+    TensorDual td(r, d);
+    auto result = td.real();
+
+    auto expected_r = torch::tensor({{1.0, 2.0}});
+    EXPECT_TRUE(torch::equal(result.r, expected_r));
+    std::cerr << "result.d=" << result.d << std::endl;
+    std::cerr << "d=" << d << std::endl;
+    EXPECT_TRUE(torch::equal(result.d, d));
+}
+
+
+TEST(TensorDualTest, RealDeviceCompatibility) {
+    if (torch::cuda::is_available()) {
+        auto r = torch::complex(torch::tensor({{1.0, 2.0}}, torch::device(torch::kCUDA)),
+                                torch::tensor({{3.0, 4.0}}, torch::device(torch::kCUDA)));
+        auto d = torch::complex(torch::tensor({{{5.0, 6.0}, {3.5, 6.9}}}, torch::device(torch::kCUDA)),
+                                torch::tensor({{{7.0, 8.0}, {3.7, 4.8}}}, torch::device(torch::kCUDA)));
+        TensorDual td(r, d);
+        auto result = td.real();
+
+        EXPECT_EQ(result.r.device(), r.device());
+        EXPECT_EQ(result.d.device(), d.device());
+    }
+}
+
+TEST(TensorDualTest, RealDtypeCompatibility) {
+    auto r = torch::complex(torch::tensor({{1.0, 2.0}}, torch::dtype(torch::kFloat64)),
+                            torch::tensor({{3.0, 4.0}}, torch::dtype(torch::kFloat64)));
+    auto d = torch::complex(torch::tensor({{{5.0, 6.0}, {4.7, 5.9}}}, torch::dtype(torch::kFloat64)),
+                            torch::tensor({{{7.0, 8.0}, {3.0, 6.5}}}, torch::dtype(torch::kFloat64)));
+    TensorDual td(r, d);
+    auto result = td.real();
+
+    EXPECT_EQ(result.r.dtype(), torch::kFloat64);
+    EXPECT_EQ(result.d.dtype(), torch::kFloat64);
+}
+
+
+
+
+
+// Test cases
+TEST(TensorDualTest, ImagAlreadyComplexInputs) {
+    auto r = torch::complex(torch::tensor({{1.0, 2.0}}), torch::tensor({{3.0, 4.0}}));
+    auto d = torch::complex(torch::tensor({{{5.0, 6.0}, {3.5, 2.9}}}), torch::tensor({{{7.0, 8.0}, {3.7, 4.8}}}));
+    TensorDual td(r, d);
+    auto result = td.imag();
+
+    auto expected_r = torch::tensor({{3.0, 4.0}});
+    auto expected_d = torch::tensor({{{7.0, 8.0}, {3.7, 4.8}}});
+
+    EXPECT_TRUE(torch::equal(result.r, expected_r));
+    EXPECT_TRUE(torch::equal(result.d, expected_d));
+}
+
+TEST(TensorDualTest, ImagRealInputs) {
+    auto r = torch::tensor({{1.0, 2.0}});
+    auto d = torch::tensor({{{3.0, 4.0}, {5.0, 6.0}}});
+    TensorDual td(r, d);
+    auto result = td.imag();
+
+    auto expected_r = torch::zeros_like(r);
+    auto expected_d = torch::zeros_like(d);
+
+    EXPECT_TRUE(torch::equal(result.r, expected_r));
+    EXPECT_TRUE(torch::equal(result.d, expected_d));
+}
+
+TEST(TensorDualTest, ImagMixedInputs) {
+    auto r = torch::complex(torch::tensor({{1.0, 2.0}}).to(torch::kFloat64), 
+                            torch::tensor({{3.0, 4.0}}).to(torch::kFloat64));
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}}).to(torch::kFloat64);
+    TensorDual td(r, d);
+    auto result = td.imag();
+
+    auto expected_r = torch::tensor({{3.0, 4.0}}).to(torch::kFloat64);
+    auto expected_d = torch::zeros_like(d);
+    
+    EXPECT_TRUE(torch::equal(result.r, expected_r));
+    EXPECT_TRUE(torch::equal(result.d, expected_d));
+}
+
+
+TEST(TensorDualTest, ImagDeviceCompatibility) {
+    if (torch::cuda::is_available()) {
+        auto r = torch::complex(torch::tensor({{1.0, 2.0}}, torch::device(torch::kCUDA)),
+                                torch::tensor({{3.0, 4.0}}, torch::device(torch::kCUDA)));
+        auto d = torch::complex(torch::tensor({{{5.0, 6.0}, {3.6, 7.4}}}, torch::device(torch::kCUDA)),
+                                torch::tensor({{{7.0, 8.0}, {2.6, 8.3}}}, torch::device(torch::kCUDA)));
+        TensorDual td(r, d);
+        auto result = td.imag();
+
+        EXPECT_EQ(result.r.device(), r.device());
+        EXPECT_EQ(result.d.device(), d.device());
+    }
+}
+
+TEST(TensorDualTest, ImagDtypeCompatibility) {
+    auto r = torch::complex(torch::tensor({{1.0, 2.0}}, torch::dtype(torch::kFloat64)),
+                            torch::tensor({{3.0, 4.0}}, torch::dtype(torch::kFloat64)));
+    auto d = torch::complex(torch::tensor({{{5.0, 6.0}, {5.3, 5.1}}}, torch::dtype(torch::kFloat64)),
+                            torch::tensor({{{7.0, 8.0}, {1.5, 8.7}}}, torch::dtype(torch::kFloat64)));
+    TensorDual td(r, d);
+    auto result = td.imag();
+
+    EXPECT_EQ(result.r.dtype(), torch::kFloat64);
+    EXPECT_EQ(result.d.dtype(), torch::kFloat64);
+}
+
+
+
+// Test cases
+TEST(TensorDualTest, IndexValidIndices) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    auto result = td.index({torch::indexing::Slice(0, 1), torch::indexing::Slice(0, 2)});
+    auto expected_r = torch::tensor({{1.0, 2.0}});
+    auto expected_d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}});
+
+    EXPECT_TRUE(torch::equal(result.r, expected_r));
+    EXPECT_TRUE(torch::equal(result.d, expected_d));
+}
+
+
+TEST(TensorDualTest, IndexOutOfBounds) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    EXPECT_THROW(td.index({torch::indexing::TensorIndex(2)}), c10::Error);
+}
+
+TEST(TensorDualTest, IndexInvalidDimensions) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    EXPECT_THROW(td.index({torch::indexing::Slice(0, 1), torch::indexing::Slice(0, 2), torch::indexing::TensorIndex(1)}),
+                 std::invalid_argument);
+}
+
+
+TEST(TensorDualTest, IndexDeviceCompatibility) {
+    if (torch::cuda::is_available()) {
+        auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::device(torch::kCUDA));
+        auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}}, torch::device(torch::kCUDA));
+        TensorDual td(r, d);
+        std::vector<torch::indexing::TensorIndex> indices{torch::indexing::Slice(0, 1)};
+        auto result = td.index(indices);
+        EXPECT_EQ(result.r.device(), r.device());
+        EXPECT_EQ(result.d.device(), d.device());
+    }
+}
+
+
+
+
+// Test cases
+TEST(TensorDualTest, IndexPutValidInput) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    auto mask = torch::tensor({true, false});
+    auto value_r = torch::tensor({{10.0, 20.0}, {30.0, 40.0}});
+    auto value_d = torch::tensor({{{15.0, 16.0}, {17.0, 18.0}}, {{19.0, 20.0}, {21.0, 22.0}}});
+    TensorDual value(value_r, value_d);
+
+    td.index_put_(mask, value.index(mask));
+
+    auto expected_r = torch::tensor({{10.0, 20.0}, {3.0, 4.0}});
+    auto expected_d = torch::tensor({{{15.0, 16.0}, {17.0, 18.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+
+    EXPECT_TRUE(torch::equal(td.r, expected_r));
+    EXPECT_TRUE(torch::equal(td.d, expected_d));
+}
+
+TEST(TensorDualTest, IndexPutInvalidMaskType) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    auto mask = torch::tensor({{1, 0}, {0, 1}}, torch::dtype(torch::kInt));
+    auto value_r = torch::tensor({{10.0, 20.0}, {30.0, 40.0}});
+    auto value_d = torch::tensor({{{15.0, 16.0}, {17.0, 18.0}}, {{19.0, 20.0}, {21.0, 22.0}}});
+    TensorDual value(value_r, value_d);
+
+    EXPECT_THROW(td.index_put_(mask, value), std::invalid_argument);
+}
+
+
+
+
+
 TEST(TensorDualTest, einsumTest4)
 {
     auto r1 = torch::randn({2, 2});
