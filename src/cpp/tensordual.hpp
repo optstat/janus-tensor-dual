@@ -2992,9 +2992,9 @@ public:
     
     
     TensorHyperDual()
-    : r(torch::zeros({1, 1, 1}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
-      d(torch::zeros({1, 1, 1, 1}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
-      h(torch::zeros({1, 1, 1, 1, 1}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
+    : r(torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
+      d(torch::zeros({1, 1, 1}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
+      h(torch::zeros({1, 1, 1, 1}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
       dtype_(torch::kFloat64),
       device_(torch::kCPU) {}
 
@@ -3020,9 +3020,9 @@ public:
     }
 private:
     void validateTensors(const torch::Tensor& r, const torch::Tensor& d, const torch::Tensor& h) const {
-        if (r.dim() != 3) throw std::invalid_argument("Real part must be a 3D tensor");
-        if (d.dim() != 4) throw std::invalid_argument("Dual part must be a 4D tensor");
-        if (h.dim() != 5) throw std::invalid_argument("Hyperdual part must be a 5D tensor");
+        if (r.dim() != 2) throw std::invalid_argument("Real part must be a 3D tensor");
+        if (d.dim() != 3) throw std::invalid_argument("Dual part must be a 4D tensor");
+        if (h.dim() != 4) throw std::invalid_argument("Hyperdual part must be a 5D tensor");
         if (r.device() != d.device() || d.device() != h.device()) {
             throw std::invalid_argument("All tensors must reside on the same device");
         }
@@ -3043,22 +3043,10 @@ public:
     TensorHyperDual(const TensorDual& x)
       : r(x.r),
         d(x.d),
-        h(torch::zeros({x.d.size(0), x.d.size(1), x.d.size(2), x.d.size(3), x.d.size(3)}, x.d.options())),
+        h(torch::zeros({x.d.size(0), x.d.size(1), x.d.size(2), x.d.size(2)}, x.d.options())),
         dtype_(torch::typeMetaToScalarType(x.r.dtype())),
         device_(x.r.device()) {
-        // Validate input dimensions and consistency
-        if (x.r.dim() != 3) {
-          throw std::invalid_argument("TensorDual real part must be a 3D tensor");
-        }
-        if (x.d.dim() != 4) {
-          throw std::invalid_argument("TensorDual dual part must be a 4D tensor");
-        }
-        if (x.r.device() != x.d.device()) {
-          throw std::invalid_argument("TensorDual real and dual parts must reside on the same device");
-        }
-        if (x.r.dtype() != x.d.dtype()) {
-          throw std::invalid_argument("TensorDual real and dual parts must have the same dtype");
-        }
+            validateTensors(r, d, h);
     }
 
     /**
@@ -3082,16 +3070,14 @@ public:
     /**
      * Sum the TensorHyperDual along the specified dimension.
      * 
-     * @param dim The dimension to sum along (default: 1).
-     * @param keepdim Whether to retain reduced dimensions (default: true).
      * @return A new TensorHyperDual object with summed components.
      * 
      * @note Assumes that `r`, `d`, and `h` are tensors with compatible dimensions.
      */
-    TensorHyperDual sum(int64_t dim = 1, bool keepdim=true) const {
-        auto r = this->r.sum(dim, true);
-        auto d = this->d.sum(dim, true);
-        auto h = this->h.sum(dim, true);
+    TensorHyperDual sum() const {
+        auto r = this->r.sum(1, true);
+        auto d = this->d.sum(1, true);
+        auto h = this->h.sum(1, true);
         return TensorHyperDual(r, d, h);
     }
     
@@ -3133,17 +3119,28 @@ public:
      */
     TensorHyperDual sqrt() const {
       // Compute the square root of the real part
-      auto rsq = r.sqrt();
+      auto rc = r;
+      auto dc = d;
+      auto hc = h;
+      //If there are negative numbers convert to complex
+      if ((r < 0).any().item<bool>() && (r.is_complex() == false)) {
+            rc = torch::complex(r, torch::zeros_like(r).to(r.device()));
+            dc = torch::complex(d, torch::zeros_like(d).to(d.device()));
+            hc = torch::complex(h, torch::zeros_like(h).to(h.device()));
+
+      }
+
+      auto rn = torch::sqrt(rc);
 
       // Compute the dual part
-      auto dn = 0.5 * torch::einsum("mi, mij->mij", {r.pow(-0.5), d});
+      auto dn = 0.5 * torch::einsum("mi, mij->mij", {rc.pow(-0.5), dc});
 
       // Compute the hyperdual part
-      auto hn = -0.25 * torch::einsum("mi, mij, mik->mijk", {r.pow(-1.5), d, d}) +
-                0.5 * torch::einsum("mi, mijk->mijk", {r.pow(-0.5), h});
+      auto hn = -0.25 * torch::einsum("mi, mij, mik->mijk", {rc.pow(-1.5), dc, dc}) +
+                0.5 * torch::einsum("mi, mijk->mijk", {rc.pow(-0.5), hc});
 
       // Return the resulting TensorHyperDual object
-      return TensorHyperDual(rsq, dn, hn);
+      return TensorHyperDual(rn, dn, hn);
     }
     
     /**
@@ -3258,6 +3255,8 @@ public:
 
     // First-order derivative (dual part)
     auto dn = this->d / othere.unsqueeze(-1);
+    //If the number is really small add a tiny number to avoid division by zero
+    dn = torch::where(dn.abs() < 1e-14, torch::ones_like(dn) * 1e-14, dn);
 
     // Second-order derivative (hyperdual part)
     auto hn = torch::einsum("mijk, mi->mijk", {this->h, othere.reciprocal()});
