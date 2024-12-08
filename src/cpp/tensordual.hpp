@@ -2919,9 +2919,11 @@ public:
 
         // Compute the maximum for the real part
         auto max_r = torch::max(this->r, other.r);
+        auto m = this->r > other.r;
+        std::cerr << m << std::endl;
 
         // Compute the dual part corresponding to the maximum real part
-        auto max_d = torch::where(this->r > other.r, this->d, other.d);
+        auto max_d = torch::where((this->r > other.r).unsqueeze(-1), this->d, other.d);
 
         // Return the resulting TensorDual
         return TensorDual(max_r, max_d);

@@ -7251,7 +7251,7 @@ TEST(TensorDualTest, IndexDeviceCompatibility) {
 
 
 // Test cases
-TEST(TensorDualTest, IndexPutValidInput) {
+TEST(TensorDualTest, TensorIndexPutValidInput) {
     auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
     auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
     TensorDual td(r, d);
@@ -7270,7 +7270,7 @@ TEST(TensorDualTest, IndexPutValidInput) {
     EXPECT_TRUE(torch::equal(td.d, expected_d));
 }
 
-TEST(TensorDualTest, IndexPutInvalidMaskType) {
+TEST(TensorDualTest, TensorIndexPutInvalidMaskType) {
     auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
     auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
     TensorDual td(r, d);
@@ -7285,7 +7285,347 @@ TEST(TensorDualTest, IndexPutInvalidMaskType) {
 
 
 
+TEST(TensorDualTest, TensorIndexPutValueShapeMismatch) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
 
+    // Mask selects specific rows
+    auto mask = torch::tensor({0, 1}, torch::kInt64);
+    auto value_r = torch::tensor({{10.0, 20.0}, {30.0, 40.0}});
+    auto value_d = torch::tensor({{{15.0, 16.0}, {17.0, 18.0}}}); // Shape mismatch
+    TensorDual value(value_r, value_d);
+
+    EXPECT_THROW(td.index_put_(mask, value), std::invalid_argument);
+}
+
+
+// Test cases
+TEST(TensorDualTest, IndexPutScalarValidInput) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    // Mask specifies elements to update
+    auto mask = torch::tensor({{true, false}, {false, true}});
+    double value = 42.0;
+
+    td.index_put_(mask, value);
+
+    auto expected_r = torch::tensor({{42.0, 2.0}, {3.0, 42.0}});
+    auto expected_d = torch::tensor({{{0.0, 0.0}, {7.0, 8.0}}, {{9.0, 10.0}, {0.0, 0.0}}});
+
+    EXPECT_TRUE(torch::equal(td.r, expected_r));
+    EXPECT_TRUE(torch::equal(td.d, expected_d));
+}
+
+TEST(TensorDualTest, IndexPutScalarInvalidMaskSize) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    // Invalid mask size
+    auto mask = torch::tensor({true, false}); // 1D mask instead of 2D
+    double value = 42.0;
+
+    EXPECT_THROW(td.index_put_(mask, value), std::invalid_argument);
+}
+
+TEST(TensorDualTest, IndexPutScalarAllFalseMask) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    // Mask selects no elements
+    auto mask = torch::zeros_like(r, torch::kBool);
+    double value = 42.0;
+
+    td.index_put_(mask, value);
+
+    EXPECT_TRUE(torch::equal(td.r, r));
+    EXPECT_TRUE(torch::equal(td.d, d));
+}
+
+TEST(TensorDualTest, IndexPutScalarAllTrueMask) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    // Mask selects all elements
+    auto mask = torch::ones_like(r, torch::kBool);
+    double value = 42.0;
+
+    td.index_put_(mask, value);
+
+    auto expected_r = torch::full_like(r, value);
+    auto expected_d = torch::zeros_like(d);
+
+    EXPECT_TRUE(torch::equal(td.r, expected_r));
+    EXPECT_TRUE(torch::equal(td.d, expected_d));
+}
+
+TEST(TensorDualTest, IndexPutScalarDeviceCompatibility) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::kCUDA);
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}}, torch::kCUDA);
+    TensorDual td(r, d);
+
+    // Mask specifies elements to update
+    auto mask = torch::tensor({{true, false}, {false, true}}, torch::kCUDA);
+    double value = 42.0;
+
+    td.index_put_(mask, value);
+
+    auto expected_r = torch::tensor({{42.0, 2.0}, {3.0, 42.0}}, torch::kCUDA);
+    auto expected_d = torch::tensor({{{0.0, 0.0}, {7.0, 8.0}}, {{9.0, 10.0}, {0.0, 0.0}}}, torch::kCUDA);
+
+    EXPECT_TRUE(torch::equal(td.r, expected_r));
+    EXPECT_TRUE(torch::equal(td.d, expected_d));
+}
+
+
+// Test cases
+TEST(TensorDualTest, IndexPutVectorValidInput) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    // Mask to index elements
+    std::vector<torch::indexing::TensorIndex> mask = {torch::indexing::Slice(0, 1), torch::indexing::Slice(0, 2)};
+    auto value_r = torch::tensor({{42.0, 43.0}});
+    auto value_d = torch::tensor({{{100.0, 101.0}, {102.0, 103.0}}});
+    TensorDual value(value_r, value_d);
+
+    td.index_put_(mask, value);
+
+    auto expected_r = torch::tensor({{42.0, 43.0}, {3.0, 4.0}});
+    auto expected_d = torch::tensor({{{100.0, 101.0}, {102.0, 103.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+
+    EXPECT_TRUE(torch::equal(td.r, expected_r));
+    EXPECT_TRUE(torch::equal(td.d, expected_d));
+}
+
+
+TEST(TensorDualTest, IndexPutVectorPartialUpdate) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
+    TensorDual td(r, d);
+
+    // Mask to index a subset of elements
+    std::vector<torch::indexing::TensorIndex> mask = {torch::indexing::Slice(0, 2), torch::indexing::Slice(1, 2)};
+    auto value_r = torch::tensor({{42.0}, {43.0}});
+    auto value_d = torch::tensor({{{100.0, 101.0}}, {{102.0, 103.0}}});
+    TensorDual value(value_r, value_d);
+
+    td.index_put_(mask, value);
+
+    auto expected_r = torch::tensor({{1.0, 42.0}, {3.0, 43.0}});
+    auto expected_d = torch::tensor({{{5.0, 6.0}, {100.0, 101.0}}, {{9.0, 10.0}, {102.0, 103.0}}});
+
+    EXPECT_TRUE(torch::equal(td.r, expected_r));
+    EXPECT_TRUE(torch::equal(td.d, expected_d));
+}
+
+TEST(TensorDualTest, IndexPutVectorDeviceCompatibility) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::kCUDA);
+    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}}, torch::kCUDA);
+    TensorDual td(r, d);
+
+    // Mask to index elements
+    std::vector<torch::indexing::TensorIndex> mask = {torch::indexing::Slice(0, 1), torch::indexing::Slice(0, 2)};
+    auto value_r = torch::tensor({{42.0, 43.0}}, torch::kCUDA);
+    auto value_d = torch::tensor({{{100.0, 101.0}, {102.0, 103.0}}}, torch::kCUDA);
+    TensorDual value(value_r, value_d);
+
+    td.index_put_(mask, value);
+
+    auto expected_r = torch::tensor({{42.0, 43.0}, {3.0, 4.0}}, torch::kCUDA);
+    auto expected_d = torch::tensor({{{100.0, 101.0}, {102.0, 103.0}}, {{9.0, 10.0}, {11.0, 12.0}}}, torch::kCUDA);
+
+    EXPECT_TRUE(torch::equal(td.r, expected_r));
+    EXPECT_TRUE(torch::equal(td.d, expected_d));
+}
+
+
+
+
+// Test: Element-wise max of matching TensorDual objects
+TEST(TensorDualTest, MaxMatchingDimensions) {
+    auto r1 = torch::tensor({{1.0, 3.0}, {2.0, 4.0}});
+    auto d1 = torch::tensor({{{10.0}, {30.0}}, {{20.0}, {40.0}}});
+    auto r2 = torch::tensor({{2.0, 1.0}, {4.0, 3.0}});
+    auto d2 = torch::tensor({{{20.0}, {10.0}}, {{40.0}, {30.0}}});
+
+    TensorDual td1(r1, d1);
+    TensorDual td2(r2, d2);
+
+    auto result = td1.max(td2);
+
+    auto expected_r = torch::tensor({{2.0, 3.0}, {4.0, 4.0}});
+    auto expected_d = torch::tensor({{{20.0}, {30.0}}, {{40.0}, {40.0}}});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r)) << "Real part of max TensorDual is incorrect.";
+    ASSERT_TRUE(torch::allclose(result.d, expected_d)) << "Dual part of max TensorDual is incorrect.";
+}
+
+// Test: Element-wise max when one TensorDual has strictly larger real values
+TEST(TensorDualTest, MaxStrictlyLargerReal) {
+    auto r1 = torch::tensor({{5.0, 6.0}, {7.0, 8.0}});
+    auto d1 = torch::tensor({{{50.0}, {60.0}}, {{70.0}, {80.0}}});
+    auto r2 = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d2 = torch::tensor({{{10.0}, {20.0}}, {{30.0}, {40.0}}});
+
+    TensorDual td1(r1, d1);
+    TensorDual td2(r2, d2);
+
+    auto result = td1.max(td2);
+
+    ASSERT_TRUE(torch::allclose(result.r, r1)) << "Real part should match TensorDual with larger values.";
+    ASSERT_TRUE(torch::allclose(result.d, d1)) << "Dual part should match TensorDual with larger values.";
+}
+
+// Test: Incompatible dimensions
+TEST(TensorDualTest, MaxIncompatibleDimensions) {
+    auto r1 = torch::tensor({{1.0, 3.0}, {2.0, 4.0}});
+    auto d1 = torch::tensor({{{10.0}, {30.0}}, {{20.0}, {40.0}}});
+    auto r2 = torch::tensor({{2.0, 1.0}});
+    auto d2 = torch::tensor({{{20.0}, {10.0}}});
+
+    TensorDual td1(r1, d1);
+    TensorDual td2(r2, d2);
+
+    ASSERT_THROW(td1.max(td2), std::invalid_argument) << "Expected exception for incompatible dimensions.";
+}
+
+// Test: Handling negative values
+TEST(TensorDualTest, MaxHandlesNegativeValues) {
+    auto r1 = torch::tensor({{-1.0, -3.0}, {-2.0, -4.0}});
+    auto d1 = torch::tensor({{{-10.0}, {-30.0}}, {{-20.0}, {-40.0}}});
+    auto r2 = torch::tensor({{-2.0, -1.0}, {-4.0, -3.0}});
+    auto d2 = torch::tensor({{{-20.0}, {-10.0}}, {{-40.0}, {-30.0}}});
+
+    TensorDual td1(r1, d1);
+    TensorDual td2(r2, d2);
+
+    auto result = td1.max(td2);
+    std::cerr << "result.r=" << result.r << std::endl;
+    std::cerr << "result.d=" << result.d << std::endl;
+
+    auto expected_r = torch::tensor({{-1.0, -1.0}, {-2.0, -3.0}});
+    auto expected_d = torch::tensor({{{-10.0}, {-10.0}}, {{-20.0}, {-30.0}}});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r)) << "Real part of max TensorDual with negatives is incorrect.";
+    ASSERT_TRUE(torch::allclose(result.d, expected_d)) << "Dual part of max TensorDual with negatives is incorrect.";
+}
+
+// Test: TensorDual with zeros
+TEST(TensorDualTest, MaxWithZeros) {
+    auto r1 = torch::tensor({{0.0, 1.0}, {0.0, 2.0}});
+    auto d1 = torch::tensor({{{0.0}, {10.0}}, {{0.0}, {20.0}}});
+    auto r2 = torch::tensor({{-1.0, 0.0}, {1.0, -2.0}});
+    auto d2 = torch::tensor({{{-10.0}, {0.0}}, {{10.0}, {-20.0}}});
+
+    TensorDual td1(r1, d1);
+    TensorDual td2(r2, d2);
+
+    auto result = td1.max(td2);
+
+    auto expected_r = torch::tensor({{0.0, 1.0}, {1.0, 2.0}});
+    auto expected_d = torch::tensor({{{0.0}, {10.0}}, {{10.0}, {20.0}}});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r)) << "Real part of max TensorDual with zeros is incorrect.";
+    ASSERT_TRUE(torch::allclose(result.d, expected_d)) << "Dual part of max TensorDual with zeros is incorrect.";
+}
+
+
+
+TEST(TensorDualTest, PowPositiveExponent) {
+    auto r = torch::tensor({{2.0, 3.0}, {4.0, 5.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual td(r, d);
+
+    double exponent = 2.0;
+    auto result = td.pow(exponent);
+
+    auto expected_r = torch::pow(r, exponent);
+    auto gradient_r = exponent * torch::pow(r, exponent - 1);
+    auto expected_d = torch::einsum("mi, mij->mij", {gradient_r, d});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r)) << "Real part is incorrect.";
+    ASSERT_TRUE(torch::allclose(result.d, expected_d)) << "Dual part is incorrect.";
+}
+
+TEST(TensorDualTest, PowFractionalExponent) {
+    auto r = torch::tensor({{4.0, 9.0}, {16.0, 25.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual td(r, d);
+
+    double exponent = 0.5;  // Square root
+    auto result = td.pow(exponent);
+
+    auto expected_r = torch::pow(r, exponent);
+    auto gradient_r = exponent * torch::pow(r, exponent - 1);
+    auto expected_d = torch::einsum("mi, mij->mij", {gradient_r, d});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r)) << "Real part is incorrect.";
+    ASSERT_TRUE(torch::allclose(result.d, expected_d)) << "Dual part is incorrect.";
+}
+
+TEST(TensorDualTest, PowNegativeExponent) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual td(r, d);
+
+    double exponent = -1.0;  // Reciprocal
+    auto result = td.pow(exponent);
+
+    auto expected_r = torch::pow(r, exponent);
+    auto gradient_r = exponent * torch::pow(r, exponent - 1);
+    auto expected_d = torch::einsum("mi, mij->mij", {gradient_r, d});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r)) << "Real part is incorrect.";
+    ASSERT_TRUE(torch::allclose(result.d, expected_d)) << "Dual part is incorrect.";
+}
+
+TEST(TensorDualTest, PowNegativeValuesFractionalExponent) {
+    auto r = torch::tensor({{-4.0, 9.0}, {16.0, -25.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual td(r, d);
+
+    double exponent = 0.5;  // Square root
+    ASSERT_THROW(td.pow(exponent), std::invalid_argument) << "Expected exception for negative base with fractional exponent.";
+}
+
+TEST(TensorDualTest, PowZeroExponent) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual td(r, d);
+
+    double exponent = 0.0;  // Any number to the power 0 is 1
+    auto result = td.pow(exponent);
+
+    auto expected_r = torch::ones_like(r);
+    auto expected_d = torch::zeros_like(d);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r)) << "Real part is incorrect.";
+    ASSERT_TRUE(torch::allclose(result.d, expected_d)) << "Dual part should be zero.";
+}
+
+TEST(TensorDualTest, PowZeroBasePositiveExponent) {
+    auto r = torch::tensor({{0.0, 2.0}, {3.0, 0.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual td(r, d);
+
+    double exponent = 2.0;  // Square
+    auto result = td.pow(exponent);
+
+    auto expected_r = torch::pow(r, exponent);
+    auto gradient_r = exponent * torch::pow(r, exponent - 1);
+    auto expected_d = torch::einsum("mi, mij->mij", {gradient_r, d});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r)) << "Real part is incorrect.";
+    ASSERT_TRUE(torch::allclose(result.d.masked_fill(r == 0, 0), expected_d.masked_fill(r == 0, 0)))
+        << "Dual part should be zero where base is zero.";
+}
 
 TEST(TensorDualTest, einsumTest4)
 {
