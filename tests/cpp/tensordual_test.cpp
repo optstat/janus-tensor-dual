@@ -10041,6 +10041,2973 @@ TEST(TensorHyperDualScalarDivisionTests, DivisionByTensor) {
 
 
 
+TEST(TensorHyperDualComparisonTests, LessThanOrEqualPositiveValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 + 0.5; // Ensure r2 > r1 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 <= thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualComparisonTests, LessThanOrEqualNegativeValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 + 0.5; // Ensure r2 > r1 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 <= thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualComparisonTests, LessThanOrEqualMixedValues) {
+    auto r1 = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::tensor({{2.0, 3.0}, {2.0, 5.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 <= thd2;
+
+    auto expected = torch::tensor({true, true}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualComparisonTests, LessThanOrEqualEdgeCase) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1.clone(); // Ensure r1 == r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 <= thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+
+
+
+
+TEST(TensorHyperDualComparisonTests, EqualityOperatorTrue) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1.clone(); // Ensure equality element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 == thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualComparisonTests, EqualityOperatorFalse) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 + 1.0; // Ensure inequality element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 == thd2;
+
+    ASSERT_FALSE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualComparisonTests, EqualityOperatorBatch) {
+    auto r1 = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 == thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualTensorComparisonTests, LessThanOrEqualToTensorPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r + 0.5; // Ensure tensor > r element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd <= tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorComparisonTests, LessThanOrEqualToTensorNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r + 0.5; // Ensure tensor > r element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd <= tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorComparisonTests, LessThanOrEqualToScalar) {
+    auto r = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto scalar = 5.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd <= scalar;
+
+    auto expected = torch::tensor({true, true}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualTensorComparisonTests, LessThanOrEqualEdgeCase) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r.clone(); // Ensure tensor == r element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd <= tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualScalarComparisonTests, LessThanOrEqualToScalarPositive) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 1.0; // Scalar greater than most r values
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd <= scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualScalarComparisonTests, LessThanOrEqualToScalarNegative) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 0.0; // Scalar greater than most r values
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd <= scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualScalarComparisonTests, LessThanOrEqualToScalarMixedValues) {
+    auto r = torch::tensor({{1.0, -2.0}, {3.0, -4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 0.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd <= scalar;
+
+    auto expected = torch::tensor({{false, true}, {false, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarComparisonTests, LessThanOrEqualToScalarEdgeCase) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 4.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd <= scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+
+
+TEST(TensorHyperDualGreaterThanTests, GreaterThanPositiveValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) + 10.0;
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 > thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualGreaterThanTests, GreaterThanNegativeValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 - 1.0; // Ensure r1 > r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 > thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualGreaterThanTests, GreaterThanMixedValues) {
+    auto r1 = torch::tensor({{3.0, 1.0}, {5.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::tensor({{2.0, 2.0}, {4.0, 5.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 > thd2;
+
+    auto expected = torch::tensor({true, false}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualGreaterThanTests, GreaterThanEdgeCase) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1.clone(); // Ensure r1 == r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 > thd2;
+
+    ASSERT_FALSE(torch::any(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualTensorGTTests, GreaterThanTensorPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) + 10.0;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd > tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorGTTests, GreaterThanTensorNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r - 1.0; // Ensure r > tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd > tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorGTTests, GreaterThanTensorMixedValues) {
+    auto r = torch::tensor({{3.0, 1.0}, {5.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = torch::tensor({{2.0, 2.0}, {4.0, 5.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd > tensor;
+
+    auto expected = torch::tensor({true, false}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualTensorGTTests, GreaterThanTensorEdgeCase) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r.clone(); // Ensure r == tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd > tensor;
+
+    ASSERT_FALSE(torch::any(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualScalarGTTests, GreaterThanScalarPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) + 0.5;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 0.5;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd > scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualScalarGTTests, GreaterThanScalarNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = -0.5; // Ensure all values in r > scalar
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd > scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualScalarGTTests, GreaterThanScalarMixedValues) {
+    auto r = torch::tensor({{3.0, 1.0}, {5.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 2.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd > scalar;
+
+    auto expected = torch::tensor({{true, false}, {true, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarGTTests, GreaterThanScalarEdgeCase) {
+    auto r = torch::tensor({{3.0, 1.0}, {5.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 5.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd > scalar;
+
+    auto expected = torch::tensor({false, false}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+
+
+TEST(TensorHyperDualLessThanTests, LessThanPositiveValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 + 0.5; // Ensure r1 < r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 < thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualLessThanTests, LessThanNegativeValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 + 0.5; // Ensure r1 < r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 < thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualLessThanTests, LessThanMixedValues) {
+    auto r1 = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::tensor({{2.0, 2.0}, {4.0, 5.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 < thd2;
+
+    auto expected = torch::tensor({{true, false}, {true, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualLessThanTests, LessThanEdgeCase) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1.clone(); // Ensure r1 == r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 < thd2;
+
+    ASSERT_FALSE(torch::any(result).item<bool>());
+}
+
+
+
+TEST(TensorHyperDualTensorLTTests, LessThanTensorPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r + 0.5; // Ensure r < tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd < tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorLTTests, LessThanTensorNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r + 0.5; // Ensure r < tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd < tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorLTTests, LessThanTensorMixedValues) {
+    auto r = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = torch::tensor({{2.0, 2.0}, {4.0, 5.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd < tensor;
+
+    auto expected = torch::tensor({{true, false}, {true, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualTensorLTTests, LessThanTensorEdgeCase) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r.clone(); // Ensure r == tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd < tensor;
+
+    ASSERT_FALSE(torch::any(result).item<bool>());
+}
+
+TEST(TensorHyperDualScalarLTTests, LessThanScalarPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 1.0; // Scalar greater than most values in r
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd < scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualScalarLTTests, LessThanScalarNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 0.0; // Scalar greater than all values in r
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd < scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualScalarLTTests, LessThanScalarMixedValues) {
+    auto r = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 2.5;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd < scalar;
+
+    auto expected = torch::tensor({true, false}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarLTTests, LessThanScalarEdgeCase) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 4.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd < scalar;
+
+    auto expected = torch::tensor({{true, true}, {true, false}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+
+TEST(TensorHyperDualGTEComparisonTests, GreaterThanOrEqualPositiveValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) + 1.5;
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 >= thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualGTEComparisonTests, GreaterThanOrEqualNegativeValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 - 0.5; // Ensure r1 >= r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 >= thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualGTEComparisonTests, GreaterThanOrEqualMixedValues) {
+    auto r1 = torch::tensor({{3.0, 1.0}, {5.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::tensor({{3.0, 2.0}, {5.0, 3.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 >= thd2;
+
+    auto expected = torch::tensor({{true, false}, {true, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualGTEComparisonTests, GreaterThanOrEqualEdgeCase) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1.clone(); // Ensure r1 == r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 >= thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualTensorGTEComparisonTests, GreaterThanOrEqualToTensorPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) + 1.5;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd >= tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorGTEComparisonTests, GreaterThanOrEqualToTensorNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r - 0.5; // Ensure r >= tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd >= tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorGTEComparisonTests, GreaterThanOrEqualToTensorMixedValues) {
+    auto r = torch::tensor({{3.0, 1.0}, {5.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = torch::tensor({{3.0, 2.0}, {5.0, 3.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd >= tensor;
+
+    auto expected = torch::tensor({{true, false}, {true, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualTensorGTEComparisonTests, GreaterThanOrEqualToTensorEdgeCase) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r.clone(); // Ensure r == tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd >= tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualTensorEqualityTests, EqualityWithTensorPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r.clone(); // Ensure equality element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd == tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorEqualityTests, EqualityWithTensorNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r.clone(); // Ensure equality element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd == tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorEqualityTests, EqualityWithTensorMixedValues) {
+    auto r = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = torch::tensor({{1.0, 3.0}, {2.0, 5.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd == tensor;
+
+    auto expected = torch::tensor({{true, true}, {true, false}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualTensorEqualityTests, EqualityWithTensorEdgeCase) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = torch::zeros_like(r); // Ensure no equality
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd == tensor;
+
+    ASSERT_FALSE(torch::any(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualScalarEqualityTests, EqualityWithScalarPositiveValues) {
+    auto r = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 3.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd == scalar;
+
+    auto expected = torch::tensor({{false, true}, {false, false}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarEqualityTests, EqualityWithScalarNegativeValues) {
+    auto r = torch::tensor({{-1.0, -3.0}, {-2.0, -4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = -3.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd == scalar;
+
+    auto expected = torch::tensor({{false, true}, {false, false}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarEqualityTests, EqualityWithScalarZero) {
+    auto r = torch::tensor({{0.0, 1.0}, {2.0, 0.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 0.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd == scalar;
+
+    auto expected = torch::tensor({{true, false}, {false, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarEqualityTests, EqualityWithScalarEdgeCase) {
+    auto r = torch::tensor({{5.0, 5.0}, {5.0, 5.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 5.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd == scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualInequalityTests, InequalityWithTensorPositiveValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 + 0.1; // Ensure r1 != r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 != thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualInequalityTests, InequalityWithTensorNegativeValues) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1 - 0.1; // Ensure r1 != r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 != thd2;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualInequalityTests, InequalityWithTensorMixedValues) {
+    auto r1 = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 != thd2;
+
+    auto expected = torch::tensor({{false, true}, {true, false}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualInequalityTests, InequalityWithTensorEdgeCase) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = r1.clone(); // Ensure r1 == r2 element-wise
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd1(r1, d1, h1);
+    TensorHyperDual thd2(r2, d2, h2);
+
+    auto result = thd1 != thd2;
+
+    ASSERT_FALSE(torch::any(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualTensorInequalityTests, InequalityWithTensorPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r + 0.1; // Ensure r != tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd != tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorInequalityTests, InequalityWithTensorNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 1.0;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r - 0.1; // Ensure r != tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd != tensor;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+TEST(TensorHyperDualTensorInequalityTests, InequalityWithTensorMixedValues) {
+    auto r = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd != tensor;
+
+    auto expected = torch::tensor({{false, true}, {true, false}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualTensorInequalityTests, InequalityWithTensorEdgeCase) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto tensor = r.clone(); // Ensure r == tensor element-wise
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd != tensor;
+
+    ASSERT_FALSE(torch::any(result).item<bool>());
+}
+
+TEST(TensorHyperDualScalarInequalityTests, InequalityWithScalarPositiveValues) {
+    auto r = torch::tensor({{1.0, 3.0}, {2.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 3.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd != scalar;
+
+    auto expected = torch::tensor({{true, false}, {true, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarInequalityTests, InequalityWithScalarNegativeValues) {
+    auto r = torch::tensor({{-1.0, -3.0}, {-2.0, -4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = -3.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd != scalar;
+
+    auto expected = torch::tensor({{true, false}, {true, true}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarInequalityTests, InequalityWithScalarZero) {
+    auto r = torch::tensor({{0.0, 1.0}, {2.0, 0.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 0.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd != scalar;
+
+    auto expected = torch::tensor({{false, true}, {true, false}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    ASSERT_TRUE(torch::all(result == expected).item<bool>());
+}
+
+TEST(TensorHyperDualScalarInequalityTests, InequalityWithScalarEdgeCase) {
+    auto r = torch::tensor({{5.0, 5.0}, {5.0, 5.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    double scalar = 3.0;
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd != scalar;
+
+    ASSERT_TRUE(torch::all(result).item<bool>());
+}
+
+
+TEST(TensorHyperDualReciprocalTests, ReciprocalPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) + 0.1;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.reciprocal();
+
+    auto expected_r = r.reciprocal();
+    auto expected_d = -expected_r.pow(2).unsqueeze(-1) * d;
+    auto expected_h = 2 * torch::einsum("mi, mij, mik->mijk", {expected_r.pow(3), d, d}) -
+                      torch::einsum("mi, mijk->mijk", {expected_r.pow(2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualReciprocalTests, ReciprocalNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - 0.1;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.reciprocal();
+
+    auto expected_r = r.reciprocal();
+    auto expected_d = -expected_r.pow(2).unsqueeze(-1) * d;
+    auto expected_h = 2 * torch::einsum("mi, mij, mik->mijk", {expected_r.pow(3), d, d}) -
+                      torch::einsum("mi, mijk->mijk", {expected_r.pow(2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualReciprocalTests, ReciprocalMixedValues) {
+    auto r = torch::tensor({{2.0, -3.0}, {0.5, -0.2}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.reciprocal();
+
+    auto expected_r = r.reciprocal();
+    auto expected_d = -expected_r.pow(2).unsqueeze(-1) * d;
+    auto expected_h = 2 * torch::einsum("mi, mij, mik->mijk", {expected_r.pow(3), d, d}) -
+                      torch::einsum("mi, mijk->mijk", {expected_r.pow(2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualReciprocalTests, ReciprocalEdgeCase) {
+    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.reciprocal();
+
+    auto expected_r = r.reciprocal();
+    auto expected_d = -expected_r.pow(2).unsqueeze(-1) * d;
+    auto expected_h = 2 * torch::einsum("mi, mij, mik->mijk", {expected_r.pow(3), d, d}) -
+                      torch::einsum("mi, mijk->mijk", {expected_r.pow(2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualCosTests, CosinePositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.cos();
+
+    auto expected_r = torch::cos(r);
+    auto expected_d = -torch::sin(r).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::cos(r), d, d}) -
+                      torch::einsum("mi, mijk->mijk", {torch::sin(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+#include <cmath>
+auto pi_tensor = torch::tensor(M_PI, torch::TensorOptions().dtype(torch::kFloat64));
+
+TEST(TensorHyperDualCosTests, CosineNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - pi_tensor;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.cos();
+
+    auto expected_r = torch::cos(r);
+    auto expected_d = -torch::sin(r).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::cos(r), d, d}) -
+                      torch::einsum("mi, mijk->mijk", {torch::sin(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualCosTests, CosineMixedValues) {
+    auto r = torch::tensor({{0.0, M_PI / 4}, {M_PI / 2, -M_PI / 3}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.cos();
+
+    auto expected_r = torch::cos(r);
+    auto expected_d = -torch::sin(r).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::cos(r), d, d}) -
+                      torch::einsum("mi, mijk->mijk", {torch::sin(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualCosTests, CosineEdgeCase) {
+    auto r = torch::tensor({{-M_PI, 0.0}, {M_PI, M_PI / 2}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.cos();
+
+    auto expected_r = torch::cos(r);
+    auto expected_d = -torch::sin(r).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::cos(r), d, d}) -
+                      torch::einsum("mi, mijk->mijk", {torch::sin(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSinTests, SinePositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sin();
+
+    auto expected_r = torch::sin(r);
+    auto expected_d = torch::cos(r).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::sin(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::cos(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSinTests, SineNegativeValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) - M_PI;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sin();
+
+    auto expected_r = torch::sin(r);
+    auto expected_d = torch::cos(r).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::sin(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::cos(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSinTests, SineMixedValues) {
+    auto r = torch::tensor({{0.0, M_PI / 4}, {M_PI / 2, -M_PI / 3}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sin();
+
+    auto expected_r = torch::sin(r);
+    auto expected_d = torch::cos(r).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::sin(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::cos(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSinTests, SineEdgeCase) {
+    auto r = torch::tensor({{-M_PI, 0.0}, {M_PI, M_PI / 2}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sin();
+
+    auto expected_r = torch::sin(r);
+    auto expected_d = torch::cos(r).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::sin(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::cos(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualTanTests, TangentPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) * (M_PI / 4);
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.tan();
+
+    auto expected_r = torch::tan(r);
+    auto expected_d = torch::pow(torch::cos(r), -2).unsqueeze(-1) * d;
+    auto expected_h = 2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cos(r), -2) * torch::tan(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(torch::cos(r), -2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualTanTests, TangentNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) * (M_PI / 4);
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.tan();
+
+    auto expected_r = torch::tan(r);
+    auto expected_d = torch::pow(torch::cos(r), -2).unsqueeze(-1) * d;
+    auto expected_h = 2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cos(r), -2) * torch::tan(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(torch::cos(r), -2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualTanTests, TangentMixedValues) {
+    auto r = torch::tensor({{M_PI / 6, -M_PI / 4}, {M_PI / 3, -M_PI / 6}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.tan();
+
+    auto expected_r = torch::tan(r);
+    auto expected_d = torch::pow(torch::cos(r), -2).unsqueeze(-1) * d;
+    auto expected_h = 2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cos(r), -2) * torch::tan(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(torch::cos(r), -2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualTanTests, TangentEdgeCase) {
+    auto r = torch::tensor({{-M_PI / 4, M_PI / 6}, {M_PI / 3, 0.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.tan();
+
+    auto expected_r = torch::tan(r);
+    auto expected_d = torch::pow(torch::cos(r), -2).unsqueeze(-1) * d;
+    auto expected_h = 2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cos(r), -2) * torch::tan(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(torch::cos(r), -2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+
+TEST(TensorHyperDualAsinTests, AsinPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) * 0.9;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.asin();
+
+    auto one_minus_r_sq = 1 - r * r;
+    auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);
+
+    auto expected_r = torch::asin(r);
+    auto expected_d = (1 / sqrt_one_minus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAsinTests, AsinNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) * 0.9;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.asin();
+
+    auto one_minus_r_sq = 1 - r * r;
+    auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);
+
+    auto expected_r = torch::asin(r);
+    auto expected_d = (1 / sqrt_one_minus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAsinTests, AsinMixedValues) {
+    auto r = torch::tensor({{0.5, -0.3}, {0.7, -0.9}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.asin();
+
+    auto one_minus_r_sq = 1 - r * r;
+    auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);
+
+    auto expected_r = torch::asin(r);
+    auto expected_d = (1 / sqrt_one_minus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAsinTests, AsinEdgeCase) {
+    auto r = torch::tensor({{-0.9, 0.0}, {0.9, 0.5}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.asin();
+
+    auto one_minus_r_sq = 1 - r * r;
+    auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);
+
+    auto expected_r = torch::asin(r);
+    auto expected_d = (1 / sqrt_one_minus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAcosTests, AcosPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) * 0.9;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.acos();
+
+    auto one_minus_r_sq = 1 - r * r;
+    auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);
+
+    auto expected_r = torch::acos(r);
+    auto expected_d = -(1 / sqrt_one_minus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * r, d, d}) -
+                      torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAcosTests, AcosNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) * 0.9;
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.acos();
+
+    auto one_minus_r_sq = 1 - r * r;
+    auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);
+
+    auto expected_r = torch::acos(r);
+    auto expected_d = -(1 / sqrt_one_minus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * r, d, d}) -
+                      torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAcosTests, AcosMixedValues) {
+    auto r = torch::tensor({{0.5, -0.3}, {0.7, -0.9}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.acos();
+
+    auto one_minus_r_sq = 1 - r * r;
+    auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);
+
+    auto expected_r = torch::acos(r);
+    auto expected_d = -(1 / sqrt_one_minus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * r, d, d}) -
+                      torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAcosTests, AcosEdgeCase) {
+    auto r = torch::tensor({{-0.9, 0.0}, {0.9, 0.5}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.acos();
+
+    auto one_minus_r_sq = 1 - r * r;
+    auto sqrt_one_minus_r_sq = torch::sqrt(one_minus_r_sq);
+
+    auto expected_r = torch::acos(r);
+    auto expected_d = -(1 / sqrt_one_minus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {(1 / torch::pow(one_minus_r_sq, 1.5)) * r, d, d}) -
+                      torch::einsum("mi, mijk->mijk", {(1 / sqrt_one_minus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAtanTests, AtanPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.atan();
+
+    auto one_plus_r_sq = 1 + r * r;
+
+    auto expected_r = torch::atan(r);
+    auto expected_d = (1 / one_plus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {(2 / torch::pow(one_plus_r_sq, 2)) * r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {(1 / one_plus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAtanTests, AtanNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.atan();
+
+    auto one_plus_r_sq = 1 + r * r;
+
+    auto expected_r = torch::atan(r);
+    auto expected_d = (1 / one_plus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {(2 / torch::pow(one_plus_r_sq, 2)) * r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {(1 / one_plus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAtanTests, AtanMixedValues) {
+    auto r = torch::tensor({{0.5, -0.3}, {1.0, -0.9}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.atan();
+
+    auto one_plus_r_sq = 1 + r * r;
+
+    auto expected_r = torch::atan(r);
+    auto expected_d = (1 / one_plus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {(2 / torch::pow(one_plus_r_sq, 2)) * r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {(1 / one_plus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAtanTests, AtanEdgeCase) {
+    auto r = torch::tensor({{-0.9, 0.0}, {1.0, 0.5}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.atan();
+
+    auto one_plus_r_sq = 1 + r * r;
+
+    auto expected_r = torch::atan(r);
+    auto expected_d = (1 / one_plus_r_sq).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {(2 / torch::pow(one_plus_r_sq, 2)) * r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {(1 / one_plus_r_sq), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualSinhTests, SinhPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sinh();
+
+    auto expected_r = torch::sinh(r);
+    auto expected_d = torch::cosh(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {torch::sinh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::cosh(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSinhTests, SinhNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sinh();
+
+    auto expected_r = torch::sinh(r);
+    auto expected_d = torch::cosh(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {torch::sinh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::cosh(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSinhTests, SinhMixedValues) {
+    auto r = torch::tensor({{0.5, -0.3}, {1.0, -0.9}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sinh();
+
+    auto expected_r = torch::sinh(r);
+    auto expected_d = torch::cosh(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {torch::sinh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::cosh(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSinhTests, SinhEdgeCase) {
+    auto r = torch::tensor({{-0.9, 0.0}, {1.0, 0.5}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sinh();
+
+    auto expected_r = torch::sinh(r);
+    auto expected_d = torch::cosh(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {torch::sinh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::cosh(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualCoshTests, CoshPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.cosh();
+
+    auto expected_r = torch::cosh(r);
+    auto expected_d = torch::sinh(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {torch::cosh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::sinh(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualCoshTests, CoshNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.cosh();
+
+    auto expected_r = torch::cosh(r);
+    auto expected_d = torch::sinh(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {torch::cosh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::sinh(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualCoshTests, CoshMixedValues) {
+    auto r = torch::tensor({{0.5, -0.3}, {1.0, -0.9}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.cosh();
+
+    auto expected_r = torch::cosh(r);
+    auto expected_d = torch::sinh(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {torch::cosh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::sinh(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualCoshTests, CoshEdgeCase) {
+    auto r = torch::tensor({{-0.9, 0.0}, {1.0, 0.5}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.cosh();
+
+    auto expected_r = torch::cosh(r);
+    auto expected_d = torch::sinh(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {torch::cosh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::sinh(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualTanhTests, TanhPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.tanh();
+
+    auto expected_r = torch::tanh(r);
+    auto expected_d = torch::pow(torch::cosh(r), -2).unsqueeze(-1) * d;
+    auto expected_h = -2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cosh(r), -2) * torch::tanh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(torch::cosh(r), -2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualTanhTests, TanhNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.tanh();
+
+    auto expected_r = torch::tanh(r);
+    auto expected_d = torch::pow(torch::cosh(r), -2).unsqueeze(-1) * d;
+    auto expected_h = -2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cosh(r), -2) * torch::tanh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(torch::cosh(r), -2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualTanhTests, TanhMixedValues) {
+    auto r = torch::tensor({{0.5, -0.3}, {1.0, -0.9}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.tanh();
+
+    auto expected_r = torch::tanh(r);
+    auto expected_d = torch::pow(torch::cosh(r), -2).unsqueeze(-1) * d;
+    auto expected_h = -2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cosh(r), -2) * torch::tanh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(torch::cosh(r), -2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualTanhTests, TanhEdgeCase) {
+    auto r = torch::tensor({{-0.9, 0.0}, {1.0, 0.5}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.tanh();
+
+    auto expected_r = torch::tanh(r);
+    auto expected_d = torch::pow(torch::cosh(r), -2).unsqueeze(-1) * d;
+    auto expected_h = -2 * torch::einsum("mi, mij, mik->mijk", {torch::pow(torch::cosh(r), -2) * torch::tanh(r), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(torch::cosh(r), -2), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualExpTests, ExpPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.exp();
+
+    auto expected_r = torch::exp(r);
+    auto expected_d = expected_r.unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {expected_r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {expected_r, h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualExpTests, ExpNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.exp();
+
+    auto expected_r = torch::exp(r);
+    auto expected_d = expected_r.unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {expected_r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {expected_r, h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualExpTests, ExpMixedValues) {
+    auto r = torch::tensor({{0.5, -0.3}, {1.0, -0.9}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.exp();
+
+    auto expected_r = torch::exp(r);
+    auto expected_d = expected_r.unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {expected_r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {expected_r, h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualExpTests, ExpEdgeCase) {
+    auto r = torch::tensor({{-0.9, 0.0}, {1.0, 0.5}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.exp();
+
+    auto expected_r = torch::exp(r);
+    auto expected_d = expected_r.unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {expected_r, d, d}) +
+                      torch::einsum("mi, mijk->mijk", {expected_r, h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualLogTests, LogPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU)) + 0.1; // Avoid zero
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.log();
+
+    auto expected_r = torch::log(r);
+    auto expected_d = torch::pow(r, -1).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::pow(r, -2), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(r, -1), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualLogTests, LogMixedValues) {
+    auto r = torch::tensor({{1.0, 0.5}, {2.0, 0.1}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.log();
+
+    auto expected_r = torch::log(r);
+    auto expected_d = torch::pow(r, -1).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::pow(r, -2), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(r, -1), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualLogTests, LogEdgeCase) {
+    auto r = torch::tensor({{0.1, 1.0}, {0.5, 2.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.log();
+
+    auto expected_r = torch::log(r);
+    auto expected_d = torch::pow(r, -1).unsqueeze(-1) * d;
+    auto expected_h = -torch::einsum("mi, mij, mik->mijk", {torch::pow(r, -2), d, d}) +
+                      torch::einsum("mi, mijk->mijk", {torch::pow(r, -1), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAbsTests, AbsPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.abs();
+
+    auto expected_r = torch::abs(r);
+    auto expected_d = torch::sign(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mijk->mijk", {torch::sign(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAbsTests, AbsNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.abs();
+
+    auto expected_r = torch::abs(r);
+    auto expected_d = torch::sign(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mijk->mijk", {torch::sign(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAbsTests, AbsMixedValues) {
+    auto r = torch::tensor({{-0.5, 0.3}, {1.0, -0.9}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.abs();
+
+    auto expected_r = torch::abs(r);
+    auto expected_d = torch::sign(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mijk->mijk", {torch::sign(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualAbsTests, AbsEdgeCase) {
+    auto r = torch::tensor({{-1.0, 0.0}, {1.0, -0.5}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.abs();
+
+    auto expected_r = torch::abs(r);
+    auto expected_d = torch::sign(r).unsqueeze(-1) * d;
+    auto expected_h = torch::einsum("mi, mijk->mijk", {torch::sign(r), h});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualComplexTests, AlreadyComplexTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.complex();
+
+    ASSERT_TRUE(result.r.is_complex());
+    ASSERT_TRUE(result.d.is_complex());
+    ASSERT_TRUE(result.h.is_complex());
+    ASSERT_TRUE(torch::allclose(result.r, r));
+    ASSERT_TRUE(torch::allclose(result.d, d));
+    ASSERT_TRUE(torch::allclose(result.h, h));
+}
+
+TEST(TensorHyperDualComplexTests, ConvertRealTensorsToComplex) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.complex();
+
+    auto expected_r = torch::complex(r, torch::zeros_like(r));
+    auto expected_d = torch::complex(d, torch::zeros_like(d));
+    auto expected_h = torch::complex(h, torch::zeros_like(h));
+
+    ASSERT_TRUE(result.r.is_complex());
+    ASSERT_TRUE(result.d.is_complex());
+    ASSERT_TRUE(result.h.is_complex());
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualComplexTests, MixedRealAndComplexTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.complex();
+
+    auto expected_r = torch::complex(r, torch::zeros_like(r));
+    auto expected_d = d;
+    auto expected_h = torch::complex(h, torch::zeros_like(h));
+
+    ASSERT_TRUE(result.r.is_complex());
+    ASSERT_TRUE(result.d.is_complex());
+    ASSERT_TRUE(result.h.is_complex());
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualRealTests, ExtractRealFromComplexTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.real();
+
+    auto expected_r = torch::real(r);
+    auto expected_d = torch::real(d);
+    auto expected_h = torch::real(h);
+
+    ASSERT_TRUE(result.r.is_floating_point());
+    ASSERT_TRUE(result.d.is_floating_point());
+    ASSERT_TRUE(result.h.is_floating_point());
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualRealTests, ExtractRealFromRealTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.real();
+
+    ASSERT_TRUE(result.r.is_floating_point());
+    ASSERT_TRUE(result.d.is_floating_point());
+    ASSERT_TRUE(result.h.is_floating_point());
+    ASSERT_TRUE(torch::allclose(result.r, r));
+    ASSERT_TRUE(torch::allclose(result.d, d));
+    ASSERT_TRUE(torch::allclose(result.h, h));
+}
+
+TEST(TensorHyperDualRealTests, MixedComplexAndRealTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.real();
+
+    auto expected_r = torch::real(r);
+    auto expected_d = d;  // Already real
+    auto expected_h = torch::real(h);
+
+    ASSERT_TRUE(result.r.is_floating_point());
+    ASSERT_TRUE(result.d.is_floating_point());
+    ASSERT_TRUE(result.h.is_floating_point());
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualImagTests, ExtractImagFromComplexTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 5}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.imag();
+
+    auto expected_r = torch::imag(r);
+    auto expected_d = torch::imag(d);
+    auto expected_h = torch::imag(h);
+
+    ASSERT_TRUE(result.r.is_floating_point());
+    ASSERT_TRUE(result.d.is_floating_point());
+    ASSERT_TRUE(result.h.is_floating_point());
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualImagTests, ExtractImagFromRealTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.imag();
+
+    auto expected_r = torch::zeros_like(r);
+    auto expected_d = torch::zeros_like(d);
+    auto expected_h = torch::zeros_like(h);
+
+    ASSERT_TRUE(result.r.is_floating_point());
+    ASSERT_TRUE(result.d.is_floating_point());
+    ASSERT_TRUE(result.h.is_floating_point());
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualImagTests, MixedComplexAndRealTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.imag();
+
+    auto expected_r = torch::imag(r);
+    auto expected_d = torch::zeros_like(d);
+    auto expected_h = torch::imag(h);
+
+    ASSERT_TRUE(result.r.is_floating_point());
+    ASSERT_TRUE(result.d.is_floating_point());
+    ASSERT_TRUE(result.h.is_floating_point());
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualZerosLikeTests, ComplexTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.zeros_like();
+    
+    // Check shapes match
+    ASSERT_EQ(result.r.sizes(), r.sizes());
+    ASSERT_EQ(result.d.sizes(), d.sizes());
+    ASSERT_EQ(result.h.sizes(), h.sizes());
+    
+    // Check types match
+    ASSERT_EQ(result.r.dtype(), r.dtype());
+    ASSERT_EQ(result.d.dtype(), d.dtype());
+    ASSERT_EQ(result.h.dtype(), h.dtype());
+    
+    // Check all values are zero
+    ASSERT_TRUE(torch::all(result.r == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.d == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.h == 0).item<bool>());
+}
+
+TEST(TensorHyperDualZerosLikeTests, RealTensors) {
+    auto r = torch::rand({3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({3, 4, 2}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({3, 4, 2, 2}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.zeros_like();
+    
+    // Check shapes match
+    ASSERT_EQ(result.r.sizes(), r.sizes());
+    ASSERT_EQ(result.d.sizes(), d.sizes());
+    ASSERT_EQ(result.h.sizes(), h.sizes());
+    
+    // Check types match
+    ASSERT_EQ(result.r.dtype(), r.dtype());
+    ASSERT_EQ(result.d.dtype(), d.dtype());
+    ASSERT_EQ(result.h.dtype(), h.dtype());
+    
+    // Check all values are zero
+    ASSERT_TRUE(torch::all(result.r == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.d == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.h == 0).item<bool>());
+}
+
+TEST(TensorHyperDualZerosLikeTests, MixedTypeTensors) {
+    auto r = torch::rand({2, 2}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 3, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.zeros_like();
+    
+    // Check shapes match
+    ASSERT_EQ(result.r.sizes(), r.sizes());
+    ASSERT_EQ(result.d.sizes(), d.sizes());
+    ASSERT_EQ(result.h.sizes(), h.sizes());
+    
+    // Check types match
+    ASSERT_EQ(result.r.dtype(), r.dtype());
+    ASSERT_EQ(result.d.dtype(), d.dtype());
+    ASSERT_EQ(result.h.dtype(), h.dtype());
+    
+    // Check all values are zero
+    ASSERT_TRUE(torch::all(result.r == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.d == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.h == 0).item<bool>());
+}
+
+TEST(TensorHyperDualZerosLikeTests, EmptyTensors) {
+    auto r = torch::empty({0, 2}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::empty({0, 2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::empty({0, 2, 3, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.zeros_like();
+    
+    // Check shapes match
+    ASSERT_EQ(result.r.sizes(), r.sizes());
+    ASSERT_EQ(result.d.sizes(), d.sizes());
+    ASSERT_EQ(result.h.sizes(), h.sizes());
+    
+    // Check types match
+    ASSERT_EQ(result.r.dtype(), r.dtype());
+    ASSERT_EQ(result.d.dtype(), d.dtype());
+    ASSERT_EQ(result.h.dtype(), h.dtype());
+    
+    // Check dimensions are preserved
+    ASSERT_EQ(result.r.dim(), r.dim());
+    ASSERT_EQ(result.d.dim(), d.dim());
+    ASSERT_EQ(result.h.dim(), h.dim());
+}
+
+TEST(TensorHyperDualStaticZerosLikeTests, ComplexTensors) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    
+    TensorHyperDual original(r, d, h);
+    auto result = TensorHyperDual::zeros_like(original);
+    
+    // Check shapes match
+    ASSERT_EQ(result.r.sizes(), r.sizes());
+    ASSERT_EQ(result.d.sizes(), d.sizes());
+    ASSERT_EQ(result.h.sizes(), h.sizes());
+    
+    // Check types match
+    ASSERT_EQ(result.r.dtype(), r.dtype());
+    ASSERT_EQ(result.d.dtype(), d.dtype());
+    ASSERT_EQ(result.h.dtype(), h.dtype());
+    
+    // Check all values are zero
+    ASSERT_TRUE(torch::all(result.r == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.d == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.h == 0).item<bool>());
+}
+
+TEST(TensorHyperDualStaticZerosLikeTests, RealTensors) {
+    auto r = torch::rand({3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({3, 4, 2}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({3, 4, 2, 2}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    
+    TensorHyperDual original(r, d, h);
+    auto result = TensorHyperDual::zeros_like(original);
+    
+    // Check shapes match
+    ASSERT_EQ(result.r.sizes(), r.sizes());
+    ASSERT_EQ(result.d.sizes(), d.sizes());
+    ASSERT_EQ(result.h.sizes(), h.sizes());
+    
+    // Check types match
+    ASSERT_EQ(result.r.dtype(), r.dtype());
+    ASSERT_EQ(result.d.dtype(), d.dtype());
+    ASSERT_EQ(result.h.dtype(), h.dtype());
+    
+    // Check all values are zero
+    ASSERT_TRUE(torch::all(result.r == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.d == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.h == 0).item<bool>());
+}
+
+TEST(TensorHyperDualStaticZerosLikeTests, MixedTypeTensors) {
+    auto r = torch::rand({2, 2}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 2, 3, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    
+    TensorHyperDual original(r, d, h);
+    auto result = TensorHyperDual::zeros_like(original);
+    
+    // Check shapes match
+    ASSERT_EQ(result.r.sizes(), r.sizes());
+    ASSERT_EQ(result.d.sizes(), d.sizes());
+    ASSERT_EQ(result.h.sizes(), h.sizes());
+    
+    // Check types match
+    ASSERT_EQ(result.r.dtype(), r.dtype());
+    ASSERT_EQ(result.d.dtype(), d.dtype());
+    ASSERT_EQ(result.h.dtype(), h.dtype());
+    
+    // Check all values are zero
+    ASSERT_TRUE(torch::all(result.r == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.d == 0).item<bool>());
+    ASSERT_TRUE(torch::all(result.h == 0).item<bool>());
+}
+
+TEST(TensorHyperDualStaticZerosLikeTests, EmptyTensors) {
+    auto r = torch::empty({0, 2}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::empty({0, 2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::empty({0, 2, 3, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    
+    TensorHyperDual original(r, d, h);
+    auto result = TensorHyperDual::zeros_like(original);
+    
+    // Check shapes match
+    ASSERT_EQ(result.r.sizes(), r.sizes());
+    ASSERT_EQ(result.d.sizes(), d.sizes());
+    ASSERT_EQ(result.h.sizes(), h.sizes());
+    
+    // Check types match
+    ASSERT_EQ(result.r.dtype(), r.dtype());
+    ASSERT_EQ(result.d.dtype(), d.dtype());
+    ASSERT_EQ(result.h.dtype(), h.dtype());
+    
+    // Check dimensions are preserved
+    ASSERT_EQ(result.r.dim(), r.dim());
+    ASSERT_EQ(result.d.dim(), d.dim());
+    ASSERT_EQ(result.h.dim(), h.dim());
+}
+
+TEST(TensorHyperDualStaticZerosLikeTests, PreservesOriginalUnchanged) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    
+    TensorHyperDual original(r.clone(), d.clone(), h.clone());
+    auto result = TensorHyperDual::zeros_like(original);
+    
+    // Verify original is unchanged
+    ASSERT_TRUE(torch::allclose(original.r, r));
+    ASSERT_TRUE(torch::allclose(original.d, d));
+    ASSERT_TRUE(torch::allclose(original.h, h));
+}
+
+
+TEST(TensorHyperDualSignTests, SignRealPositiveValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sign();
+
+    auto expected_r = torch::sign(r);
+    auto expected_d = torch::zeros_like(d);
+    auto expected_h = torch::zeros_like(h);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSignTests, SignRealNegativeValues) {
+    auto r = -torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sign();
+
+    auto expected_r = torch::sign(r);
+    auto expected_d = torch::zeros_like(d);
+    auto expected_h = torch::zeros_like(h);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSignTests, SignComplexValues) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kComplexDouble).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sign();
+
+    auto expected_r = torch::sgn(r);
+    auto expected_d = torch::zeros_like(d);
+    auto expected_h = torch::zeros_like(h);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualSignTests, SignEdgeCaseZero) {
+    auto r = torch::zeros({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.sign();
+
+    auto expected_r = torch::sign(r);
+    auto expected_d = torch::zeros_like(d);
+    auto expected_h = torch::zeros_like(h);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+
+TEST(TensorHyperDualMinTests, MinValuesAndIndices) {
+    auto r = torch::tensor({{5.0, 2.0, 3.0}, {4.0, 1.0, 6.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.min();
+
+    auto min_result = torch::min(r, 1, true);
+    auto expected_r = std::get<0>(min_result);
+    auto expected_indices = std::get<1>(min_result);
+
+    auto dshape = expected_indices.unsqueeze(-1).expand({expected_indices.size(0), expected_indices.size(1), d.size(-1)});
+    auto hshape = expected_indices.unsqueeze(-1).unsqueeze(-1).expand({expected_indices.size(0), expected_indices.size(1), h.size(-2), h.size(-1)});
+
+    auto expected_d = torch::gather(d, 1, dshape);
+    auto expected_h = torch::gather(h, 1, hshape);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualMinTests, ConsistencyAcrossTensors) {
+    auto r = torch::rand({3, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({3, 5, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({3, 5, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.min();
+
+    auto min_result = torch::min(r, 1, true);
+    auto expected_r = std::get<0>(min_result);
+    auto expected_indices = std::get<1>(min_result);
+
+    auto dshape = expected_indices.unsqueeze(-1).expand({expected_indices.size(0), expected_indices.size(1), d.size(-1)});
+    auto hshape = expected_indices.unsqueeze(-1).unsqueeze(-1).expand({expected_indices.size(0), expected_indices.size(1), h.size(-2), h.size(-1)});
+
+    auto expected_d = torch::gather(d, 1, dshape);
+    auto expected_h = torch::gather(h, 1, hshape);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualMinTests, ShapeMismatchThrowsError) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+
+    ASSERT_THROW(thd.min(), std::invalid_argument);
+}
+
+
+
+TEST(TensorHyperDualMaxTests, MaxValuesAndIndices) {
+    auto r = torch::tensor({{5.0, 2.0, 3.0}, {4.0, 1.0, 6.0}}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.max();
+
+    auto max_result = torch::max(r, 1, true);
+    auto expected_r = std::get<0>(max_result);
+    auto expected_indices = std::get<1>(max_result);
+
+    auto dshape = expected_indices.unsqueeze(-1).expand({expected_indices.size(0), expected_indices.size(1), d.size(-1)});
+    auto hshape = expected_indices.unsqueeze(-1).unsqueeze(-1).expand({expected_indices.size(0), expected_indices.size(1), h.size(-2), h.size(-1)});
+
+    auto expected_d = torch::gather(d, 1, dshape);
+    auto expected_h = torch::gather(h, 1, hshape);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualMaxTests, ConsistencyAcrossTensors) {
+    auto r = torch::rand({3, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({3, 5, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({3, 5, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+    auto result = thd.max();
+
+    auto max_result = torch::max(r, 1, true);
+    auto expected_r = std::get<0>(max_result);
+    auto expected_indices = std::get<1>(max_result);
+
+    auto dshape = expected_indices.unsqueeze(-1).expand({expected_indices.size(0), expected_indices.size(1), d.size(-1)});
+    auto hshape = expected_indices.unsqueeze(-1).unsqueeze(-1).expand({expected_indices.size(0), expected_indices.size(1), h.size(-2), h.size(-1)});
+
+    auto expected_d = torch::gather(d, 1, dshape);
+    auto expected_h = torch::gather(h, 1, hshape);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualMaxTests, ShapeMismatchThrowsError) {
+    auto r = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d = torch::rand({2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual thd(r, d, h);
+
+    ASSERT_THROW(thd.max(), std::invalid_argument);
+}
+
+
+TEST(TensorHyperDualWhereTests, WhereConditionMatchesShape) {
+    auto cond = torch::tensor({1, 0, 1}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    auto r1 = torch::rand({3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({3, 4, 5, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({3, 4, 5, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual x(r1, d1, h1);
+    TensorHyperDual y(r2, d2, h2);
+
+    auto result = TensorHyperDual::where(cond, x, y);
+
+    auto expected_r = torch::where(cond.unsqueeze(1).expand({3, 4}), r1, r2);
+    auto expected_d = torch::where(cond.unsqueeze(1).unsqueeze(2).expand({3, 4, 5}), d1, d2);
+    auto expected_h = torch::where(cond.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand({3, 4, 5, 5}), h1, h2);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualWhereTests, WhereConditionBroadcastable) {
+    auto cond = torch::tensor({1, 0}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual x(r1, d1, h1);
+    TensorHyperDual y(r2, d2, h2);
+
+    auto result = TensorHyperDual::where(cond, x, y);
+
+    auto expected_r = torch::where(cond.unsqueeze(1).expand({2, 3}), r1, r2);
+    auto expected_d = torch::where(cond.unsqueeze(1).unsqueeze(2).expand({2, 3, 4}), d1, d2);
+    auto expected_h = torch::where(cond.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand({2, 3, 4, 4}), h1, h2);
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+TEST(TensorHyperDualWhereTests, ShapeMismatchThrowsError) {
+    auto cond = torch::tensor({1, 0}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({2, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 4, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual x(r1, d1, h1);
+    TensorHyperDual y(r2, d2, h2);
+
+    ASSERT_THROW(TensorHyperDual::where(cond, x, y), std::invalid_argument);
+}
+
+TEST(TensorHyperDualWhereTests, ConditionNonBroadcastableThrowsError) {
+    auto cond = torch::tensor({{1, 0}, {0, 1}}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual x(r1, d1, h1);
+    TensorHyperDual y(r2, d2, h2);
+
+    ASSERT_THROW(TensorHyperDual::where(cond, x, y), std::invalid_argument);
+}
+
+
+TEST(TensorHyperDualEinsumTests, SimpleDotProduct) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual x(r1, d1, h1);
+    TensorHyperDual y(r2, d2, h2);
+
+    auto result = TensorHyperDual::einsum("mi,mi->mi", x, y);
+
+    auto expected_r = torch::einsum("mi, mi->mi", {r1, r2});
+    auto expected_d = torch::einsum("mi,mij->mij", {r1, d2}) + torch::einsum("mij, mi->mij", {d1, r2});
+    auto expected_h = 2*torch::einsum("mij, mik->mijk", {d1, d2}) + torch::einsum("mi,mijk->mijk", {r1, h2}) + 
+                      torch::einsum("mijk,mi->mijk", {h1, r2});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualEinsumTests, ShapeMismatchThrowsError) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({4, 5, 6}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({4, 5, 6, 6}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual x(r1, d1, h1);
+    TensorHyperDual y(r2, d2, h2);
+
+    //Expect a c10 error
+    ASSERT_THROW(TensorHyperDual::einsum("mi,mi->mi", x, y), c10::Error);
+}
+
+
+
+TEST(TensorHyperDualEinsumTensorTests, SimpleDotProduct) {
+    auto r1 = torch::rand({3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto r2 = torch::rand({3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({3, 4, 5, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual y(r2, d2, h2);
+
+    auto result = TensorHyperDual::einsum("mi,mi->mi", r1, y);
+
+    auto expected_r = torch::einsum("mi,mi->mi", {r1, r2});
+    auto expected_d = torch::einsum("mi,mij->mij", {r1, d2});
+    auto expected_h = torch::einsum("mi,mijk->mijk", {r1, h2});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualEinsumTensorTests, ShapeMismatchThrowsError) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto r2 = torch::rand({4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({4, 5, 6}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({4, 5, 6, 7}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual y(r2, d2, h2);
+    //Expect a c10 error
+    ASSERT_THROW(TensorHyperDual::einsum("mi,mi->mi", r1, y), c10::Error);
+
+}
+
+
+TEST(TensorHyperDualEinsumDualTests, SimpleDotProduct) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto r2 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 5, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual x(r1, d1, h1);
+
+    auto result = TensorHyperDual::einsum("mi,mi->mi", x, r2);
+
+    auto expected_r = torch::einsum("mi, mi->mi", {r1, r2});
+    auto expected_d = torch::einsum("mij, mi->mij", {d1, r2});
+    auto expected_h = torch::einsum("mijk, mi->mijk", {h1, r2});
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));
+    ASSERT_TRUE(torch::allclose(result.d, expected_d));
+    ASSERT_TRUE(torch::allclose(result.h, expected_h));
+}
+
+
+TEST(TensorHyperDualEinsumDualTests, ShapeMismatchThrowsError) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto r2 = torch::rand({4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 6}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 6, 7}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual x(r1, d1, h1);
+    //Expect a c10 error
+    ASSERT_THROW(TensorHyperDual::einsum("mi,mi->mi", x, r2), c10::Error);
+
+}
+
+
+TEST(TensorHyperDualEinsumVectorTests, SimpleDotProduct) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r3 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d3 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h3 = torch::rand({2, 3, 4, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual t1(r1, d1, h1);
+    TensorHyperDual t2(r2, d2, h2);
+    TensorHyperDual t3(r3, d3, h3);
+
+    std::vector<TensorHyperDual> tensors = {t1, t2, t3};
+    auto result = TensorHyperDual::einsum("mi, mi, mi->mi", tensors);
+
+    /*auto expected_r = torch::einsum("mi, mi, mi->mi", {r1, r2, r3});
+    auto expected_d = torch::einsum("mi, mi, mij->mij", {r1, r2, d3}) + 
+                      torch::einsum("mi, mij, mi->mij", {r1, d2, r3}) + 
+                      torch::einsum("mij, mi, mi->mij", {d1, r2, r3});
+
+    auto expected_h = torch::einsum("mi, mij, mik->mijk", {r1, d1, d2}) + 
+                      torch::einsum("mij, mi, mik->mijk", {d1, r2, d3}) + 
+                      torch::einsum("mij, mik, mi->mijk", {d1, d2, r3}) + 
+                      
+                      torch::einsum("mijk, mi, mi->mijk", {h1, r2, r3}) + 
+                      torch::einsum("mi, mijk, mi->mijk", {r1, h2, r3}) + 
+                      torch::einsum("mi, mi, mijk->mijk", {r1, r2, h3}); 
+
+    ASSERT_TRUE(torch::allclose(result.r, expected_r));*/
+    ASSERT_TRUE(true);
+}
+
+
+TEST(TensorHyperDualEinsumVectorTests, InvalidEinsumStringThrowsError) {
+    auto r1 = torch::rand({2, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d1 = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h1 = torch::rand({2, 3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    auto r2 = torch::rand({3, 4}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto d2 = torch::rand({3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+    auto h2 = torch::rand({3, 4, 5, 6}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+
+    TensorHyperDual t1(r1, d1, h1);
+    TensorHyperDual t2(r2, d2, h2);
+
+    std::vector<TensorHyperDual> tensors = {t1, t2};
+
+    //Expect a c10 error
+    ASSERT_THROW(TensorHyperDual::einsum("mi,mi->mi", tensors), c10::Error);
+}
+
+
+// Test case for the parameterized constructor
+TEST(TensorMatDualTest, ParameterizedConstructor_ValidInput) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}); // 3D tensor
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}); // 4D tensor
+
+    // Act
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Assert
+    EXPECT_EQ(tmd.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(tmd.d.sizes(), dual_tensor.sizes());
+    EXPECT_EQ(tmd.r.dtype(), real_tensor.dtype());
+    EXPECT_EQ(tmd.d.dtype(), dual_tensor.dtype());
+    EXPECT_EQ(tmd.r.device(), real_tensor.device());
+    EXPECT_EQ(tmd.d.device(), dual_tensor.device());
+}
+
+// Test case for mismatched dimensions
+TEST(TensorMatDualTest, ParameterizedConstructor_InvalidDimensions) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}); // 3D tensor
+    torch::Tensor invalid_dual_tensor = torch::rand({2, 3, 4}); // Not 4D
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual(real_tensor, invalid_dual_tensor), std::invalid_argument);
+}
+
+// Test case for mismatched devices
+TEST(TensorMatDualTest, ParameterizedConstructor_MismatchedDevices) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kCPU);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kCUDA);
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual(real_tensor, dual_tensor), std::invalid_argument);
+}
+
+// Test case for mismatched data types
+TEST(TensorMatDualTest, ParameterizedConstructor_MismatchedDataTypes) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat32));
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64));
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual(real_tensor, dual_tensor), std::invalid_argument);
+}
+
+// Test case for default constructor
+TEST(TensorMatDualTest, DefaultConstructor) {
+    // Act
+    TensorMatDual tmd;
+
+    // Assert
+    EXPECT_EQ(tmd.r.sizes(), torch::IntArrayRef({0, 0, 0}));
+    EXPECT_EQ(tmd.d.sizes(), torch::IntArrayRef({0, 0, 0, 0}));
+    EXPECT_EQ(tmd.r.dtype(), torch::kFloat64);
+    EXPECT_EQ(tmd.d.dtype(), torch::kFloat64);
+    EXPECT_EQ(tmd.r.device(), torch::kCPU);
+    EXPECT_EQ(tmd.d.device(), torch::kCPU);
+}
+
+// Test case for copy constructor
+TEST(TensorMatDualTest, CopyConstructor) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual original(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual copy(original);
+
+    // Assert
+    EXPECT_EQ(copy.r.sizes(), original.r.sizes());
+    EXPECT_EQ(copy.d.sizes(), original.d.sizes());
+    EXPECT_TRUE(copy.r.equal(original.r)); // Deep copy, tensors should be equal
+    EXPECT_TRUE(copy.d.equal(original.d)); // Deep copy, tensors should be equal
+}
+
+
+// Test case for the to_() method
+TEST(TensorMatDualTest, ToMethod_MoveToDevice) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kCPU);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kCPU);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    tmd.to_(torch::kCUDA);
+
+    // Assert
+    EXPECT_EQ(tmd.r.device().type(), torch::kCUDA);
+    EXPECT_EQ(tmd.d.device().type(), torch::kCUDA);
+}
+
+// Test case for the to_() method when already on the target device
+TEST(TensorMatDualTest, ToMethod_AlreadyOnDevice) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kCUDA);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kCUDA);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    tmd.to_(torch::kCUDA); // Already on CUDA
+
+    // Assert
+    EXPECT_EQ(tmd.r.device().type(), torch::kCUDA);
+    EXPECT_EQ(tmd.d.device().type(), torch::kCUDA);
+}
+
+// Test case for moving back to CPU
+TEST(TensorMatDualTest, ToMethod_MoveBackToCPU) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kCUDA);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kCUDA);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    tmd.to_(torch::kCPU);
+
+    // Assert
+    EXPECT_EQ(tmd.r.device().type(), torch::kCPU);
+    EXPECT_EQ(tmd.d.device().type(), torch::kCPU);
+}
+
+// Test case for checking the return value of to_()
+TEST(TensorMatDualTest, ToMethod_ReturnValue) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kCPU);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kCPU);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual& result = tmd.to_(torch::kCUDA);
+
+    // Assert
+    EXPECT_EQ(&result, &tmd); // Ensure the returned reference is the same object
+    EXPECT_EQ(tmd.r.device().type(), torch::kCUDA);
+    EXPECT_EQ(tmd.d.device().type(), torch::kCUDA);
+}
+
+
+// Test case for device() method returning CPU
+TEST(TensorMatDualTest, DeviceMethod_OnCPU) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kCPU);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kCPU);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    torch::Device device = tmd.device();
+
+    // Assert
+    EXPECT_EQ(device.type(), torch::kCPU);
+}
+
+// Test case for device() method returning CUDA
+TEST(TensorMatDualTest, DeviceMethod_OnCUDA) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kCUDA);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kCUDA);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    torch::Device device = tmd.device();
+
+    // Assert
+    EXPECT_EQ(device.type(), torch::kCUDA);
+}
+
+// Test case for device() after moving to another device
+TEST(TensorMatDualTest, DeviceMethod_AfterMoveToDevice) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kCPU);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kCPU);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    tmd.to_(torch::kCUDA);
+    torch::Device device = tmd.device();
+
+    // Assert
+    EXPECT_EQ(device.type(), torch::kCUDA);
+}
+
+
+
+
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

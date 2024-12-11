@@ -3026,9 +3026,6 @@ private:
         if (r.device() != d.device() || d.device() != h.device()) {
             throw std::invalid_argument("All tensors must reside on the same device");
         }
-        if (r.dtype() != d.dtype() || d.dtype() != h.dtype()) {
-            throw std::invalid_argument("All tensors must have the same dtype");
-        }
     }
 
 public:
@@ -3292,11 +3289,9 @@ public:
         // Perform element-wise comparison of the real parts
         auto mask = r <= other.r;
 
-        // Reduce across non-batch dimensions (if necessary) to generate a batch-level mask
-        auto batch_mask = mask.all(1); // Adjust dimension as needed based on tensor shape
 
         // Return the mask for batch selection
-        return batch_mask;
+        return mask;
     }
 
 
@@ -3313,10 +3308,8 @@ public:
         // Perform element-wise comparison of the real parts
         auto mask = r == other.r;
 
-        // Reduce across the feature dimension (N) to get a batch-level mask
-        auto batch_mask = mask.all(1);
 
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3332,10 +3325,8 @@ public:
         // Perform element-wise comparison of the real part with the other tensor
         auto mask = r <= other;
 
-        // Return the mask directly (no squeezing required)
-        auto batch_mask = mask.all(1);
 
-        return batch_mask;
+        return mask;
 
     }
 
@@ -3352,9 +3343,7 @@ public:
         // Perform element-wise comparison of the real part with the scalar
         auto mask = (r <= scalar);
 
-        //Remove the last dimension
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
 
@@ -3371,9 +3360,7 @@ public:
         // Perform element-wise comparison of the real parts
         auto mask = r > other.r;
 
-        //Remove the last dimension
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3388,8 +3375,7 @@ public:
      */
     torch::Tensor operator>(const torch::Tensor& other) const {
         auto mask = r > other;
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3405,8 +3391,7 @@ public:
         // Ensure the scalar is of a type convertible to Tensor
         auto scalar_tensor = torch::tensor({scalar}, this->r.options());
         auto mask = r > scalar_tensor;
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3416,8 +3401,7 @@ public:
      */
     torch::Tensor operator<(const TensorHyperDual& other) const {
         auto mask = r < other.r;
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3428,9 +3412,7 @@ public:
      */
     torch::Tensor operator<(const torch::Tensor& other) const {
         auto mask = r < other;
-        //std::cerr << "mask sizes in <: " << mask.sizes() << std::endl;
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3443,8 +3425,7 @@ public:
     torch::Tensor operator<(const Scalar& scalar) const {
         // Ensure the scalar is of a type convertible to Tensor
         auto mask = r < scalar;
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
 
@@ -3456,8 +3437,7 @@ public:
      */
     torch::Tensor operator>=(const TensorHyperDual& other) const {
         auto mask = r >= other.r;
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3468,8 +3448,7 @@ public:
      */
     torch::Tensor operator>=(const torch::Tensor& other) const {
         auto mask = r >= other;
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3483,8 +3462,7 @@ public:
         // Ensure the scalar is of a type convertible to Tensor
         auto scalar_tensor = torch::tensor({scalar}, this->r.options());
         auto mask = r >= scalar_tensor;
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
 
@@ -3497,8 +3475,7 @@ public:
      */
     torch::Tensor operator==(const torch::Tensor& other) const {
         auto mask = r.eq(other); // Using the .eq() function for equality comparison
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     
@@ -3512,8 +3489,7 @@ public:
     torch::Tensor operator==(const Scalar& scalar) const {
         // Ensure the scalar is of a type convertible to Tensor
         auto mask = r.eq(scalar);
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3523,8 +3499,7 @@ public:
      */
     torch::Tensor operator!=(const TensorHyperDual& other) const {
         auto mask = r.ne(other.r); // Using the .ne() function for inequality comparison
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3535,8 +3510,7 @@ public:
      */
     torch::Tensor operator!=(const torch::Tensor& other) const {
         auto mask = r.ne(other); // Using the .ne() function for inequality comparison
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
     
 
@@ -3550,8 +3524,7 @@ public:
     torch::Tensor operator!=(const Scalar& scalar) const {
         // Ensure the scalar is of a type convertible to Tensor
         auto mask = r.ne(scalar);
-        auto batch_mask = mask.all(1);
-        return batch_mask;
+        return mask;
     }
 
     /**
@@ -3828,10 +3801,29 @@ public:
      * Extract the imaginary part of the TensorHyperDual object.
      */
     TensorHyperDual imag() {
-        auto r = torch::imag(this->r);
-        auto d = torch::imag(this->d);
-        auto h = torch::imag(this->h);
-        return TensorHyperDual(r, d, h);
+        torch::Tensor rn, dn, hn;
+        if (this->r.is_complex()) {
+            rn = torch::imag(this->r);
+        }
+        else 
+        {
+            rn = torch::zeros_like(this->r);
+        }
+        if (this->d.is_complex()) {
+            dn = torch::imag(this->d);
+        }
+        else 
+        {
+            dn = torch::zeros_like(this->d);
+        }
+        if (this->h.is_complex()) {
+            hn = torch::imag(this->h);
+        }
+        else 
+        {
+            hn = torch::zeros_like(this->h);
+        }
+        return TensorHyperDual(rn, dn, hn);
     }
 
     /**
@@ -3872,7 +3864,13 @@ public:
      */
     TensorHyperDual sign() const {
         // Compute the sign of the real part
-        auto sign_r = torch::sign(this->r);  // sign(r)
+        torch::Tensor sign_r;
+        if (this->r.is_complex()) {
+            sign_r = torch::sgn(this->r);
+        }
+        else {
+            sign_r = torch::sign(this->r);
+        }
 
         // Dual and hyperdual parts are zero
         auto sign_d = torch::zeros_like(this->d);  // 0 for the dual part
@@ -4084,9 +4082,7 @@ public:
 
         auto h1r2arg = arg1+"zw,"+arg2+"->"+arg3+"zw";
         auto h1r2 = torch::einsum(h1r2arg, {h1, r2});
-        auto d1d2arg = arg1+"z,"+arg2+"w->"+arg3+"zw";
-        auto d1d2 = torch::einsum(d1d2arg, {d1, r2});
-        auto h = h1r2 + d1d2;
+        auto h = h1r2;
 
         return TensorHyperDual(r, d, h);
     }
@@ -4112,54 +4108,79 @@ public:
 
         // Find the position of the '->' in the einsum string
         auto posa = arg.find("->");
+        auto rhsarg = arg.substr(posa+2);
 
         //Find the positions of the "," in the einsum string
         std::vector<std::string> lhsargs{};
-        std::string rhsarg; //The right hand side of the einsum only one output
         size_t pos = arg.find(',');
         size_t posl = 0;
         while(pos != std::string::npos) 
         {
-           lhsargs.push_back(arg.substr(posl+1, pos));
-           posl = pos;
+           lhsargs.push_back(arg.substr(posl, pos-posl));
+           //Find the next comma
+           posl = pos+1;
+           pos = arg.find(',', pos+1);
         }
-        size_t pos2 = arg.find("->");
-        rhsarg = arg.substr(pos2+2);
-        std::vector<torch::Tensor> dr_tensors{};
+        //The last argument is before the ->
+        lhsargs.push_back(arg.substr(posl, posa-posl));
+        rhsarg = arg.substr(posa+2);
 
         auto d = torch::zeros_like(tensors[0].d);
         for ( int i=0; i < tensors.size(); i++)
         {
-            auto dpart = torch::zeros_like(tensors[0].d);
+            std::vector<torch::Tensor> dpart = {torch::zeros_like(tensors[0].d)};
             auto dl = tensors[i].d;
-            for ( int j=0; j < tensors.size(); i++)
+            auto darg = lhsargs[i] + "z";
+            for ( int j=0; j < tensors.size(); j++)
             {
                 if ( i==j) continue;
-                auto darg = lhsargs[i] + "z," + lhsargs[j] + "->" + rhsarg + "z";
-                dl = dl+torch::einsum(darg, {dpart, d_tensors[j]});
+                darg +=  ","+lhsargs[j];
+                dpart.push_back(tensors[j].r);
             }
-            d = d + dl;
-            dr_tensors.push_back(dl); //Keep this for the h calculation
+            dl = dl+torch::einsum(darg, dpart);
 
+            d = d + dl;
         }
 
         torch::Tensor h = torch::zeros_like(tensors[0].h);
         for ( int i=0; i < tensors.size(); i++)
         {
-            for ( int j=0; j < tensors.size(); i++)
+            //For each h there is one h and the rest are all are real parts
+            //After that we have pairs of dual parts while the rest are real parts
+            std::vector<torch::Tensor> hpart = {tensors[i].h};
+            std::string harg = lhsargs[i] + "zw";
+            for ( int j=0; j < tensors.size(); j++)
             {
                 if ( i==j) continue;
-                auto harg = lhsargs[i] + "zw," + lhsargs[j] + "->" + rhsarg + "zw";
-                h = h + torch::einsum(harg, {tensors[i].h, d_tensors[j]});
+                harg +=  ","+lhsargs[j];
+                hpart.push_back(tensors[j].r);
             }
-            //Now for the d^2 terms
-            auto d2 = torch::zeros_like(tensors[0].d);
-            for ( int j=0; j < tensors.size(); i++)
+            harg = harg + "->" + rhsarg + "zw";
+            h = h + torch::einsum(harg, hpart);
+        }
+        //We now need to evaluate the pairs of dual parts
+        for ( int i=0; i < tensors.size(); i++)
+        {
+            //First dual part
+            auto d1 = tensors[i].d;
+            std::string dharg = lhsargs[i] + "z";
+            std::vector<torch::Tensor> dhpart = {tensors[i].d};
+            for ( int j=0; j < tensors.size(); j++)
             {
                 if ( i==j) continue;
-                auto d2arg = lhsargs[i] + "z," + lhsargs[j] + "w->" + rhsarg + "zw";
-                h = h + torch::einsum(d2arg, {d_tensors[i], dr_tensors[j]});
+                //second dual part
+                dharg +=  ","+lhsargs[j]+"w";
+                dhpart.push_back(tensors[j].d);
+                //Finally the real parts
+                for ( int k=0; k < tensors.size(); k++)
+                {
+                    if ( i==k ||  j==k) continue;
+                    dharg +=  ","+lhsargs[k];
+                    dhpart.push_back(tensors[k].r);
+                }
             }
+            dharg = dharg + "->" + rhsarg + "zw";
+            h = h+torch::einsum(dharg, dhpart);
         }
         
         return TensorHyperDual(r, d, h);
@@ -4213,6 +4234,7 @@ public:
         this->dtype_ = torch::typeMetaToScalarType(this->r.dtype());
         this->device_ = this->r.device();
     }
+
     // Default Constructor
     /**
      * @brief Default constructor initializes the TensorMatDual object with empty tensors.
@@ -4222,8 +4244,8 @@ public:
      * on the default device (`kCPU`) with the default data type (`kFloat64`).
      */
     TensorMatDual()
-        : r(torch::empty({0, 0, 0}, torch::TensorOptions().dtype(dtype_).device(device_))),
-        d(torch::empty({0, 0, 0, 0}, torch::TensorOptions().dtype(dtype_).device(device_))) {}
+        : r(torch::empty({0, 0, 0}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))),
+        d(torch::empty({0, 0, 0, 0}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU))) {}
 
 
     // Copy Constructor
@@ -4285,7 +4307,7 @@ public:
      * @param dim The dimension along which to unsqueeze (default is 2).
      * @throws std::invalid_argument If the specified dimension is invalid for the input tensors.
      */
-    TensorMatDual(const TensorDual& x, int dim = 2)
+    TensorMatDual(const TensorDual& x, int dim = 1)
         : TensorMatDual(
             x.r.dim() > dim ? x.r.unsqueeze(dim) : throw std::invalid_argument("Invalid dimension for unsqueeze"),
             x.d.dim() > dim ? x.d.unsqueeze(dim) : throw std::invalid_argument("Invalid dimension for unsqueeze")
