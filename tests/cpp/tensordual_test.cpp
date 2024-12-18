@@ -8962,9 +8962,9 @@ TEST (TensorMatDualTest, einsumTest4)
     auto d2 = torch::randn({2, 2, 4});
     TensorMatDual td1(r1, d1);
     TensorDual td2(r2, d2);
-    TensorMatDual result = TensorMatDual::einsum("mi,mij->mij", td2, td1);
-    auto r = torch::einsum("mij,mi->mij", {r1, r2});
-    auto d = torch::einsum("mij,mik->mijk", {r1, d2}) + torch::einsum("mi,mijk->mijk", {r2, d1});
+    TensorDual result = TensorMatDual::einsum("mi,mij->mj", td2, td1);
+    auto r = torch::einsum("mij,mi->mj", {r1, r2});
+    auto d = torch::einsum("mij,mik->mjk", {r1, d2}) + torch::einsum("mi,mijk->mjk", {r2, d1});
     EXPECT_TRUE(result.r.equal(r));
     EXPECT_TRUE(result.d.equal(d));
 }
@@ -12857,15 +12857,6 @@ TEST(TensorMatDualTest, ParameterizedConstructor_MismatchedDevices) {
     EXPECT_THROW(TensorMatDual(real_tensor, dual_tensor), std::invalid_argument);
 }
 
-// Test case for mismatched data types
-TEST(TensorMatDualTest, ParameterizedConstructor_MismatchedDataTypes) {
-    // Arrange
-    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::TensorOptions().dtype(torch::kFloat32));
-    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::TensorOptions().dtype(torch::kFloat64));
-
-    // Act & Assert
-    EXPECT_THROW(TensorMatDual(real_tensor, dual_tensor), std::invalid_argument);
-}
 
 // Test case for default constructor
 TEST(TensorMatDualTest, DefaultConstructor) {
@@ -13005,6 +12996,2120 @@ TEST(TensorMatDualTest, DeviceMethod_AfterMoveToDevice) {
 }
 
 
+
+// Test case for valid unsqueeze along the default dimension (dim = 2)
+TEST(TensorMatDualTest, UnsqueezeConstructor_ValidDefaultDim) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4});
+    TensorDual tensor_dual(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual tmd(tensor_dual);
+
+    // Assert
+    EXPECT_EQ(tmd.r.sizes(), torch::IntArrayRef({2, 3, 1})); // Unsqueezed along dim 2
+    EXPECT_EQ(tmd.d.sizes(), torch::IntArrayRef({2, 3, 1, 4})); // Unsqueezed along dim 2
+}
+
+// Test case for valid unsqueeze along a specified dimension
+TEST(TensorMatDualTest, UnsqueezeConstructor_ValidSpecifiedDim) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4});
+    TensorDual tensor_dual(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual tmd(tensor_dual, 1);
+
+    // Assert
+    EXPECT_EQ(tmd.r.sizes(), torch::IntArrayRef({2, 1, 3})); // Unsqueezed along dim 1
+    EXPECT_EQ(tmd.d.sizes(), torch::IntArrayRef({2, 1, 3, 4})); // Unsqueezed along dim 1
+}
+
+// Test case for invalid dimension
+TEST(TensorMatDualTest, UnsqueezeConstructor_InvalidDim) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4});
+    TensorDual tensor_dual(real_tensor, dual_tensor);
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual(tensor_dual, 5), std::invalid_argument); // Invalid dim
+}
+
+
+
+// Test case for real and dual tensors already in complex format
+TEST(TensorMatDualTest, ComplexMethod_AlreadyComplex) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kComplexDouble);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kComplexDouble);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.complex();
+
+    // Assert
+    EXPECT_TRUE(result.r.is_complex());
+    EXPECT_TRUE(result.d.is_complex());
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(result.r.equal(real_tensor));
+    EXPECT_TRUE(result.d.equal(dual_tensor));
+}
+
+// Test case for real and dual tensors in real format
+TEST(TensorMatDualTest, ComplexMethod_ConvertToComplex) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kFloat64);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat64);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.complex();
+
+    // Assert
+    EXPECT_TRUE(result.r.is_complex());
+    EXPECT_TRUE(result.d.is_complex());
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(result.r.equal(torch::complex(real_tensor, torch::zeros_like(real_tensor))));
+    EXPECT_TRUE(result.d.equal(torch::complex(dual_tensor, torch::zeros_like(dual_tensor))));
+}
+
+// Test case for mixed real and complex tensors
+TEST(TensorMatDualTest, ComplexMethod_MixedFormat) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kComplexDouble);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat64);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.complex();
+
+    // Assert
+    EXPECT_TRUE(result.r.is_complex());
+    EXPECT_TRUE(result.d.is_complex());
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(result.r.equal(real_tensor));
+    EXPECT_TRUE(result.d.equal(torch::complex(dual_tensor, torch::zeros_like(dual_tensor))));
+}
+
+
+// Test case for the output stream operator with valid tensors
+TEST(TensorMatDualTest, OutputStreamOperator_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    std::ostringstream output;
+
+    // Act
+    output << tmd;
+
+    // Assert
+    std::string result = output.str();
+    EXPECT_NE(result.find("TensorMatDual Object:"), std::string::npos);
+    EXPECT_NE(result.find("Real Part (r):"), std::string::npos);
+    EXPECT_NE(result.find("Dual Part (d):"), std::string::npos);
+    EXPECT_NE(result.find("Shape: [2, 3, 4]"), std::string::npos); // Real tensor shape
+    EXPECT_NE(result.find("Shape: [2, 3, 4, 5]"), std::string::npos); // Dual tensor shape
+}
+
+// Test case for the output stream operator with empty tensors
+TEST(TensorMatDualTest, OutputStreamOperator_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 0, 0});
+    torch::Tensor dual_tensor = torch::empty({0, 0, 0, 0});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    std::ostringstream output;
+
+    // Act
+    output << tmd;
+
+    // Assert
+    std::string result = output.str();
+    EXPECT_NE(result.find("TensorMatDual Object:"), std::string::npos);
+    EXPECT_NE(result.find("Real Part (r):"), std::string::npos);
+    EXPECT_NE(result.find("Dual Part (d):"), std::string::npos);
+    EXPECT_NE(result.find("Shape: [0, 0, 0]"), std::string::npos); // Real tensor shape
+    EXPECT_NE(result.find("Shape: [0, 0, 0, 0]"), std::string::npos); // Dual tensor shape
+}
+
+// Test case for tensors with mixed data types
+TEST(TensorMatDualTest, OutputStreamOperator_MixedDataTypes) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kFloat64);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    std::ostringstream output;
+
+    // Act
+    output << tmd;
+
+    // Assert
+    std::string result = output.str();
+    EXPECT_NE(result.find("TensorMatDual Object:"), std::string::npos);
+    EXPECT_NE(result.find("Real Part (r):"), std::string::npos);
+    EXPECT_NE(result.find("Dual Part (d):"), std::string::npos);
+    EXPECT_NE(result.find("Shape: [2, 3, 4]"), std::string::npos); // Real tensor shape
+    EXPECT_NE(result.find("Shape: [2, 3, 4, 5]"), std::string::npos); // Dual tensor shape
+}
+
+
+
+// Test case for valid squeeze operation
+TEST(TensorDualTest, Squeeze_ValidDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 1, 3}); // Dimension 1 has size 1
+    torch::Tensor dual_tensor = torch::rand({2, 1, 3, 4}); // Dimension 1 has size 1
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorDual result = tmd.squeeze(1);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3})); // Dimension 1 squeezed
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 4})); // Dimension 1 squeezed
+}
+
+// Test case for invalid dimension (out of range)
+TEST(TensorDualTest, Squeeze_InvalidDimensionOutOfRange) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 1, 3});
+    torch::Tensor dual_tensor = torch::rand({2, 1, 3, 4});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act & Assert
+    EXPECT_THROW(tmd.squeeze(5), std::invalid_argument); // Invalid dimension
+}
+
+// Test case for dimension that cannot be squeezed
+TEST(TensorDualTest, Squeeze_InvalidDimensionSizeNotOne) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 2, 3}); // Dimension 1 has size 2
+    torch::Tensor dual_tensor = torch::rand({2, 2, 3, 4}); // Dimension 1 has size 2
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act & Assert
+    EXPECT_THROW(tmd.squeeze(1), std::invalid_argument); // Cannot squeeze dimension 1
+}
+
+// Test case for squeezing first dimension
+TEST(TensorDualTest, Squeeze_FirstDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({1, 2, 3}); // Dimension 0 has size 1
+    torch::Tensor dual_tensor = torch::rand({1, 2, 3, 4}); // Dimension 0 has size 1
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorDual result = tmd.squeeze(0);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3})); // Dimension 0 squeezed
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 4})); // Dimension 0 squeezed
+}
+
+// Test case for squeezing last dimension
+TEST(TensorDualTest, Squeeze_LastDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 1}); // Dimension 2 has size 1
+    torch::Tensor dual_tensor = torch::rand({2, 3, 1, 4}); // Dimension 2 has size 1
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorDual result = tmd.squeeze(2);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3})); // Dimension 2 squeezed
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 4})); // Dimension 2 squeezed
+}
+
+
+// Test case for contiguous operation on already contiguous tensors
+TEST(TensorMatDualTest, Contiguous_AlreadyContiguous) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}).contiguous();
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}).contiguous();
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.contiguous();
+
+    // Assert
+    EXPECT_TRUE(result.r.is_contiguous());
+    EXPECT_TRUE(result.d.is_contiguous());
+    EXPECT_TRUE(result.r.equal(real_tensor)); // Should remain unchanged
+    EXPECT_TRUE(result.d.equal(dual_tensor)); // Should remain unchanged
+}
+
+// Test case for contiguous operation on non-contiguous tensors
+TEST(TensorMatDualTest, Contiguous_NonContiguous) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}).transpose(0, 1); // Non-contiguous
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}).transpose(0, 1); // Non-contiguous
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.contiguous();
+
+    // Assert
+    EXPECT_TRUE(result.r.is_contiguous());
+    EXPECT_TRUE(result.d.is_contiguous());
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(result.r.equal(real_tensor)); // Contiguous tensor differs from original
+    EXPECT_TRUE(result.d.equal(dual_tensor)); // Contiguous tensor differs from original
+}
+
+// Test case for ensuring contiguous tensors are correctly returned
+TEST(TensorMatDualTest, Contiguous_ReturnCorrectTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}).transpose(0, 1); // Non-contiguous
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}).transpose(0, 1); // Non-contiguous
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.contiguous();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(result.r.is_contiguous());
+    EXPECT_TRUE(result.d.is_contiguous());
+}
+
+// Test case for empty tensors
+TEST(TensorMatDualTest, Contiguous_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 0, 0});
+    torch::Tensor dual_tensor = torch::empty({0, 0, 0, 0});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.contiguous();
+
+    // Assert
+    EXPECT_TRUE(result.r.is_contiguous());
+    EXPECT_TRUE(result.d.is_contiguous());
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+}
+
+
+
+// Test case for eye operation with valid tensors
+TEST(TensorMatDualTest, Eye_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}); // Batch size 2, matrix size 3x4
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.eye();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 3})); // Batch of identity matrices
+    EXPECT_TRUE(torch::allclose(result.r[0], torch::eye(3, real_tensor.options())));
+    EXPECT_TRUE(torch::allclose(result.r[1], torch::eye(3, real_tensor.options())));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 4, 5})); // Zero tensor for dual part
+    EXPECT_TRUE(torch::all(result.d == 0).item<bool>());
+}
+
+
+// Test case for eye operation with empty tensors
+TEST(TensorMatDualTest, Eye_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4}); // Empty batch size
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.eye();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({0, 3, 3})); // Batch of identity matrices
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({0, 3, 4, 5})); // Zero tensor for dual part
+}
+
+// Test case for eye operation with square matrices
+TEST(TensorMatDualTest, Eye_SquareMatrices) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 3}); // Square matrices
+    torch::Tensor dual_tensor = torch::rand({2, 3, 3, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.eye();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 3})); // Batch of identity matrices
+    EXPECT_TRUE(torch::allclose(result.r[0], torch::eye(3, real_tensor.options())));
+    EXPECT_TRUE(torch::allclose(result.r[1], torch::eye(3, real_tensor.options())));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 3, 5})); // Zero tensor for dual part
+    EXPECT_TRUE(torch::all(result.d == 0).item<bool>());
+}
+
+
+// Test case for sum operation on valid tensors along a valid dimension
+TEST(TensorMatDualTest, Sum_ValidDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}); // Batch size 2, matrix size 3x4
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.sum(1); // Sum along dimension 1
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 1, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 1, 4, 5}));
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.sum(1, true)));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor.sum(1, true)));
+}
+
+
+// Test case for sum operation along the last dimension
+TEST(TensorMatDualTest, Sum_LastDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.sum(2); // Sum along dimension 2
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 1}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 1, 5}));
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.sum(2, true)));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor.sum(2, true)));
+}
+
+// Test case for invalid dimension
+TEST(TensorMatDualTest, Sum_InvalidDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act & Assert
+    EXPECT_THROW(tmd.sum(4), std::invalid_argument); // Dimension 4 is out of bounds for real tensor
+    EXPECT_THROW(tmd.sum(5), std::invalid_argument); // Dimension 5 is out of bounds for dual tensor
+}
+
+// Test case for sum operation with empty tensors
+TEST(TensorMatDualTest, Sum_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4}); // Empty batch size
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.sum(1); // Sum along dimension 1
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({0, 1, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({0, 1, 4, 5}));
+    EXPECT_TRUE(result.r.numel() == 0); // Ensure the tensor remains empty
+    EXPECT_TRUE(result.d.numel() == 0); // Ensure the tensor remains empty
+}
+
+// Test case for square operation with valid tensors
+TEST(TensorMatDualTest, Square_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.square();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.square()));
+    EXPECT_TRUE(torch::allclose(result.d, 2 * real_tensor.unsqueeze(-1) * dual_tensor));
+}
+
+// Test case for shape mismatch between real and dual tensors
+TEST(TensorMatDualTest, Square_ShapeMismatch) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 3}); // Real tensor dim = 3
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}); // Dual tensor dim = 4
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    //Expect a c10 error
+    ASSERT_THROW(tmd.square(), c10::Error);
+}
+
+// Test case for square operation with empty tensors
+TEST(TensorMatDualTest, Square_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4}); // Empty tensor
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.square();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::all(result.r == 0).item<bool>());
+    EXPECT_TRUE(torch::all(result.d == 0).item<bool>());
+}
+
+// Test case for square operation with broadcasting compatibility
+TEST(TensorMatDualTest, Square_BroadcastCompatibility) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 1, 4}); // Broadcastable shape
+    torch::Tensor dual_tensor = torch::rand({2, 1, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.square();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.square()));
+    EXPECT_TRUE(torch::allclose(result.d, 2 * real_tensor.unsqueeze(-1) * dual_tensor));
+}
+
+
+// Test case for sqrt operation with valid tensors
+TEST(TensorMatDualTest, Sqrt_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}) + 0.1; // Ensure positive values
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.sqrt();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.sqrt()));
+    EXPECT_TRUE(torch::allclose(result.d, 0.5 * real_tensor.pow(-0.5).unsqueeze(-1) * dual_tensor));
+}
+
+// Test case for sqrt operation with negative values in real tensor
+TEST(TensorMatDualTest, Sqrt_NegativeValues) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}) - 1.0; // Include negative values
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    //Expect that there is no exception thrown
+    ASSERT_NO_THROW(tmd.sqrt());
+}
+
+// Test case for sqrt operation with empty tensors
+TEST(TensorMatDualTest, Sqrt_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4}); // Empty tensor
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.sqrt();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+}
+
+// Test case for broadcasting compatibility in sqrt operation
+TEST(TensorMatDualTest, Sqrt_BroadcastCompatibility) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 1, 4}) + 0.1; // Ensure positive values
+    torch::Tensor dual_tensor = torch::rand({2, 1, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.sqrt();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.sqrt()));
+    EXPECT_TRUE(torch::allclose(result.d, 0.5 * real_tensor.pow(-0.5).unsqueeze(-1) * dual_tensor));
+}
+
+
+// Test case for normL2 operation with valid tensors
+TEST(TensorMatDualTest, NormL2_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.normL2();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 1})); // L2 norm keeps reduced dimension
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 1, 5}));
+    EXPECT_TRUE(torch::allclose(result.r, torch::norm(real_tensor, 2, -1, true)));
+
+    auto norm_r = torch::norm(real_tensor, 2, -1, true).expand_as(real_tensor);
+    auto grad_r = torch::where(norm_r > 0, real_tensor / norm_r, torch::zeros_like(real_tensor));
+    auto expected_dual = torch::einsum("mij, mijn->min", {grad_r, dual_tensor}).unsqueeze(2);
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+// Test case for normL2 operation with empty tensors
+TEST(TensorMatDualTest, NormL2_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.normL2();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({0, 3, 1}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({0, 3, 1, 5}));
+}
+
+// Test case for normL2 operation with broadcasting compatibility
+TEST(TensorMatDualTest, NormL2_BroadcastCompatibility) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 1, 4}); // Broadcastable shape
+    torch::Tensor dual_tensor = torch::rand({2, 1, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.normL2();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 1, 1}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 1, 1, 5}));
+    EXPECT_TRUE(torch::allclose(result.r, torch::norm(real_tensor, 2, -1, true)));
+
+    auto norm_r = torch::norm(real_tensor, 2, -1, true).expand_as(real_tensor);
+    auto grad_r = torch::where(norm_r > 0, real_tensor / norm_r, torch::zeros_like(real_tensor));
+    auto expected_dual = torch::einsum("mij, mijn->min", {grad_r, dual_tensor}).unsqueeze(2);
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+// Test case for normL2 operation with shape mismatch
+TEST(TensorMatDualTest, NormL2_ShapeMismatch) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 3, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    //Expect a c10 error
+    EXPECT_THROW(tmd.normL2(), c10::Error);
+}
+
+
+
+// Test case for createZero with valid input tensors
+TEST(TensorMatDualTest, CreateZero_ValidInput) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}); // Real tensor
+    int ddim = 5;
+
+    // Act
+    TensorMatDual result = TensorMatDual::createZero(real_tensor, ddim);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    auto expected_dual_shape = real_tensor.sizes().vec();
+    expected_dual_shape.push_back(ddim);
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef(expected_dual_shape));
+    EXPECT_TRUE(torch::all(result.d == 0).item<bool>());
+}
+
+// Test case for createZero with empty real tensor
+TEST(TensorMatDualTest, CreateZero_EmptyRealTensor) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    int ddim = 5;
+
+    // Act
+    TensorMatDual result = TensorMatDual::createZero(real_tensor, ddim);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    auto expected_dual_shape = real_tensor.sizes().vec();
+    expected_dual_shape.push_back(ddim);
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef(expected_dual_shape));
+    EXPECT_TRUE(torch::all(result.d == 0).item<bool>());
+}
+
+// Test case for createZero with invalid ddim (negative)
+TEST(TensorMatDualTest, CreateZero_InvalidDdimNegative) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    int ddim = -1;
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::createZero(real_tensor, ddim), std::invalid_argument);
+}
+
+// Test case for createZero with invalid ddim (zero)
+TEST(TensorMatDualTest, CreateZero_InvalidDdimZero) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    int ddim = 0;
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::createZero(real_tensor, ddim), std::invalid_argument);
+}
+
+// Test case for createZero with undefined real tensor
+TEST(TensorMatDualTest, CreateZero_UndefinedRealTensor) {
+    // Arrange
+    torch::Tensor real_tensor; // Undefined tensor
+    int ddim = 5;
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::createZero(real_tensor, ddim), std::invalid_argument);
+}
+
+
+
+// Test case for zeros_like with valid tensors
+TEST(TensorMatDualTest, ZerosLikeSelf_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.zeros_like();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_TRUE(torch::all(result.r == 0).item<bool>());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::all(result.d == 0).item<bool>());
+    EXPECT_EQ(result.r.dtype(), real_tensor.dtype());
+    EXPECT_EQ(result.r.device(), real_tensor.device());
+    EXPECT_EQ(result.d.dtype(), dual_tensor.dtype());
+    EXPECT_EQ(result.d.device(), dual_tensor.device());
+}
+
+// Test case for zeros_like with empty tensors
+TEST(TensorMatDualTest, ZerosLikeSelf_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.zeros_like();
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_TRUE(torch::all(result.r == 0).item<bool>());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::all(result.d == 0).item<bool>());
+}
+
+
+
+
+// Test case for clone with valid tensors
+TEST(TensorMatDualTest, Clone_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual cloned_tmd = tmd.clone();
+
+    // Assert
+    EXPECT_EQ(cloned_tmd.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(cloned_tmd.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(cloned_tmd.r, real_tensor));
+    EXPECT_TRUE(torch::allclose(cloned_tmd.d, dual_tensor));
+}
+
+// Test case for clone with empty tensors
+TEST(TensorMatDualTest, Clone_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual cloned_tmd = tmd.clone();
+
+    // Assert
+    EXPECT_EQ(cloned_tmd.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(cloned_tmd.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::all(cloned_tmd.r == 0).item<bool>());
+    EXPECT_TRUE(torch::all(cloned_tmd.d == 0).item<bool>());
+}
+
+
+// Test case for cat with valid tensors along the default dimension
+TEST(TensorMatDualTest, Cat_ValidDefaultDimension) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act
+    TensorMatDual result = TensorMatDual::cat(tmd1, tmd2);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 8})); // Concatenated along dim 2
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 8, 5}));
+}
+
+// Test case for cat with valid tensors along a specified dimension
+TEST(TensorMatDualTest, Cat_ValidSpecifiedDimension) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act
+    TensorMatDual result = TensorMatDual::cat(tmd1, tmd2, 1);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 6, 4})); // Concatenated along dim 1
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 6, 4, 5}));
+}
+
+// Test case for cat with mismatched dimensions
+TEST(TensorMatDualTest, Cat_MismatchedDimensions) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 4, 4}); // Mismatched dimensions
+    torch::Tensor dual_tensor2 = torch::rand({2, 4, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::cat(tmd1, tmd2), std::invalid_argument);
+}
+
+
+// Test case for cat with valid TensorMatDual and TensorDual objects
+TEST(TensorMatDualTest, Cat_ValidTensorMatDualWithTensorDual) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 3});
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 5});
+    TensorDual td(real_tensor2, dual_tensor2);
+
+    // Act
+    TensorMatDual result = TensorMatDual::cat(tmd, td);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 5})); // Concatenated along dim 2
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 5, 5}));
+}
+
+// Test case for cat with mismatched TensorMatDual and TensorDual objects
+TEST(TensorMatDualTest, Cat_MismatchedTensorMatDualWithTensorDual) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({1, 3}); // Mismatched batch size
+    torch::Tensor dual_tensor2 = torch::rand({1, 3, 5});
+    TensorDual td(real_tensor2, dual_tensor2);
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::cat(tmd, td), std::invalid_argument);
+}
+
+
+// Test case for cat with valid TensorMatDual and tensor objects
+TEST(TensorMatDualTest, Cat_ValidTensorMatDualWithTensor) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor1, dual_tensor1);
+
+    torch::Tensor t2 = torch::rand({3, 4});
+
+    // Act
+    TensorMatDual result = TensorMatDual::cat(tmd, t2);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 8})); // Concatenated along dim 2
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 8, 5}));
+    EXPECT_TRUE(torch::allclose(result.r.narrow(2, 4, 4), t2.repeat({2, 1, 1})));
+    EXPECT_TRUE(torch::all(result.d.narrow(2, 4, 4) == 0).item<bool>());
+}
+
+// Test case for cat with mismatched TensorMatDual and tensor objects
+TEST(TensorMatDualTest, Cat_MismatchedTensorMatDualWithTensor) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor1, dual_tensor1);
+
+    torch::Tensor t2 = torch::rand({2, 4}); // Mismatched dimensions
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::cat(tmd, t2), std::invalid_argument);
+}
+
+
+// Test case for addition of two valid TensorMatDual objects
+TEST(TensorMatDualTest, Addition_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act
+    TensorMatDual result = tmd1 + tmd2;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor1.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor1.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor1 + real_tensor2));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor1 + dual_tensor2));
+}
+
+// Test case for addition with mismatched TensorMatDual objects
+TEST(TensorMatDualTest, Addition_MismatchedTensors) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 4, 4}); // Mismatched dimensions
+    torch::Tensor dual_tensor2 = torch::rand({2, 4, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act & Assert
+    EXPECT_THROW(tmd1 + tmd2, std::invalid_argument);
+}
+
+
+// Test case for addition of a valid TensorMatDual with TensorDual
+TEST(TensorMatDualTest, Addition_ValidTensorDual) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 3});
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 5});
+    TensorDual td(real_tensor2, dual_tensor2);
+
+    // Act
+    TensorMatDual result = tmd + td;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor1.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor1.sizes());
+    auto real_part = torch::einsum("mij, mi->mij", {real_tensor1, real_tensor2});
+    auto dual_part = torch::einsum("mik, mijk->mijk", {dual_tensor2, dual_tensor1});
+    EXPECT_TRUE(torch::allclose(result.r, real_part));
+    EXPECT_TRUE(torch::allclose(result.d, dual_part));
+}
+
+// Test case for addition with mismatched TensorMatDual and TensorDual
+TEST(TensorMatDualTest, Addition_MismatchedTensorDual) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 4}); // Mismatched dimensions
+    torch::Tensor dual_tensor2 = torch::rand({2, 4, 5});
+    TensorDual td(real_tensor2, dual_tensor2);
+
+    //Expact a c10 error
+    EXPECT_THROW(tmd + td, c10::Error);
+}
+
+
+// Test case for addition of a scalar to a valid TensorMatDual
+TEST(TensorMatDualTest, Addition_ValidScalar) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 2.5;
+
+    // Act
+    TensorMatDual result = tmd + scalar;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor + scalar));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor)); // Dual part remains unchanged
+}
+
+// Test case for addition of a scalar to a TensorMatDual with empty tensors
+TEST(TensorMatDualTest, Addition_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 1.0;
+
+    // Act
+    TensorMatDual result = tmd + scalar;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor + scalar));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor));
+}
+
+
+// Test case for subtraction of two valid TensorMatDual objects
+TEST(TensorMatDualTest, Subtraction_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act
+    TensorMatDual result = tmd1 - tmd2;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor1.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor1.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor1 - real_tensor2));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor1 - dual_tensor2));
+}
+
+// Test case for subtraction with mismatched TensorMatDual objects
+TEST(TensorMatDualTest, Subtraction_MismatchedTensors) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 4, 4}); // Mismatched dimensions
+    torch::Tensor dual_tensor2 = torch::rand({2, 4, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    //Expect an c10 error
+    EXPECT_THROW(tmd1 - tmd2, c10::Error);
+}
+
+
+
+// Test case for subtraction of a scalar from a valid TensorMatDual
+TEST(TensorMatDualTest, Subtraction_ValidScalar) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 2.5;
+
+    // Act
+    TensorMatDual result = tmd - scalar;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor - scalar));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor)); // Dual part remains unchanged
+}
+
+// Test case for subtraction of a scalar from a TensorMatDual with empty tensors
+TEST(TensorMatDualTest, Subtraction_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 1.0;
+
+    // Act
+    TensorMatDual result = tmd - scalar;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor - scalar));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor));
+}
+
+
+// Test case for equality comparison of two valid TensorMatDual objects
+TEST(TensorMatDualTest, Equality_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::randint(0, 2, {2, 3, 4}); // Binary values for easier comparison
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = real_tensor1.clone();
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act
+    torch::Tensor result = tmd1 == tmd2;
+
+    // Assert
+    EXPECT_EQ(result.sizes(), real_tensor1.sizes());
+    EXPECT_TRUE(torch::all(result).item<bool>()); // All elements should be true
+}
+
+// Test case for equality comparison with mismatched TensorMatDual objects
+TEST(TensorMatDualTest, Equality_MismatchedTensors) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 4, 4}); // Mismatched dimensions
+    torch::Tensor dual_tensor2 = torch::rand({2, 4, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act & Assert
+    EXPECT_THROW(tmd1 == tmd2, std::invalid_argument);
+}
+
+
+// Test case for partial equality in TensorMatDual objects
+TEST(TensorMatDualTest, Equality_PartialMatch) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::randint(0, 2, {2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = real_tensor1.clone();
+    real_tensor2[0][0][0] = real_tensor2[0][0][0] + 1; // Introduce a mismatch
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act
+    torch::Tensor result = tmd1 == tmd2;
+
+    // Assert
+    EXPECT_EQ(result.sizes(), real_tensor1.sizes());
+    EXPECT_FALSE(torch::all(result).item<bool>()); // Not all elements should match
+}
+
+
+// Test case for unary negation of a valid TensorMatDual
+TEST(TensorMatDualTest, UnaryNegation_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = -tmd;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, -real_tensor));
+    EXPECT_TRUE(torch::allclose(result.d, -dual_tensor));
+}
+
+// Test case for unary negation of a TensorMatDual with empty tensors
+TEST(TensorMatDualTest, UnaryNegation_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = -tmd;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, -real_tensor));
+    EXPECT_TRUE(torch::allclose(result.d, -dual_tensor));
+}
+
+
+// Test case for scalar multiplication of a valid TensorMatDual
+TEST(TensorMatDualTest, ScalarMultiplication_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 2.5;
+
+    // Act
+    TensorMatDual result = tmd * scalar;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor * scalar));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor * scalar));
+}
+
+// Test case for scalar multiplication of a TensorMatDual with empty tensors
+TEST(TensorMatDualTest, ScalarMultiplication_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 1.0;
+
+    // Act
+    TensorMatDual result = tmd * scalar;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor * scalar));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor * scalar));
+}
+
+
+// Test case for division of two valid TensorMatDual objects
+TEST(TensorMatDualTest, Division_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4}) + 1.0; // Ensure no zeros in denominator
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 3, 4}) + 1.0; // Ensure no zeros in denominator
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act
+    TensorMatDual result = tmd1 / tmd2;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor1.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor1.sizes());
+
+    // Compute expected values
+    auto expected_r = real_tensor1 / real_tensor2;
+    auto otherrsq = real_tensor2.square();
+    auto expected_d = -torch::einsum("mij,mijn->mijn", {real_tensor1 / otherrsq, dual_tensor2}) +
+                      torch::einsum("mij,mijn->mijn", {real_tensor2.reciprocal(), dual_tensor1});
+
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test case for division with mismatched TensorMatDual objects
+TEST(TensorMatDualTest, Division_MismatchedTensors) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::rand({2, 4, 4}); // Mismatched dimensions
+    torch::Tensor dual_tensor2 = torch::rand({2, 4, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    //Expect a c10 error
+    EXPECT_THROW(tmd1 / tmd2, std::invalid_argument);
+}
+
+// Test case for division with zeros in the denominator
+TEST(TensorMatDualTest, Division_DivisionByZero) {
+    // Arrange
+    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd1(real_tensor1, dual_tensor1);
+
+    torch::Tensor real_tensor2 = torch::zeros({2, 3, 4}); // Zeros in denominator
+    torch::Tensor dual_tensor2 = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd2(real_tensor2, dual_tensor2);
+
+    // Act & Assert
+    EXPECT_THROW(tmd1 / tmd2, std::runtime_error);
+}
+
+
+// Test case for division of a TensorMatDual by a valid torch::Tensor
+TEST(TensorMatDualTest, Division_ValidTensor) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}) + 1.0; // Ensure no zeros in denominator
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor divisor = torch::rand({2, 3, 4}) + 1.0; // Ensure no zeros in divisor
+
+    // Act
+    TensorMatDual result = tmd / divisor;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+
+    // Compute expected values
+    auto expected_r = real_tensor / divisor;
+    auto expected_d = dual_tensor / divisor.unsqueeze(-1);
+
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test case for division with mismatched tensor shapes
+TEST(TensorMatDualTest, Division_MismatchedTensorShapes) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor divisor = torch::rand({3, 4}); // Mismatched dimensions
+
+    // Act & Assert
+    EXPECT_THROW(tmd / divisor, std::invalid_argument);
+}
+
+// Test case for division by a tensor containing zeros
+TEST(TensorMatDualTest, Division_ByZeroTensor) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor divisor = torch::zeros({2, 3, 4}); // Zeros in divisor
+
+    // Act & Assert
+    EXPECT_THROW(tmd / divisor, std::runtime_error);
+}
+
+// Test case for division with undefined tensor
+TEST(TensorMatDualTest, Division_UndefinedTensor) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor divisor; // Undefined tensor
+
+    // Act & Assert
+    EXPECT_THROW(tmd / divisor, std::invalid_argument);
+}
+
+
+// Test case for division of a TensorMatDual by a valid scalar
+TEST(TensorMatDualTest, ScalarDivision_ValidScalar) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 2.5;
+
+    // Act
+    TensorMatDual result = tmd / scalar;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor / scalar));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor / scalar));
+}
+
+// Test case for division of a TensorMatDual by zero scalar
+TEST(TensorMatDualTest, ScalarDivision_DivisionByZero) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 0.0;
+
+    // Act & Assert
+    EXPECT_THROW(tmd / scalar, std::runtime_error);
+}
+
+// Test case for division of a TensorMatDual with empty tensors by a scalar
+TEST(TensorMatDualTest, ScalarDivision_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 3, 4});
+    torch::Tensor dual_tensor = torch::empty({0, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+    double scalar = 1.0;
+
+    // Act
+    TensorMatDual result = tmd / scalar;
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), real_tensor.sizes());
+    EXPECT_EQ(result.d.sizes(), dual_tensor.sizes());
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor / scalar));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor / scalar));
+}
+
+
+
+// Test case for indexing with valid slices
+TEST(TensorMatDualTest, Indexing_ValidSlices) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    std::vector<torch::indexing::TensorIndex> indices = {torch::indexing::Slice(0, 2), torch::indexing::Slice(1, 3)};
+    TensorMatDual result = tmd.index(indices);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 2, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 2, 4, 5}));
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.index(indices)));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor.index(indices)));
+}
+
+// Test case for indexing with a slice resulting in size 1
+TEST(TensorMatDualTest, Indexing_SliceOfSizeOne) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act & Assert
+    std::vector<torch::indexing::TensorIndex> indices = {torch::indexing::Slice(0, 1), torch::indexing::Slice(1, 2)};
+    TensorMatDual result = tmd.index(indices);
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({1, 1, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({1, 1, 4, 5}));
+}
+
+// Test case for indexing that reduces dimensions to 2D for real tensor
+TEST(TensorMatDualTest, Indexing_ReduceTo2D) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    std::vector<torch::indexing::TensorIndex> indices = {torch::indexing::Slice(0, 1), torch::indexing::Slice(1, 3)};
+    TensorMatDual result = tmd.index(indices);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({1, 2, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({1, 2, 4, 5}));
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.index(indices)));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor.index(indices)));
+}
+
+// Test case for valid first-dimension indexing
+TEST(TensorMatDualTest, Indexing_ValidFirstDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({3, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({3, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.index(1);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({1, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({1, 3, 4, 5}));
+}
+
+// Test case for out-of-bounds indexing
+TEST(TensorMatDualTest, Indexing_OutOfBounds) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({3, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({3, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    //Expect a std::out_of_range 
+    EXPECT_THROW(tmd.index(3), std::out_of_range);
+}
+
+
+// Test case for indexing at the first dimension boundary
+TEST(TensorMatDualTest, Indexing_BoundaryIndex) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({3, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({3, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.index(2); // Last valid index
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({1, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({1, 3, 4, 5}));
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.index({2}).unsqueeze(0)));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor.index({2}).unsqueeze(0)));
+}
+
+
+// Test case for valid mask indexing
+TEST(TensorMatDualTest, MaskIndexing_ValidMask) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({5, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({5, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor mask = torch::tensor({true, false, true, false, true}, torch::kBool);
+
+    // Act
+    TensorMatDual result = tmd.index(mask);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({3, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({3, 3, 4, 5}));
+    EXPECT_TRUE(torch::allclose(result.r, real_tensor.index({mask})));
+    EXPECT_TRUE(torch::allclose(result.d, dual_tensor.index({mask})));
+}
+
+// Test case for mask indexing with undefined mask
+TEST(TensorMatDualTest, MaskIndexing_UndefinedMask) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({5, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({5, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor mask; // Undefined mask
+
+    // Act & Assert
+    EXPECT_THROW(tmd.index(mask), std::invalid_argument);
+}
+
+// Test case for mask indexing with non-boolean mask
+TEST(TensorMatDualTest, MaskIndexing_NonBooleanMask) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({5, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({5, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor mask = torch::randint(0, 2, {5}, torch::kInt32); // Non-boolean tensor
+
+    // Act & Assert
+    EXPECT_THROW(tmd.index(mask), std::invalid_argument);
+}
+
+// Test case for mask indexing with mismatched mask shape
+TEST(TensorMatDualTest, MaskIndexing_MismatchedMaskShape) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({5, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({5, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor mask = torch::tensor({true, false, true}, torch::kBool); // Mismatched shape
+
+    //Expect a c10 error
+    EXPECT_THROW(tmd.index(mask), c10::Error);
+}
+
+// Test case for mask indexing with all elements masked out
+TEST(TensorMatDualTest, MaskIndexing_AllElementsMaskedOut) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({5, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({5, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    torch::Tensor mask = torch::tensor({false, false, false, false, false}, torch::kBool);
+
+    // Act
+    TensorMatDual result = tmd.index(mask);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({0, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({0, 3, 4, 5}));
+    EXPECT_TRUE(result.r.numel() == 0);
+    EXPECT_TRUE(result.d.numel() == 0);
+}
+
+
+// Test case for enabling requires_grad on valid tensors
+TEST(TensorMatDualTest, RequiresGrad_Enable) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    tmd.requires_grad_(true);
+
+    // Assert
+    EXPECT_TRUE(tmd.r.requires_grad());
+    EXPECT_TRUE(tmd.d.requires_grad());
+}
+
+// Test case for disabling requires_grad on valid tensors
+TEST(TensorMatDualTest, RequiresGrad_Disable) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}).requires_grad_(true);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}).requires_grad_(true);
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    tmd.requires_grad_(false);
+
+    // Assert
+    EXPECT_FALSE(tmd.r.requires_grad());
+    EXPECT_FALSE(tmd.d.requires_grad());
+}
+
+
+// Test case for triggering backward pass on valid tensors
+TEST(TensorMatDualTest, Backward_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::requires_grad());
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::requires_grad());
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Create a loss function for the backward pass
+    auto loss = tmd.r.sum() + tmd.d.sum();
+
+    // Act
+    loss.backward();
+
+    // Assert
+    EXPECT_TRUE(tmd.r.requires_grad());
+    EXPECT_TRUE(tmd.d.requires_grad());
+    EXPECT_TRUE(tmd.r.grad().defined());
+    EXPECT_TRUE(tmd.d.grad().defined());
+}
+
+
+// Test case for backward pass with requires_grad set to false
+TEST(TensorMatDualTest, Backward_RequiresGradFalse) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}); // requires_grad is false
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}); // requires_grad is false
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act & Assert
+    EXPECT_THROW(tmd.backward(), std::runtime_error);
+}
+
+
+// Test case for computing the absolute value of valid tensors
+TEST(TensorMatDualTest, Abs_ValidTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4})-1.0;
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.abs();
+
+    // Assert
+    EXPECT_TRUE(torch::allclose(result.r, torch::abs(real_tensor)));
+    EXPECT_TRUE(torch::allclose(result.d, torch::sign(real_tensor).unsqueeze(-1) * dual_tensor));
+}
+
+
+// Test case for tensors with zero values
+TEST(TensorMatDualTest, Abs_ZeroValues) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4})-1.0;
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5});
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.abs();
+
+    // Assert
+    EXPECT_TRUE(torch::allclose(result.r, torch::abs(real_tensor)));
+    EXPECT_TRUE(torch::allclose(result.d, torch::sign(real_tensor).unsqueeze(-1) * dual_tensor));
+}
+
+// Test case for tensors with complex values
+TEST(TensorMatDualTest, Abs_ComplexTensors) {
+    // Arrange
+    //Generate random complex tensors
+    torch::Tensor real_tensor_real = torch::rand({2, 3, 4});
+    torch::Tensor real_tensor_imag = torch::rand({2, 3, 4});
+    torch::Tensor dual_tensor_real = torch::rand({2, 3, 4, 5});
+    torch::Tensor dual_tensor_imag = torch::rand({2, 3, 4, 5});
+    torch::Tensor real_tensor = torch::complex(real_tensor_real, real_tensor_imag);
+    torch::Tensor dual_tensor = torch::complex(dual_tensor_real, dual_tensor_imag);
+
+    TensorMatDual tmd(real_tensor, dual_tensor);
+
+    // Act
+    TensorMatDual result = tmd.abs();
+
+    // Assert
+    EXPECT_TRUE(torch::allclose(result.r, torch::abs(real_tensor)));
+    EXPECT_TRUE(torch::allclose(result.d, torch::sign(torch::real(real_tensor)).unsqueeze(-1) * dual_tensor));
+}
+
+
+// Test case for valid einsum operation
+TEST(TensorMatDualTest, Einsum_ValidInputs) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3, 4});
+    torch::Tensor first_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::rand({2, 4});
+    torch::Tensor second_dual = torch::rand({2, 4, 5});
+    TensorDual second(second_real, second_dual);
+
+    std::string einsum_arg = "mij,mj->mi";
+
+    // Act
+    TensorDual result = TensorMatDual::einsum(einsum_arg, first, second);
+
+    // Assert
+    auto expected_r = torch::einsum(einsum_arg, {first_real, second_real});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    auto darg1 = "mijz,mj->miz";
+    auto d1 = torch::einsum(darg1, {first_dual, second_real});
+
+    auto darg2 = "mij,mjz->miz";
+    auto d2 = torch::einsum(darg2, {first_real, second_dual});
+
+    EXPECT_TRUE(torch::allclose(result.d, d1 + d2));
+}
+
+// Test case for mismatched dimensions
+TEST(TensorMatDualTest, Einsum_MismatchedDimensions) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3, 3});
+    torch::Tensor first_dual = torch::rand({2, 3, 3, 4});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::rand({2, 5}); // Mismatched dimensions
+    torch::Tensor second_dual = torch::rand({2, 5, 6});
+    TensorDual second(second_real, second_dual);
+
+    std::string einsum_arg = "ij,jk->ik";
+
+    //Expect a c10 error
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), c10::Error);
+}
+
+
+
+// Test case for valid einsum operation with TensorMatDual and torch::Tensor
+TEST(TensorMatDualTest, TensorEinsum_ValidInputs) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3, 4});
+    torch::Tensor first_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second = torch::rand({2, 3, 4});
+
+    std::string einsum_arg = "mij, mij->mij";
+
+    // Act
+    TensorMatDual result = TensorMatDual::einsum(einsum_arg, first, second);
+
+    // Assert
+    auto expected_r = torch::einsum(einsum_arg, {first_real, second});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    auto darg1 = "mijz,mij->mijz";
+    auto expected_d = torch::einsum(darg1, {first_dual, second});
+
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test case for invalid einsum string
+TEST(TensorMatDualTest, TensorEinsum_InvalidEinsumString) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3, 4});
+    torch::Tensor first_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second = torch::rand({2, 3, 4});
+
+    std::string einsum_arg = "invalid";
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), std::invalid_argument);
+}
+
+// Test case for mismatched dimensions
+TEST(TensorMatDualTest, TensorEinsum_MismatchedDimensions) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3, 4});
+    torch::Tensor first_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second = torch::rand({2, 4, 5}); // Mismatched dimensions
+
+    std::string einsum_arg = "mij, mij->mij";
+
+    //Expect a c10 error
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), c10::Error);
+}
+
+
+// Test case for einsum with empty tensors
+TEST(TensorMatDualTest, TensorEinsum_EmptyTensors) {
+    // Arrange
+    torch::Tensor first_real = torch::empty({0, 3, 4});
+    torch::Tensor first_dual = torch::empty({0, 3, 4, 5});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second = torch::empty({0, 3, 4});
+
+    std::string einsum_arg = "mij, mij->mij";
+
+    // Act
+    TensorMatDual result = TensorMatDual::einsum(einsum_arg, first, second);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({0, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({0, 3, 4, 5}));
+}
+
+
+// Test case for valid einsum operation with TensorDual and TensorMatDual
+TEST(TensorDualMatDualTest, Einsum_ValidInputs) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3});
+    torch::Tensor first_dual = torch::rand({2, 3, 5});
+    TensorDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::rand({2, 3, 4});
+    torch::Tensor second_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "mi, mij->mj";
+
+    // Act
+    TensorDual result = TensorMatDual::einsum(einsum_arg, first, second);
+
+    // Assert
+    auto expected_r = torch::einsum(einsum_arg, {first_real, second_real});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    auto darg1 = "miz, mij->mjz";
+    auto d1 = torch::einsum(darg1, {first_dual, second_real});
+
+    auto darg2 = "mi, mijz->mjz";
+    auto d2 = torch::einsum(darg2, {first_real, second_dual});
+
+    EXPECT_TRUE(torch::allclose(result.d, d1 + d2));
+}
+
+// Test case for invalid einsum string
+TEST(TensorDualMatDualTest, Einsum_InvalidEinsumString) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3});
+    torch::Tensor first_dual = torch::rand({2, 3, 5});
+    TensorDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::rand({2, 3, 4});
+    torch::Tensor second_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "invalid";
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), std::invalid_argument);
+}
+
+// Test case for mismatched dimensions
+TEST(TensorDualMatDualTest, Einsum_MismatchedDimensions) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3});
+    torch::Tensor first_dual = torch::rand({2, 3, 5});
+    TensorDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::rand({2, 4, 5}); // Mismatched dimensions
+    torch::Tensor second_dual = torch::rand({2, 4, 5, 6});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "mi, mij->mj";
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), c10::Error);
+}
+
+// Test case for einsum with empty tensors
+TEST(TensorDualMatDualTest, Einsum_EmptyTensors) {
+    // Arrange
+    torch::Tensor first_real = torch::empty({0, 3});
+    torch::Tensor first_dual = torch::empty({0, 3, 5});
+    TensorDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::empty({0, 3, 1});
+    torch::Tensor second_dual = torch::empty({0, 3, 1, 5});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "mi, mij->mj";
+
+    // Act
+    TensorDual result = TensorMatDual::einsum(einsum_arg, first, second);
+
+    // Assert
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({0, 1}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({0, 1, 5}));
+}
+
+
+
+// Test case for valid einsum operation with torch::Tensor and TensorMatDual
+TEST(TensorTensorMatDualTest, Einsum_ValidInputs) {
+    // Arrange
+    torch::Tensor first = torch::rand({3, 4});
+
+    torch::Tensor second_real = torch::rand({2, 3, 4});
+    torch::Tensor second_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "ij,mij->mij";
+
+    // Act
+    TensorMatDual result = TensorMatDual::einsum(einsum_arg, first, second);
+
+    // Assert
+    auto expected_r = torch::einsum(einsum_arg, {first, second_real});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    auto darg1 = "ij,mijz->mijz";
+    auto expected_d = torch::einsum(darg1, {first, second_dual});
+
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+// Test case for invalid einsum string
+TEST(TensorTensorMatDualTest, Einsum_InvalidEinsumString) {
+    // Arrange
+    torch::Tensor first = torch::rand({2, 3});
+
+    torch::Tensor second_real = torch::rand({2, 3, 4});
+    torch::Tensor second_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "invalid";
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), std::invalid_argument);
+}
+
+// Test case for mismatched dimensions
+TEST(TensorTensorMatDualTest, Einsum_MismatchedDimensions) {
+    // Arrange
+    torch::Tensor first = torch::rand({2, 3});
+
+    torch::Tensor second_real = torch::rand({2, 4, 5}); // Mismatched dimensions
+    torch::Tensor second_dual = torch::rand({2, 4, 5, 6});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "ij,mij->mij";
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), c10::Error);
+}
+
+
+// Test case for valid einsum operation with two TensorMatDual objects
+TEST(TensorMatDualTest, TensorMatDualTensorMatDualEinsum_ValidInputs) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3, 4});
+    torch::Tensor first_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::rand({2, 4, 3});
+    torch::Tensor second_dual = torch::rand({2, 4, 3, 5});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "mij,mjk->mik";
+
+    // Act
+    TensorMatDual result = TensorMatDual::einsum(einsum_arg, first, second);
+
+    // Assert
+    auto expected_r = torch::einsum(einsum_arg, {first_real, second_real});
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    auto darg1 = "mijz,mjk->mikz";
+    auto d1 = torch::einsum(darg1, {first_dual, second_real});
+
+    auto darg2 = "mij,mjkz->mikz";
+    auto d2 = torch::einsum(darg2, {first_real, second_dual});
+
+    EXPECT_TRUE(torch::allclose(result.d, d1 + d2));
+}
+
+// Test case for invalid einsum string
+TEST(TensorMatDualTest, TensorMatDualTensorMatDualEinsum_InvalidEinsumString) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3, 4});
+    torch::Tensor first_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::rand({2, 3, 4});
+    torch::Tensor second_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "invalid";
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), std::invalid_argument);
+}
+
+// Test case for mismatched dimensions
+TEST(TensorMatDualTest, TensorMatDualTensorMatDualEinsum_MismatchedDimensions) {
+    // Arrange
+    torch::Tensor first_real = torch::rand({2, 3, 4});
+    torch::Tensor first_dual = torch::rand({2, 3, 4, 5});
+    TensorMatDual first(first_real, first_dual);
+
+    torch::Tensor second_real = torch::rand({4, 5, 6}); // Mismatched dimensions
+    torch::Tensor second_dual = torch::rand({4, 5, 6, 7});
+    TensorMatDual second(second_real, second_dual);
+
+    std::string einsum_arg = "mij,mjk->mik";
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::einsum(einsum_arg, first, second), c10::Error);
+}
+
+
+
+// Test case for valid max operation along a dimension
+TEST(TensorMatDualTest, Max_ValidInputs) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kFloat32);;
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual tensor_mat_dual(real_tensor, dual_tensor);
+
+    int dim = 1;
+
+    // Act
+    TensorMatDual result = tensor_mat_dual.max(dim);
+
+    // Assert
+    auto max_result = torch::max(real_tensor, /*dim=*/dim, /*keepdim=*/true);
+    auto expected_real = std::get<0>(max_result);
+    auto max_indices = std::get<1>(max_result);
+
+    auto expanded_indices = max_indices.unsqueeze(-1).expand({-1, -1, -1, dual_tensor.size(-1)});
+    auto expected_dual = torch::gather(dual_tensor, dim, expanded_indices);
+
+    EXPECT_TRUE(torch::allclose(result.r, expected_real));
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+// Test case for invalid dimension
+TEST(TensorMatDualTest, Max_InvalidDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual tensor_mat_dual(real_tensor, dual_tensor);
+
+    int invalid_dim = 3; // Out of bounds
+
+    // Act & Assert
+    EXPECT_THROW(tensor_mat_dual.max(invalid_dim), std::invalid_argument);
+}
+
+
+
+// Test case for complex real tensor
+TEST(TensorMatDualTest, Max_ComplexRealTensor) {
+    // Arrange
+    //Generate a random complex tensor
+    torch::Tensor real_tensor = torch::complex(torch::rand({2, 3, 4}, torch::kFloat32),
+                                               torch::rand({2, 3, 4}, torch::kFloat32));
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual tensor_mat_dual(real_tensor, dual_tensor);
+
+    int dim = 1;
+
+    // Act
+    TensorMatDual result = tensor_mat_dual.max(dim);
+
+    // Assert
+    auto max_result = torch::max(torch::real(real_tensor), /*dim=*/dim, /*keepdim=*/true);
+    auto expected_real = std::get<0>(max_result);
+    auto max_indices = std::get<1>(max_result);
+
+    auto expanded_indices = max_indices.unsqueeze(-1).expand({-1, -1, -1, dual_tensor.size(-1)});
+    auto expected_dual = torch::gather(dual_tensor, dim, expanded_indices);
+
+    EXPECT_TRUE(torch::allclose(result.r, expected_real));
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+
+
+// Test case for valid index_put_ operation
+TEST(TensorMatDualTest, IndexPut_ValidInputs) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual tensor_mat_dual(real_tensor, dual_tensor);
+
+    torch::Tensor mask = torch::tensor({true, false}, torch::kBool);
+    torch::Tensor value_real = torch::rand({1, 3, 4}, torch::kFloat32);
+    torch::Tensor value_dual = torch::rand({1, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual value(value_real, value_dual);
+
+    // Act
+    tensor_mat_dual.index_put_(mask, value);
+
+    // Assert
+    auto expected_real = real_tensor.clone();
+    expected_real.index_put_({mask}, value_real);
+    EXPECT_TRUE(torch::allclose(tensor_mat_dual.r, expected_real));
+
+    auto expected_dual = dual_tensor.clone();
+    expected_dual.index_put_({mask}, value_dual);
+    EXPECT_TRUE(torch::allclose(tensor_mat_dual.d, expected_dual));
+}
+
+
+// Test case for non-boolean mask tensor
+TEST(TensorMatDualTest, IndexPut_NonBooleanMask) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual tensor_mat_dual(real_tensor, dual_tensor);
+
+    torch::Tensor mask = torch::tensor({1, 0}, torch::kInt32); // Non-boolean
+    torch::Tensor value_real = torch::rand({1, 3, 4}, torch::kFloat32);
+    torch::Tensor value_dual = torch::rand({1, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual value(value_real, value_dual);
+
+    // Act & Assert
+    EXPECT_THROW(tensor_mat_dual.index_put_(mask, value), std::invalid_argument);
+}
+
+// Test case for mismatched shapes between mask and TensorMatDual
+TEST(TensorMatDualTest, IndexPut_MismatchedShapes) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({2, 3, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::rand({2, 3, 4, 5}, torch::kFloat32);
+    TensorMatDual tensor_mat_dual(real_tensor, dual_tensor);
+
+    torch::Tensor mask = torch::tensor({true, false}, torch::kBool); // Incorrect shape
+    torch::Tensor value_real = torch::rand({1, 2, 5}, torch::kFloat32);
+    torch::Tensor value_dual = torch::rand({1, 2, 5, 7}, torch::kFloat32);
+    TensorMatDual value(value_real, value_dual);
+
+    // Act & Assert
+    EXPECT_THROW(tensor_mat_dual.index_put_(mask, value), c10::Error);
+}
 
 
 

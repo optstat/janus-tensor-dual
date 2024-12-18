@@ -4225,9 +4225,6 @@ public:
         if (r.device() != d.device()) {
             throw std::invalid_argument("Real and dual tensors must reside on the same device.");
         }
-        if (r.dtype() != d.dtype()) {
-            throw std::invalid_argument("Real and dual tensors must have the same data type.");
-        }
 
         this->r = std::move(r);
         this->d = std::move(d);
@@ -4307,10 +4304,10 @@ public:
      * @param dim The dimension along which to unsqueeze (default is 2).
      * @throws std::invalid_argument If the specified dimension is invalid for the input tensors.
      */
-    TensorMatDual(const TensorDual& x, int dim = 1)
+    TensorMatDual(const TensorDual& x, int dim = 2)
         : TensorMatDual(
-            x.r.dim() > dim ? x.r.unsqueeze(dim) : throw std::invalid_argument("Invalid dimension for unsqueeze"),
-            x.d.dim() > dim ? x.d.unsqueeze(dim) : throw std::invalid_argument("Invalid dimension for unsqueeze")
+            x.r.dim() >= dim ? x.r.unsqueeze(dim) : throw std::invalid_argument("Invalid dimension for unsqueeze"),
+            x.d.dim() >= dim ? x.d.unsqueeze(dim) : throw std::invalid_argument("Invalid dimension for unsqueeze")
         ) {}
 
     /**
@@ -4364,36 +4361,6 @@ public:
         return os;
     }
 
-    /**
-     * @brief Constructor overload for scalar inputs.
-     *
-     * This constructor allows creating a TensorMatDual object from scalar real and dual values.
-     * The scalars are converted into tensors with a specified precision and unsqueezed along
-     * a given dimension to match the required tensor shape.
-     *
-     * @tparam S The scalar type, constrained to arithmetic types (e.g., int, float, double).
-     * @param r The scalar value for the real part.
-     * @param d The scalar value for the dual part.
-     * @param dim The dimension along which to unsqueeze the tensors (default is 1).
-     * @throws std::invalid_argument If the specified dimension is invalid for unsqueezing.
-     */
-    template <typename S, typename = std::enable_if_t<std::is_arithmetic<S>::value>>
-    TensorMatDual(S r, S d, int64_t dim = 1) {
-        // Create tensor options with double precision
-        auto options = torch::TensorOptions().dtype(torch::kFloat64);
-
-        // Convert scalars to tensors
-        this->r = torch::tensor(r, options);
-        this->d = torch::tensor(d, options);
-
-        // Validate the dimension and unsqueeze if necessary
-        if (dim >= 0 && dim <= this->r.dim() + 1) {
-            this->r = this->r.unsqueeze(dim);
-            this->d = this->d.unsqueeze(dim);
-        } else {
-            throw std::invalid_argument("Invalid dimension for unsqueeze operation");
-        }
-    }
 
 
     /**
@@ -4545,18 +4512,24 @@ public:
      * @throws std::runtime_error If the real part contains negative values or if dimensions are incompatible.
      */
     TensorMatDual sqrt() const {
+        TensorMatDual c;
         // Validate the real part
         if (torch::any(this->r < 0).item<bool>()) {
-            throw std::runtime_error("Cannot compute the square root of a tensor with negative values.");
+            //Convert to a complex number
+            auto c = this->complex();
+        }
+        else {
+            c = *this;
         }
 
+
         // Compute the square root of the real part
-        auto r = torch::sqrt(this->r);
+        auto r = torch::sqrt(c.r);
 
 
         // Compute the dual part using the chain rule: d = (1 / (2 * sqrt(r))) * d
-        auto rf_inv_sqrt = 0.5 * this->r.pow(-0.5); // Add dimension for broadcasting
-        auto d = torch::einsum("mij, mijn->mijn", {rf_inv_sqrt, this->d});
+        auto rf_inv_sqrt = 0.5 * c.r.pow(-0.5); // Add dimension for broadcasting
+        auto d = torch::einsum("mij, mijn->mijn", {rf_inv_sqrt, c.d});
 
         // Return the resulting TensorMatDual
         return TensorMatDual(r, d);
@@ -4632,45 +4605,6 @@ public:
         return TensorMatDual(r, ds);
     }
 
-    /**
-     * @brief Creates a TensorMatDual object with tensors of zeros, matching the shape of the input tensor.
-     *
-     * This method creates:
-     * - A real part (`r`) initialized with zeros, matching the shape of the input tensor `x`.
-     * - A dual part (`d`) initialized with zeros, with dimensions inferred from the original dual tensor `d`.
-     *   If the real tensor is of type `torch::kBool`, the dual tensor is set to `torch::kFloat64`.
-     *
-     * @param x The tensor to use as a reference for the shape and device of the real part.
-     * @return TensorMatDual A new TensorMatDual object with zero-filled real and dual parts.
-     * @throws std::runtime_error If the original dual tensor does not have the expected dimensions.
-     */
-    TensorMatDual zeros_like(const torch::Tensor &x) const {
-        // Create a zero tensor for the real part
-        auto rc = torch::zeros_like(x);
-
-        // Validate the dimensions of the original dual tensor
-        if (d.dim() < 3) {
-            throw std::runtime_error("The dual tensor must have at least 3 dimensions.");
-        }
-
-        // Infer dimensions for the new dual tensor
-        int nr1 = d.size(1);
-        int nr2 = d.size(2);
-        int nd = d.size(3);
-
-        // Create a zero tensor for the dual part
-        auto options = torch::TensorOptions().dtype(x.dtype()).device(x.device());
-        auto dc = torch::zeros({nr1, nr2, nd}, options);
-
-        // Handle the case where the real tensor is of type `torch::kBool`
-        if (r.dtype() == torch::kBool) {
-            auto float64_options = options.dtype(torch::kFloat64);
-            dc = torch::zeros({nr1, nr2, nd}, float64_options);
-        }
-
-        // Return the new TensorMatDual object
-        return TensorMatDual(rc, dc);
-    }
 
 
     /**
@@ -4685,9 +4619,6 @@ public:
      */
     TensorMatDual zeros_like() const {
         // Validate that the real and dual tensors are defined
-        if (!this->r.defined() || !this->d.defined()) {
-            throw std::runtime_error("The real or dual tensor of the current object is not defined.");
-        }
 
         // Create zero tensors for the real and dual parts
         auto rc = torch::zeros_like(this->r);
@@ -4710,39 +4641,12 @@ public:
      * @throws std::runtime_error If the real or dual tensors are not defined.
      */
     TensorMatDual clone() const {
-        // Validate that the real and dual tensors are defined
-        if (!this->r.defined() || !this->d.defined()) {
-            throw std::runtime_error("Cannot clone TensorMatDual: real or dual tensor is not defined.");
-        }
 
         // Clone the real and dual tensors
         return TensorMatDual(this->r.clone(), this->d.clone());
     }
 
 
-    /**
-     * @brief Squeezes all dimensions of size 1 in the real and dual parts of the TensorDual.
-     *
-     * This method removes all dimensions of size 1 in the real (`r`) and dual (`d`) tensors.
-     * If specific dimensions need to be squeezed, consider adding a parameter to specify
-     * the target dimension(s) instead of using this method.
-     *
-     * @return TensorDual A new TensorDual object with squeezed real and dual parts.
-     * @throws std::runtime_error If the tensors are not defined or have invalid shapes.
-     */
-    TensorDual squeeze() const {
-        // Validate that the real and dual tensors are defined
-        if (!this->r.defined() || !this->d.defined()) {
-            throw std::runtime_error("Cannot squeeze TensorDual: real or dual tensor is not defined.");
-        }
-
-        // Squeeze all dimensions of size 1 for both tensors
-        auto r_squeezed = this->r.squeeze();
-        auto d_squeezed = this->d.squeeze();
-
-        // Return the new TensorDual object
-        return TensorDual(r_squeezed, d_squeezed);
-    }
 
     /**
      * @brief Concatenates two TensorMatDual objects along a specified dimension.
@@ -4804,10 +4708,6 @@ public:
      * @throws std::invalid_argument If the tensors are incompatible for concatenation.
      */
     static TensorMatDual cat(const TensorMatDual& t1, const TensorDual& t2) {
-        // Validate that the tensors are defined
-        if (!t1.r.defined() || !t2.r.defined() || !t1.d.defined() || !t2.d.defined()) {
-            throw std::invalid_argument("Cannot concatenate TensorMatDual with TensorDual: undefined tensors.");
-        }
 
         // Validate the batch size and other dimensions for real tensors
         if (t1.r.size(0) != t2.r.size(0)) {
@@ -4850,10 +4750,6 @@ public:
      * @throws std::invalid_argument If the tensors are incompatible for concatenation.
      */
     static TensorMatDual cat(const TensorMatDual& t1, const torch::Tensor& t2, int dim = 2) {
-        // Validate that the tensors are defined
-        if (!t1.r.defined() || !t1.d.defined() || !t2.defined()) {
-            throw std::invalid_argument("Cannot concatenate: Undefined tensors.");
-        }
 
         // Validate dimensions of `t1.r` and `t2`
         if (t1.r.dim() != t2.dim() + 1) {
@@ -4920,23 +4816,12 @@ public:
      * @throws std::invalid_argument If the tensors are undefined or incompatible for addition.
      */
     TensorMatDual operator+(const TensorDual& other) const {
-        // Validate that the tensors are defined
-        if (!this->r.defined() || !this->d.defined() || !other.r.defined() || !other.d.defined()) {
-            throw std::invalid_argument("Cannot add TensorMatDual with TensorDual: undefined tensors.");
-        }
 
-        // Validate that the shapes match for real tensors
-        if (this->r.sizes() != other.r.sizes()) {
-            throw std::invalid_argument("Cannot add TensorMatDual with TensorDual: incompatible real tensor shapes.");
-        }
-
-        // Validate that the dual tensors are compatible
-        if (this->d.sizes() != other.d.sizes()) {
-            throw std::invalid_argument("Cannot add TensorMatDual with TensorDual: incompatible dual tensor shapes.");
-        }
 
         // Perform element-wise addition
-        return TensorMatDual(this->r + other.r, this->d + other.d);
+        auto rn = torch::einsum("mij,mi->mij", {this->r, other.r});
+        auto dn = torch::einsum("mijk, mik->mijk", {this->d, other.d});
+        return TensorMatDual(rn, dn);
     }
 
     /**
@@ -4950,10 +4835,6 @@ public:
      * @throws std::runtime_error If the real tensor (`r`) is not defined.
      */
     TensorMatDual operator+(const double& other) const {
-        // Validate that the real tensor is defined
-        if (!this->r.defined()) {
-            throw std::runtime_error("Cannot add scalar to TensorMatDual: real tensor is not defined.");
-        }
 
         // Add the scalar to the real part and return a new TensorMatDual
         return TensorMatDual(this->r + other, this->d);
@@ -4971,15 +4852,6 @@ public:
      * @throws std::invalid_argument If the tensors are undefined or incompatible for subtraction.
      */
     TensorMatDual operator-(const TensorMatDual& other) const {
-        // Validate that the tensors are defined
-        if (!this->r.defined() || !this->d.defined() || !other.r.defined() || !other.d.defined()) {
-            throw std::invalid_argument("Cannot subtract TensorMatDual objects: undefined tensors.");
-        }
-
-        // Validate that the shapes match
-        if (this->r.sizes() != other.r.sizes() || this->d.sizes() != other.d.sizes()) {
-            throw std::invalid_argument("Cannot subtract TensorMatDual objects: incompatible tensor shapes.");
-        }
 
         // Perform element-wise subtraction
         return TensorMatDual(this->r - other.r, this->d - other.d);
@@ -4994,13 +4866,8 @@ public:
      *
      * @param other The scalar (double) to subtract from the real part.
      * @return TensorMatDual A new TensorMatDual object with the scalar subtracted from the real part.
-     * @throws std::runtime_error If the real tensor (`r`) is not defined.
      */
     TensorMatDual operator-(const double& other) const {
-        // Validate that the real tensor is defined
-        if (!this->r.defined()) {
-            throw std::runtime_error("Cannot subtract scalar from TensorMatDual: real tensor is not defined.");
-        }
 
         // Subtract the scalar from the real part and return a new TensorMatDual
         return TensorMatDual(this->r - other, this->d);
@@ -5020,10 +4887,6 @@ public:
      * @throws std::invalid_argument If the real tensors (`r`) are undefined or incompatible for comparison.
      */
     torch::Tensor operator==(const TensorMatDual& other) const {
-        // Validate that the real tensors are defined
-        if (!this->r.defined() || !other.r.defined()) {
-            throw std::invalid_argument("Cannot compare TensorMatDual objects: undefined real tensors.");
-        }
 
         // Validate that the shapes match
         if (this->r.sizes() != other.r.sizes()) {
@@ -5042,13 +4905,8 @@ public:
      * are negated element-wise.
      *
      * @return TensorMatDual A new TensorMatDual object with the real and dual parts negated.
-     * @throws std::runtime_error If the real or dual tensors are not defined.
      */
     TensorMatDual operator-() const {
-        // Validate that the tensors are defined
-        if (!this->r.defined() || !this->d.defined()) {
-            throw std::runtime_error("Cannot negate TensorMatDual: undefined tensors.");
-        }
 
         // Negate the real and dual parts and return a new TensorMatDual
         return TensorMatDual(-this->r, -this->d);
@@ -5062,13 +4920,8 @@ public:
      *
      * @param other The scalar (double) by which to scale the real and dual tensors.
      * @return TensorMatDual A new TensorMatDual object with the real and dual parts scaled by the scalar.
-     * @throws std::runtime_error If the real or dual tensors are not defined.
      */
     TensorMatDual operator*(const double other) const {
-        // Validate that the tensors are defined
-        if (!this->r.defined() || !this->d.defined()) {
-            throw std::runtime_error("Cannot scale TensorMatDual: undefined tensors.");
-        }
 
         // Scale the real and dual parts
         auto real = this->r * other;
@@ -5092,11 +4945,6 @@ public:
      * @throws std::runtime_error If division by zero occurs in the real part.
      */
     TensorMatDual operator/(const TensorMatDual& other) const {
-        // Validate that the tensors are defined
-        if (!this->r.defined() || !this->d.defined() || !other.r.defined() || !other.d.defined()) {
-            throw std::invalid_argument("Cannot divide TensorMatDual objects: undefined tensors.");
-        }
-
         // Validate that the shapes match
         if (this->r.sizes() != other.r.sizes() || this->d.sizes() != other.d.sizes()) {
             throw std::invalid_argument("Cannot divide TensorMatDual objects: incompatible tensor shapes.");
@@ -5195,26 +5043,14 @@ public:
      * @throws std::invalid_argument If the real or dual tensors are undefined.
      */
     TensorMatDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
-        // Validate that the tensors are defined
-        if (!this->r.defined() || !this->d.defined()) {
-            throw std::invalid_argument("Cannot index TensorMatDual: undefined real or dual tensors.");
-        }
 
         // Index the real part
         auto r = this->r.index(indices);
 
-        // Add an extra dimension if the real part has 2 dimensions
-        if (r.dim() == 2) {
-            r = r.unsqueeze(2);
-        }
 
         // Index the dual part
         auto d = this->d.index(indices);
 
-        // Add an extra dimension if the dual part has 3 dimensions
-        if (d.dim() == 3) {
-            d = d.unsqueeze(2);
-        }
 
         // Return the indexed TensorMatDual object
         return TensorMatDual(r, d);
@@ -5234,22 +5070,15 @@ public:
      * @throws std::invalid_argument If the real or dual tensors are undefined.
      */
     TensorMatDual index(int index) const {
-        // Validate that the tensors are defined
-        if (!this->r.defined() || !this->d.defined()) {
-            throw std::invalid_argument("Cannot index TensorMatDual: undefined real or dual tensors.");
+        //Check if the index is greater than the first dimension and trow an error
+        if (index >= this->r.size(0)) {
+            throw std::out_of_range("Index out of bounds for indexing the first dimension of the TensorMatDual object.");
         }
 
-        // Validate the index range
-        if (index < 0 || index >= this->r.size(0)) {
-            throw std::out_of_range("Index out of bounds for TensorMatDual real tensor.");
-        }
-        if (index < 0 || index >= this->d.size(0)) {
-            throw std::out_of_range("Index out of bounds for TensorMatDual dual tensor.");
-        }
-
+        //Convert this into a slice to avoid reduction of dimensions
         // Perform indexing
-        auto real = this->r.index({index});
-        auto dual = this->d.index({index});
+        auto real = this->r.index({index}).unsqueeze(0);
+        auto dual = this->d.index({index}).unsqueeze(0);
 
         // Return the indexed TensorMatDual object
         return TensorMatDual(real, dual);
@@ -5268,10 +5097,6 @@ public:
      * @throws std::invalid_argument If the mask is undefined or incompatible for indexing.
      */
     TensorMatDual index(const torch::Tensor& mask) const {
-        // Validate that the real and dual tensors are defined
-        if (!this->r.defined() || !this->d.defined()) {
-            throw std::invalid_argument("Cannot index TensorMatDual: undefined real or dual tensors.");
-        }
 
         // Validate that the mask is defined
         if (!mask.defined()) {
@@ -5283,10 +5108,6 @@ public:
             throw std::invalid_argument("Cannot index TensorMatDual: mask tensor must be of boolean type.");
         }
 
-        // Validate that the mask is broadcastable to the shape of the real and dual tensors
-        if (!mask.sizes().empty() && mask.size(0) != this->r.size(0)) {
-            throw std::invalid_argument("Cannot index TensorMatDual: mask tensor is not broadcastable to the first dimension of the tensors.");
-        }
 
         // Apply the mask to the real and dual parts
         auto real = this->r.index({mask});
@@ -5308,10 +5129,6 @@ public:
      * @throws std::invalid_argument If the real or dual tensors are undefined.
      */
     void requires_grad_(bool req_grad) {
-        // Validate that the tensors are defined
-        if (!r.defined() || !d.defined()) {
-            throw std::invalid_argument("Cannot set requires_grad: undefined real or dual tensors.");
-        }
 
         // Set the requires_grad attribute for both tensors
         r.requires_grad_(req_grad);
@@ -5328,10 +5145,6 @@ public:
      * @throws std::runtime_error If the real or dual tensors are undefined or do not require gradients.
      */
     void backward() {
-        // Validate that the real and dual tensors are defined
-        if (!r.defined() || !d.defined()) {
-            throw std::runtime_error("Cannot perform backward pass: undefined real or dual tensors.");
-        }
 
         // Validate that the tensors require gradients
         if (!r.requires_grad() || !d.requires_grad()) {
@@ -5356,10 +5169,6 @@ public:
      * @throws std::invalid_argument If the real or dual tensors are undefined.
      */
     TensorMatDual abs() const {
-        // Validate that the real and dual tensors are defined
-        if (!r.defined() || !d.defined()) {
-            throw std::invalid_argument("Cannot compute absolute value: undefined real or dual tensors.");
-        }
 
         // Compute the absolute value of the real part
         auto abs_r = torch::abs(r);
@@ -5421,10 +5230,6 @@ public:
      * @throws std::invalid_argument If the einsum string is invalid or the input tensors are undefined.
      */
     static TensorMatDual einsum(const std::string& arg, const TensorMatDual& first, const torch::Tensor& second) {
-        // Validate that the inputs are defined
-        if (!first.r.defined() || !first.d.defined() || !second.defined()) {
-            throw std::invalid_argument("Cannot perform einsum: undefined real or dual tensors in inputs.");
-        }
 
         // Validate the einsum string format
         auto pos = arg.find(",");
@@ -5464,7 +5269,7 @@ public:
      * @return TensorMatDual A new TensorMatDual object containing the computed real and dual tensors.
      * @throws std::invalid_argument If the einsum string is invalid or the input tensors are undefined.
      */
-    static TensorMatDual einsum(const std::string& arg, const TensorDual& first, const TensorMatDual& second) {
+    static TensorDual einsum(const std::string& arg, const TensorDual& first, const TensorMatDual& second) {
         // Validate that the inputs are defined
         if (!first.r.defined() || !first.d.defined() || !second.r.defined() || !second.d.defined()) {
             throw std::invalid_argument("Cannot perform einsum: undefined real or dual tensors in inputs.");
@@ -5496,7 +5301,7 @@ public:
         auto d = d1 + d2;
 
         // Return the resulting TensorMatDual object
-        return TensorMatDual(std::move(r), std::move(d));
+        return TensorDual(std::move(r), std::move(d));
     }
 
     /**
@@ -5557,10 +5362,6 @@ public:
      * @throws std::invalid_argument If the einsum string is invalid or the input tensors are undefined.
      */
     static TensorMatDual einsum(const std::string& arg, const TensorMatDual& first, const TensorMatDual& second) {
-        // Validate that the inputs are defined
-        if (!first.r.defined() || !first.d.defined() || !second.r.defined() || !second.d.defined()) {
-            throw std::invalid_argument("Cannot perform einsum: undefined real or dual tensors in inputs.");
-        }
 
         // Validate the einsum string format
         auto pos = arg.find(",");
@@ -5643,10 +5444,6 @@ public:
      * @throws std::invalid_argument If the real or dual tensors are undefined or the dimension is invalid.
      */
     TensorMatDual min(int dim = 1) {
-        // Validate that the tensors are defined
-        if (!r.defined() || !d.defined()) {
-            throw std::invalid_argument("Cannot compute min: undefined real or dual tensors.");
-        }
 
         // Ensure the specified dimension is valid
         if (dim < 0 || dim >= r.dim()) {
@@ -5673,7 +5470,7 @@ public:
 
 
     /**
-     * @brief Updates elements in the TensorMatDual object based on a mask and a TensorDual value.
+     * @brief Updates elements in the TensorMatDual object based on a mask and a TensorMatDual value.
      *
      * This method performs an in-place update of the real (`r`) and dual (`d`) tensors in the
      * TensorMatDual object. The elements specified by the mask are updated with the corresponding
@@ -5683,13 +5480,10 @@ public:
      * @param value A TensorDual object containing the new real and dual values to assign.
      * @throws std::invalid_argument If the mask or value tensors are undefined or have incompatible shapes.
      */
-    void index_put_(const torch::Tensor& mask, const TensorDual& value) {
+    void index_put_(const torch::Tensor& mask, const TensorMatDual& value) {
         // Validate that the mask and value tensors are defined
         if (!mask.defined()) {
             throw std::invalid_argument("Cannot perform index_put_: mask tensor is undefined.");
-        }
-        if (!value.r.defined() || !value.d.defined()) {
-            throw std::invalid_argument("Cannot perform index_put_: value tensors are undefined.");
         }
 
         // Validate that the mask is a boolean tensor
@@ -5697,41 +5491,12 @@ public:
             throw std::invalid_argument("Cannot perform index_put_: mask tensor must be of boolean type.");
         }
 
-        // Validate compatibility of the value shapes with the mask
-        if (value.r.sizes() != mask.sizes() || value.d.sizes() != mask.sizes()) {
-            throw std::invalid_argument("Cannot perform index_put_: value tensors must match the shape of the mask.");
-        }
 
         // Perform the in-place update
-        this->r.index_put_({mask}, value.r.squeeze());
-        this->d.index_put_({mask}, value.d.squeeze());
+        this->r.index_put_({mask}, value.r);
+        this->d.index_put_({mask}, value.d);
     }
 
-    /**
-     * @brief Updates elements in the TensorMatDual object based on a TensorIndex and a TensorDual value.
-     *
-     * This method performs an in-place update of the real (`r`) and dual (`d`) tensors in the
-     * TensorMatDual object. The elements specified by the TensorIndex mask are updated with the
-     * corresponding elements from the TensorDual value.
-     *
-     * @param mask A TensorIndex specifying the elements to update.
-     * @param value A TensorDual object containing the new real and dual values to assign.
-     * @throws std::invalid_argument If the value tensors are undefined or incompatible with the mask.
-     */
-    void index_put_(const TensorIndex& mask, const TensorDual& value) {
-        // Validate that the value tensors are defined
-        if (!value.r.defined() || !value.d.defined()) {
-            throw std::invalid_argument("Cannot perform index_put_: value tensors are undefined.");
-        }
-
-        // Perform the in-place update for the real and dual tensors
-        try {
-            this->r.index_put_({mask}, value.r.squeeze());
-            this->d.index_put_({mask}, value.d.squeeze());
-        } catch (const std::exception& e) {
-            throw std::invalid_argument(std::string("Error in index_put_: ") + e.what());
-        }
-    }
 
     /**
      * @brief Updates elements in the TensorMatDual object based on a vector of TensorIndex objects and a TensorDual value.
@@ -5744,48 +5509,13 @@ public:
      * @param value A TensorDual object containing the new real and dual values to assign.
      * @throws std::invalid_argument If the value tensors are undefined or the mask is invalid.
      */
-    void index_put_(const std::vector<TensorIndex>& mask, const TensorDual& value) {
-        // Validate that the value tensors are defined
-        if (!value.r.defined() || !value.d.defined()) {
-            throw std::invalid_argument("Cannot perform index_put_: value tensors are undefined.");
-        }
-
-        // Perform the in-place update for the real and dual tensors
-        try {
-            this->r.index_put_(mask, value.r);
-            this->d.index_put_(mask, value.d);
-        } catch (const std::exception& e) {
-            throw std::invalid_argument(std::string("Error in index_put_: ") + e.what());
-        }
-    }
-
-
-
-    /**
-     * @brief Updates elements in the TensorMatDual object based on a vector of TensorIndex objects and another TensorMatDual object.
-     *
-     * This method performs an in-place update of the real (`r`) and dual (`d`) tensors in the
-     * TensorMatDual object. The elements specified by the vector of TensorIndex objects are updated with
-     * the corresponding elements from the real and dual tensors of another TensorMatDual object.
-     *
-     * @param mask A vector of TensorIndex objects specifying the indices to update.
-     * @param value A TensorMatDual object containing the new real and dual values to assign.
-     * @throws std::invalid_argument If the value tensors are undefined or the mask is invalid.
-     */
     void index_put_(const std::vector<TensorIndex>& mask, const TensorMatDual& value) {
-        // Validate that the value tensors are defined
-        if (!value.r.defined() || !value.d.defined()) {
-            throw std::invalid_argument("Cannot perform index_put_: value tensors are undefined.");
-        }
-
-        // Perform the in-place update for the real and dual tensors
-        try {
-            this->r.index_put_(mask, value.r);
-            this->d.index_put_(mask, value.d);
-        } catch (const std::exception& e) {
-            throw std::invalid_argument(std::string("Error in index_put_: ") + e.what());
-        }
+        this->r.index_put_(mask, value.r);
+        this->d.index_put_(mask, value.d);
     }
+
+
+
 
     /**
      * @brief Updates elements in the TensorMatDual object based on a vector of TensorIndex objects and a torch::Tensor value.
@@ -5798,10 +5528,6 @@ public:
      * @throws std::invalid_argument If the value tensor is undefined, incompatible with the mask, or if the mask is invalid.
      */
     void index_put_(const std::vector<TensorIndex>& mask, const torch::Tensor& value) {
-        // Validate that the value tensor is defined
-        if (!value.defined()) {
-            throw std::invalid_argument("Cannot perform index_put_: value tensor is undefined.");
-        }
 
         // Validate compatibility of the value tensor with the mask
         if (value.sizes() != this->r.index({mask}).sizes()) {
@@ -5809,12 +5535,10 @@ public:
         }
 
         // Perform the in-place update for the real and dual tensors
-        try {
-            this->r.index_put_({mask}, value);
-            this->d.index_put_({mask}, torch::zeros_like(value, this->d.options()));
-        } catch (const std::exception& e) {
-            throw std::invalid_argument(std::string("Error in index_put_: ") + e.what());
-        }
+        this->r.index_put_({mask}, value);
+        auto sizes = this->r.sizes();
+        auto dual_values = torch::zeros({sizes[0], sizes[1], sizes[2], this->d.size(-1)}, this->d.options());
+        this->d.index_put_({mask}, dual_values);
     }
     
 
