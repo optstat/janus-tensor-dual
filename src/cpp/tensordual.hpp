@@ -5556,15 +5556,7 @@ public:
      * @throws std::invalid_argument If the input tensors are undefined or the dimension is invalid.
      */
     static TensorMatDual unsqueeze(const TensorDual& x, int dim) {
-        // Validate that the input tensors are defined
-        if (!x.r.defined() || !x.d.defined()) {
-            throw std::invalid_argument("Cannot unsqueeze: undefined real or dual tensors.");
-        }
 
-        // Validate the dimension
-        if (dim < 0 || dim > x.r.dim()) {
-            throw std::invalid_argument("Cannot unsqueeze: dimension is out of bounds.");
-        }
 
         // Perform the unsqueeze operation for both real and dual parts
         auto r = x.r.unsqueeze(dim);
@@ -5624,7 +5616,16 @@ public:
         oss << "]";
         return oss.str();
     }
-
+    
+    // toString method
+    std::string toString() const {
+        std::ostringstream oss;
+        oss << "TensorMatHyperDual("
+            << "r: " << r.sizes() << ", "
+            << "d: " << d.sizes() << ", "
+            << "h: " << h.sizes() << ")";
+        return oss.str();
+    }
 
 
     /**
@@ -5650,12 +5651,28 @@ public:
         return this->device_;
     }
 
-    TensorMatHyperDual(const TensorDual& x, int dim = 2)
-        : r(x.r.unsqueeze(dim)), 
-        d(x.d.unsqueeze(dim)), 
-        h(torch::zeros_like(x.d.unsqueeze(dim))),
-        dtype_(torch::typeMetaToScalarType(x.r.dtype())), // Explicit conversion
-        device_(x.r.device()) {}
+    TensorMatHyperDual(const TensorDual& x, int dim = 2) : device_(x.r.device()) {
+        if (dim <= 0 || dim > 2) {
+            throw std::invalid_argument("Invalid dimension specified for TensorDual to TensorMatHyperDual conversion.");
+        }
+        dtype_ = torch::typeMetaToScalarType(x.r.dtype());
+
+        auto dual_dim = x.d.sizes()[2];
+        torch::Tensor rn, dn, hn;
+        //Here h will have dimension [M, N, 1, D, D] where D is the dual dimension
+        if (dim == 1) {
+            this->r = x.r.unsqueeze(1);
+            this->d = x.d.unsqueeze(1);
+            std::vector<int64_t> h_sizes = {x.r.size(0), 1, x.r.size(1), dual_dim, dual_dim};
+            this->h = torch::zeros(h_sizes, x.r.options());
+        } else {
+            this->r = x.r.unsqueeze(2);
+            this->d = x.d.unsqueeze(2);
+            std::vector<int64_t> h_sizes = {x.r.size(0), x.r.size(1), 1, dual_dim, dual_dim};
+            this->h = torch::zeros(h_sizes, x.r.options());
+        }
+        
+    }
 
     
     TensorMatHyperDual complex() const {
@@ -5665,19 +5682,19 @@ public:
         if (this->r.is_complex()) {
             rc = this->r;
         } else {
-            rc = torch::cat({this->r.unsqueeze(-1), torch::zeros_like(this->r).unsqueeze(-1)}, -1);
+            rc = torch::complex(this->r, torch::zeros_like(this->r));
         }
 
         if (this->d.is_complex()) {
             dc = this->d;
         } else {
-            dc = torch::cat({this->d.unsqueeze(-1), torch::zeros_like(this->d).unsqueeze(-1)}, -1);
+            dc = torch::complex(this->d, torch::zeros_like(this->d));
         }
 
         if (this->h.is_complex()) {
             hc = this->h;
         } else {
-            hc = torch::cat({this->h.unsqueeze(-1), torch::zeros_like(this->h).unsqueeze(-1)}, -1);
+            hc = torch::complex(this->h, torch::zeros_like(this->h));
         }
 
         // Return a new TensorMatHyperDual with complex tensors
@@ -5746,6 +5763,9 @@ public:
     }
 
 
+
+
+
     /**
      * Compute the maximum values along a specified dimension for the TensorMatHyperDual object.
      *
@@ -5759,44 +5779,45 @@ public:
         auto max_result = torch::max(this->r, dim, /*keepdim=*/true);
         auto max_values = std::get<0>(max_result);  // Maximum values
         auto max_indices = std::get<1>(max_result); // Indices of the maximum values
+        auto szs = max_indices.sizes();
+        int dsz = this->d.size(-1);
+        int hsz = this->h.size(-1);
+        
 
-        // Adjust the shape of max_indices for gathering
-        auto dshape = max_indices.unsqueeze(-1).expand_as(this->d.select(dim, 0)); // Expand to match dual shape
-        auto hshape = max_indices.unsqueeze(-1).unsqueeze(-1).expand_as(this->h.select(dim, 0).select(dim, 0)); // Expand to match hyperdual shape
+        auto dvalues = torch::gather(this->d, dim, max_indices.unsqueeze(-1).expand({szs[0], szs[1], szs[2], dsz}));
 
-        // Gather dual and hyperdual values based on max indices
-        auto dual_values = torch::gather(this->d, dim, dshape);
-        auto hyper_values = torch::gather(this->h, dim, hshape);
+        auto hvalues = torch::gather(this->h, dim, max_indices.unsqueeze(-1).unsqueeze(-1).expand({szs[0], szs[1], szs[2], hsz, hsz}));
 
         // Return a new TensorMatHyperDual object
-        return TensorMatHyperDual(max_values, dual_values, hyper_values);
+        return TensorMatHyperDual(max_values, dvalues, hvalues);
     }
 
     /**
-     * Compute the minimum values along a specified dimension for the TensorMatHyperDual object.
+     * Compute the maximum values along a specified dimension for the TensorMatHyperDual object.
      *
-     * The real, dual, and hyperdual parts are reduced based on the indices of the minimum values.
+     * The real, dual, and hyperdual parts are reduced based on the indices of the maximum values.
      *
-     * @param dim The dimension along which to compute the minimum (default: 1).
-     * @return A new TensorMatHyperDual object containing the minimum values and corresponding dual and hyperdual values.
+     * @param dim The dimension along which to compute the maximum (default: 1).
+     * @return A new TensorMatHyperDual object containing the maximum values and corresponding dual and hyperdual values.
      */
     TensorMatHyperDual min(int dim = 1) const {
-        // Compute min values and indices along the specified dimension
+        // Compute max values and indices along the specified dimension
         auto min_result = torch::min(this->r, dim, /*keepdim=*/true);
-        auto min_values = std::get<0>(min_result);  // Minimum values
-        auto min_indices = std::get<1>(min_result); // Indices of the minimum values
+        auto min_values = std::get<0>(min_result);  // Maximum values
+        auto min_indices = std::get<1>(min_result); // Indices of the maximum values
+        auto szs = min_indices.sizes();
+        int dsz = this->d.size(-1);
+        int hsz = this->h.size(-1);
+        
 
-        // Adjust the shape of min_indices for gathering
-        auto dshape = min_indices.unsqueeze(-1).expand_as(this->d.select(dim, 0)); // Expand to match dual shape
-        auto hshape = min_indices.unsqueeze(-1).unsqueeze(-1).expand_as(this->h.select(dim, 0).select(dim, 0)); // Expand to match hyperdual shape
+        auto dvalues = torch::gather(this->d, dim, min_indices.unsqueeze(-1).expand({szs[0], szs[1], szs[2], dsz}));
 
-        // Gather dual and hyperdual values based on min indices
-        auto dual_values = torch::gather(this->d, dim, dshape);
-        auto hyper_values = torch::gather(this->h, dim, hshape);
+        auto hvalues = torch::gather(this->h, dim, min_indices.unsqueeze(-1).unsqueeze(-1).expand({szs[0], szs[1], szs[2], hsz, hsz}));
 
         // Return a new TensorMatHyperDual object
-        return TensorMatHyperDual(min_values, dual_values, hyper_values);
+        return TensorMatHyperDual(min_values, dvalues, hvalues);
     }
+
 
     /**
      * Compute the sum of the TensorMatHyperDual object along a specified dimension.

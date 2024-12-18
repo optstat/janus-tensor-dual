@@ -15112,6 +15112,837 @@ TEST(TensorMatDualTest, IndexPut_MismatchedShapes) {
 }
 
 
+// Test case for valid unsqueeze operation
+TEST(TensorDualTest, Unsqueeze_ValidInputs) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({3, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::rand({3, 4, 5}, torch::kFloat32);
+    TensorDual tensor_dual(real_tensor, dual_tensor);
+
+    int dim = 1; // Dimension to unsqueeze
+
+    // Act
+    TensorMatDual result = TensorMatDual::unsqueeze(tensor_dual, dim);
+
+    // Assert
+    auto expected_real = real_tensor.unsqueeze(dim);
+    auto expected_dual = dual_tensor.unsqueeze(dim);
+
+    EXPECT_TRUE(torch::allclose(result.r, expected_real));
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+// Test case for invalid dimension
+TEST(TensorDualTest, Unsqueeze_InvalidDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({3, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::rand({3, 4, 5}, torch::kFloat32);
+    TensorDual tensor_dual(real_tensor, dual_tensor);
+
+    int invalid_dim = 5; // Out of bounds
+
+    // Act & Assert
+    EXPECT_THROW(TensorMatDual::unsqueeze(tensor_dual, invalid_dim), c10::Error);
+}
+
+
+// Test case for unsqueeze with empty tensors
+TEST(TensorDualTest, Unsqueeze_EmptyTensors) {
+    // Arrange
+    torch::Tensor real_tensor = torch::empty({0, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::empty({0, 4, 5}, torch::kFloat32);
+    TensorDual tensor_dual(real_tensor, dual_tensor);
+
+    int dim = 1;
+
+    // Act
+    TensorMatDual result = TensorMatDual::unsqueeze(tensor_dual, dim);
+
+    // Assert
+    auto expected_real = real_tensor.unsqueeze(dim);
+    auto expected_dual = dual_tensor.unsqueeze(dim);
+
+    EXPECT_TRUE(torch::allclose(result.r, expected_real));
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+// Test case for unsqueeze at the first dimension
+TEST(TensorDualTest, Unsqueeze_FirstDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({3, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::rand({3, 4, 5}, torch::kFloat32);
+    TensorDual tensor_dual(real_tensor, dual_tensor);
+
+    int dim = 0; // First dimension
+
+    // Act
+    TensorMatDual result = TensorMatDual::unsqueeze(tensor_dual, dim);
+
+    // Assert
+    auto expected_real = real_tensor.unsqueeze(dim);
+    auto expected_dual = dual_tensor.unsqueeze(dim);
+
+    EXPECT_TRUE(torch::allclose(result.r, expected_real));
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+// Test case for unsqueeze at the last dimension
+TEST(TensorDualTest, Unsqueeze_LastDimension) {
+    // Arrange
+    torch::Tensor real_tensor = torch::rand({3, 4}, torch::kFloat32);
+    torch::Tensor dual_tensor = torch::rand({3, 4, 5}, torch::kFloat32);
+    TensorDual tensor_dual(real_tensor, dual_tensor);
+
+    int dim = -1; // Last dimension
+
+    // Act
+    TensorMatDual result = TensorMatDual::unsqueeze(tensor_dual, dim);
+
+    // Assert
+    auto expected_real = real_tensor.unsqueeze(dim);
+    auto expected_dual = dual_tensor.unsqueeze(dim);
+
+    EXPECT_TRUE(torch::allclose(result.r, expected_real));
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+// Helper to create valid tensors
+TensorMatHyperDual createValidTensorMatHyperDual() {
+        torch::Dtype dtype = torch::kFloat64;
+        torch::Device device = torch::kCPU;
+        auto r = torch::rand({2, 3, 4}, dtype).to(device);
+        auto d = torch::rand({2, 3, 4, 5}, dtype).to(device);
+        auto h = torch::rand({2, 3, 4, 6, 6}, dtype).to(device);
+        return TensorMatHyperDual(r, d, h);
+}
+
+
+// Test: Constructor with valid input
+TEST(TensorMatHyperDualTest, ConstructorValidInput) {
+    torch::Dtype dtype = torch::kFloat64;
+    torch::Device device = torch::kCPU;
+
+
+    auto r = torch::rand({2, 3, 4}, dtype).to(device);
+    auto d = torch::rand({2, 3, 4, 5}, dtype).to(device);
+    auto h = torch::rand({2, 3, 4, 6, 6}, dtype).to(device);
+
+    EXPECT_NO_THROW(TensorMatHyperDual(r, d, h));
+}
+
+// Test: Constructor with invalid real part dimensions
+TEST(TensorMatHyperDualTest, ConstructorInvalidRDimensions) {
+    torch::Dtype dtype = torch::kFloat64;
+    torch::Device device = torch::kCPU;
+
+
+    auto r = torch::rand({3, 4}, dtype).to(device); // Invalid shape
+    auto d = torch::rand({2, 3, 4, 5}, dtype).to(device);
+    auto h = torch::rand({2, 3, 4, 6, 6}, dtype).to(device);
+
+    EXPECT_THROW(TensorMatHyperDual(r, d, h), std::invalid_argument);
+}
+
+// Test: Constructor with invalid dual part dimensions
+TEST(TensorMatHyperDualTest, ConstructorInvalidDDimensions) {
+    torch::Dtype dtype = torch::kFloat64;
+    torch::Device device = torch::kCPU;
+
+
+    auto r = torch::rand({2, 3, 4}, dtype).to(device);
+    auto d = torch::rand({2, 3, 5}, dtype).to(device); // Invalid shape
+    auto h = torch::rand({2, 3, 4, 6, 6}, dtype).to(device);
+
+    EXPECT_THROW(TensorMatHyperDual(r, d, h), std::invalid_argument);
+}
+
+// Test: Constructor with invalid hyperdual part dimensions
+TEST(TensorMatHyperDualTest, ConstructorInvalidHDimensions) {
+    torch::Dtype dtype = torch::kFloat64;
+    torch::Device device = torch::kCPU;
+
+
+    auto r = torch::rand({2, 3, 4}, dtype).to(device);
+    auto d = torch::rand({2, 3, 4, 5}, dtype).to(device);
+    auto h = torch::rand({2, 3, 4, 6}, dtype).to(device); // Invalid shape
+
+    EXPECT_THROW(TensorMatHyperDual(r, d, h), std::invalid_argument);
+}
+
+// Test: Constructor with mismatched dimensions
+TEST(TensorMatHyperDualTest, ConstructorMismatchedDimensions) {
+    torch::Dtype dtype = torch::kFloat64;
+    torch::Device device = torch::kCPU;
+
+
+    auto r = torch::rand({2, 3, 4}, dtype).to(device);
+    auto d = torch::rand({2, 3, 5, 5}, dtype).to(device); // Mismatch in L
+    auto h = torch::rand({2, 3, 4, 6, 6}, dtype).to(device);
+
+    EXPECT_THROW(TensorMatHyperDual(r, d, h), std::invalid_argument);
+}
+
+// Test: Device and dtype consistency
+TEST(TensorMatHyperDualTest, DeviceAndDtypeConsistency) {    
+    torch::Dtype dtype = torch::kFloat64;
+    torch::Device device = torch::kCPU;
+
+
+    auto tensorMat = createValidTensorMatHyperDual();
+    EXPECT_EQ(tensorMat.dtype_, dtype);
+    EXPECT_EQ(tensorMat.device_, device);
+}
+
+// Test: Utility function `toString` (if implemented)
+TEST(TensorMatHyperDualTest, ToString) {
+    auto tensorMat = createValidTensorMatHyperDual();
+    std::string description = tensorMat.toString();
+    EXPECT_NE(description.find("r: [2, 3, 4]"), std::string::npos);
+    EXPECT_NE(description.find("d: [2, 3, 4, 5]"), std::string::npos);
+    EXPECT_NE(description.find("h: [2, 3, 4, 6, 6]"), std::string::npos);
+}
+
+TEST(TensorMatHyperDualTest, ToMethod_ValidDeviceSwitch) {
+    // Create tensors on the CPU
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 6, 6});
+
+    // Initialize the TensorMatHyperDual object
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Move tensors to CUDA (if available)
+    if (torch::cuda::is_available()) {
+        TensorMatHyperDual tensorMatCUDA = tensorMat.to(torch::kCUDA);
+
+        // Check that tensors are moved to CUDA
+        EXPECT_EQ(tensorMatCUDA.r.device().type(), torch::kCUDA);
+        EXPECT_EQ(tensorMatCUDA.d.device().type(), torch::kCUDA);
+        EXPECT_EQ(tensorMatCUDA.h.device().type(), torch::kCUDA);
+
+        // Ensure the sizes remain unchanged
+        EXPECT_EQ(tensorMatCUDA.r.sizes(), r.sizes());
+        EXPECT_EQ(tensorMatCUDA.d.sizes(), d.sizes());
+        EXPECT_EQ(tensorMatCUDA.h.sizes(), h.sizes());
+    }
+}
+
+TEST(TensorMatHyperDualTest, ToMethod_BackToCPU) {
+    // Create tensors on CUDA (if available)
+    if (torch::cuda::is_available()) {
+        auto r = torch::rand({2, 3, 4}, torch::device(torch::kCUDA));
+        auto d = torch::rand({2, 3, 4, 5}, torch::device(torch::kCUDA));
+        auto h = torch::rand({2, 3, 4, 6, 6}, torch::device(torch::kCUDA));
+
+        // Initialize the TensorMatHyperDual object on CUDA
+        TensorMatHyperDual tensorMatCUDA(r, d, h);
+
+        // Move tensors back to CPU
+        TensorMatHyperDual tensorMatCPU = tensorMatCUDA.to(torch::kCPU);
+
+        // Check that tensors are moved to CPU
+        EXPECT_EQ(tensorMatCPU.r.device().type(), torch::kCPU);
+        EXPECT_EQ(tensorMatCPU.d.device().type(), torch::kCPU);
+        EXPECT_EQ(tensorMatCPU.h.device().type(), torch::kCPU);
+
+        // Ensure the sizes remain unchanged
+        EXPECT_EQ(tensorMatCPU.r.sizes(), r.sizes());
+        EXPECT_EQ(tensorMatCPU.d.sizes(), d.sizes());
+        EXPECT_EQ(tensorMatCPU.h.sizes(), h.sizes());
+    }
+}
+
+TEST(TensorMatHyperDualTest, ToMethod_InvalidDevice) {
+    // Create tensors on the CPU
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 6, 6});
+
+    // Initialize the TensorMatHyperDual object
+    TensorMatHyperDual tensorMat(r, d, h);
+
+
+    EXPECT_THROW({
+            // Attempt to move tensors to an invalid device
+        // This is just for testing, as Torch itself will throw an error for invalid devices
+        torch::Device invalidDevice("nonexistent");
+
+        TensorMatHyperDual tensorMatInvalid = tensorMat.to(invalidDevice);
+    }, c10::Error); // Expect a c10::Error for invalid device
+}
+
+
+TEST(TensorMatHyperDualTest, DeviceMethod_CPU) {
+    // Create tensors on CPU
+    auto r = torch::rand({2, 3, 4}, torch::device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4, 5}, torch::device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 6, 6}, torch::device(torch::kCPU));
+
+    // Initialize TensorMatHyperDual object
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Check that the device is correctly reported as CPU
+    EXPECT_EQ(tensorMat.device().type(), torch::kCPU);
+}
+
+TEST(TensorMatHyperDualTest, DeviceMethod_CUDA) {
+    // Only test CUDA if it's available
+    if (torch::cuda::is_available()) {
+        // Create tensors on CUDA
+        auto r = torch::rand({2, 3, 4}, torch::device(torch::kCUDA));
+        auto d = torch::rand({2, 3, 4, 5}, torch::device(torch::kCUDA));
+        auto h = torch::rand({2, 3, 4, 6, 6}, torch::device(torch::kCUDA));
+
+        // Initialize TensorMatHyperDual object
+        TensorMatHyperDual tensorMat(r, d, h);
+
+        // Check that the device is correctly reported as CUDA
+        EXPECT_EQ(tensorMat.device().type(), torch::kCUDA);
+    } else {
+        GTEST_SKIP() << "CUDA is not available on this system.";
+    }
+}
+
+TEST(TensorMatHyperDualTest, DeviceMethod_ConsistencyAfterMove) {
+    // Create tensors on CPU initially
+    auto r = torch::rand({2, 3, 4}, torch::device(torch::kCPU));
+    auto d = torch::rand({2, 3, 4, 5}, torch::device(torch::kCPU));
+    auto h = torch::rand({2, 3, 4, 6, 6}, torch::device(torch::kCPU));
+
+    // Initialize TensorMatHyperDual object
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Verify initial device is CPU
+    EXPECT_EQ(tensorMat.device().type(), torch::kCPU);
+
+    // Move tensors to CUDA if available
+    if (torch::cuda::is_available()) {
+        TensorMatHyperDual tensorMatCUDA = tensorMat.to(torch::kCUDA);
+        EXPECT_EQ(tensorMatCUDA.device().type(), torch::kCUDA);
+    } else {
+        GTEST_SKIP() << "CUDA is not available on this system.";
+    }
+}
+
+TEST(TensorMatHyperDualTest, ConstructorFromTensorDual_DefaultDim) {
+    // Create a TensorDual object
+    auto r = torch::rand({2, 3}).to(torch::kFloat64);
+    auto d = torch::rand({2, 3, 4}).to(torch::kFloat64); // 4 is the dual dimension
+    TensorDual tensorDual{r, d};
+
+    // Initialize TensorMatHyperDual with default dimension (dim = 2)
+    TensorMatHyperDual tensorMat(tensorDual);
+
+    // Check dimensions
+    EXPECT_EQ(tensorMat.r.sizes(), torch::IntArrayRef({2, 3, 1}));
+    EXPECT_EQ(tensorMat.d.sizes(), torch::IntArrayRef({2, 3, 1, 4}));
+    EXPECT_EQ(tensorMat.h.sizes(), torch::IntArrayRef({2, 3, 1, 4, 4}));
+
+    // Check dtype and device consistency
+    EXPECT_EQ(tensorMat.dtype_, torch::typeMetaToScalarType(r.dtype()));
+    EXPECT_EQ(tensorMat.device_, r.device());
+}
+
+TEST(TensorMatHyperDualTest, ConstructorFromTensorDual_CustomDim) {
+    // Create a TensorDual object
+    auto r = torch::rand({2, 3});
+    auto d = torch::rand({2, 3, 4}); // 4 is the dual dimension
+    TensorDual tensorDual{r, d};
+
+    // Initialize TensorMatHyperDual with custom dimension (dim = 1)
+    TensorMatHyperDual tensorMat(tensorDual, 1);
+
+    // Check dimensions
+    EXPECT_EQ(tensorMat.r.sizes(), torch::IntArrayRef({2, 1, 3}));
+    EXPECT_EQ(tensorMat.d.sizes(), torch::IntArrayRef({2, 1, 3, 4}));
+    EXPECT_EQ(tensorMat.h.sizes(), torch::IntArrayRef({2, 1, 3, 4, 4}));
+
+    // Check dtype and device consistency
+    EXPECT_EQ(tensorMat.dtype_, torch::typeMetaToScalarType(r.dtype()));
+    EXPECT_EQ(tensorMat.device_, r.device());
+}
+
+TEST(TensorMatHyperDualTest, ConstructorFromTensorDual_InvalidDim) {
+    // Create a TensorDual object
+    auto r = torch::rand({2, 3});
+    auto d = torch::rand({2, 3, 4}); // 4 is the dual dimension
+    TensorDual tensorDual{r, d};
+
+    // Attempt to use invalid dimensions (e.g., dim = 0 and dim > 2)
+    EXPECT_THROW({
+        TensorMatHyperDual tensorMat(tensorDual, 0);
+    }, std::invalid_argument);
+
+    EXPECT_THROW({
+        TensorMatHyperDual tensorMat(tensorDual, 3);
+    }, std::invalid_argument);
+}
+
+TEST(TensorMatHyperDualTest, ConstructorFromTensorDual_ZeroHyperdualInitialization) {
+    // Create a TensorDual object
+    auto r = torch::rand({2, 3});
+    auto d = torch::rand({2, 3, 4}); // 4 is the dual dimension
+    TensorDual tensorDual{r, d};
+
+    // Initialize TensorMatHyperDual with default dimension
+    TensorMatHyperDual tensorMat(tensorDual);
+
+    // Check that the hyperdual part is correctly initialized to zeros
+    EXPECT_TRUE(torch::all(tensorMat.h == 0).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, ConstructorFromTensorDual_DeviceConsistency) {
+    // Create a TensorDual object on CUDA (if available)
+    if (torch::cuda::is_available()) {
+        auto r = torch::rand({2, 3}, torch::device(torch::kCUDA));
+        auto d = torch::rand({2, 3, 4}, torch::device(torch::kCUDA));
+        TensorDual tensorDual{r, d};
+
+        // Initialize TensorMatHyperDual
+        TensorMatHyperDual tensorMat(tensorDual);
+
+        // Check device consistency
+        EXPECT_EQ(tensorMat.device_.type(), torch::kCUDA);  // Compare device type
+        EXPECT_EQ(tensorMat.r.device().type(), torch::kCUDA);      // Ensure tensors are on CUDA
+        EXPECT_EQ(tensorMat.d.device().type(), torch::kCUDA);
+        EXPECT_EQ(tensorMat.h.device().type(), torch::kCUDA);
+    } else {
+        GTEST_SKIP() << "CUDA is not available on this system.";
+    }
+}
+
+TEST(TensorMatHyperDualTest, ComplexMethod_RealToComplexConversion) {
+    // Create real tensors
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual with real tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Convert to complex
+    TensorMatHyperDual complexMat = tensorMat.complex();
+
+    // Check that the tensors are complex
+    EXPECT_TRUE(complexMat.r.is_complex());
+    EXPECT_TRUE(complexMat.d.is_complex());
+    EXPECT_TRUE(complexMat.h.is_complex());
+
+    // Check that the real part matches the original real tensors
+    EXPECT_TRUE(torch::all(torch::real(complexMat.r) == r).item<bool>());
+    EXPECT_TRUE(torch::all(torch::real(complexMat.d) == d).item<bool>());
+    EXPECT_TRUE(torch::all(torch::real(complexMat.h) == h).item<bool>());
+
+    // Check that the imaginary part is zero
+    EXPECT_TRUE(torch::all(torch::imag(complexMat.r) == 0).item<bool>());
+    EXPECT_TRUE(torch::all(torch::imag(complexMat.d) == 0).item<bool>());
+    EXPECT_TRUE(torch::all(torch::imag(complexMat.h) == 0).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, ComplexMethod_AlreadyComplexTensors) {
+    // Create complex tensors
+    auto r = torch::rand({2, 3, 4}, torch::dtype(torch::kComplexDouble));
+    auto d = torch::rand({2, 3, 4, 5}, torch::dtype(torch::kComplexDouble));
+    auto h = torch::rand({2, 3, 4, 5, 5}, torch::dtype(torch::kComplexDouble));
+
+    // Initialize TensorMatHyperDual with complex tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Convert to complex
+    TensorMatHyperDual complexMat = tensorMat.complex();
+
+    // Check that the tensors remain unchanged
+    EXPECT_TRUE(torch::all(complexMat.r == r).item<bool>());
+    EXPECT_TRUE(torch::all(complexMat.d == d).item<bool>());
+    EXPECT_TRUE(torch::all(complexMat.h == h).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, ComplexMethod_MixedRealAndComplexTensors) {
+    // Create mixed tensors (real and complex)
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5}, torch::dtype(torch::kComplexDouble));
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual with mixed tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Convert to complex
+    TensorMatHyperDual complexMat = tensorMat.complex();
+
+    // Check that real tensors are converted to complex
+    EXPECT_TRUE(complexMat.r.is_complex());
+    EXPECT_TRUE(complexMat.h.is_complex());
+    EXPECT_TRUE(torch::all(torch::real(complexMat.r) == r).item<bool>());
+    EXPECT_TRUE(torch::all(torch::real(complexMat.h) == h).item<bool>());
+    EXPECT_TRUE(torch::all(torch::imag(complexMat.r) == 0).item<bool>());
+    EXPECT_TRUE(torch::all(torch::imag(complexMat.h) == 0).item<bool>());
+
+    // Check that already complex tensors remain unchanged
+    EXPECT_TRUE(torch::all(complexMat.d == d).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, RealMethod_AlreadyRealTensors) {
+    // Create real tensors
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual with real tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Extract the real part
+    TensorMatHyperDual realMat = tensorMat.real();
+
+    // Check that the tensors are unchanged
+    EXPECT_TRUE(torch::all(realMat.r == r).item<bool>());
+    EXPECT_TRUE(torch::all(realMat.d == d).item<bool>());
+    EXPECT_TRUE(torch::all(realMat.h == h).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, RealMethod_ComplexTensors) {
+    // Create complex tensors
+    auto r = torch::rand({2, 3, 4}, torch::dtype(torch::kComplexDouble));
+    auto d = torch::rand({2, 3, 4, 5}, torch::dtype(torch::kComplexDouble));
+    auto h = torch::rand({2, 3, 4, 5, 5}, torch::dtype(torch::kComplexDouble));
+
+    // Initialize TensorMatHyperDual with complex tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Extract the real part
+    TensorMatHyperDual realMat = tensorMat.real();
+
+    // Check that the real part matches the real components of the original tensors
+    EXPECT_TRUE(torch::all(realMat.r == torch::real(r)).item<bool>());
+    EXPECT_TRUE(torch::all(realMat.d == torch::real(d)).item<bool>());
+    EXPECT_TRUE(torch::all(realMat.h == torch::real(h)).item<bool>());
+
+    // Check that the resulting tensors are not complex
+    EXPECT_FALSE(realMat.r.is_complex());
+    EXPECT_FALSE(realMat.d.is_complex());
+    EXPECT_FALSE(realMat.h.is_complex());
+}
+
+TEST(TensorMatHyperDualTest, RealMethod_MixedTensors) {
+    // Create mixed tensors (real and complex)
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5}, torch::dtype(torch::kComplexDouble));
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual with mixed tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Extract the real part
+    TensorMatHyperDual realMat = tensorMat.real();
+
+    // Check that real tensors are unchanged
+    EXPECT_TRUE(torch::all(realMat.r == r).item<bool>());
+    EXPECT_TRUE(torch::all(realMat.h == h).item<bool>());
+
+    // Check that complex tensors are converted to their real components
+    EXPECT_TRUE(torch::all(realMat.d == torch::real(d)).item<bool>());
+
+    // Check that the resulting tensors are not complex
+    EXPECT_FALSE(realMat.r.is_complex());
+    EXPECT_FALSE(realMat.d.is_complex());
+    EXPECT_FALSE(realMat.h.is_complex());
+}
+
+
+TEST(TensorMatHyperDualTest, ImagMethod_AlreadyRealTensors) {
+    // Create real tensors
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual with real tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Extract the imaginary part
+    TensorMatHyperDual imagMat = tensorMat.imag();
+
+    // Check that the imaginary part is zero tensors
+    EXPECT_TRUE(torch::all(imagMat.r == torch::zeros_like(r)).item<bool>());
+    EXPECT_TRUE(torch::all(imagMat.d == torch::zeros_like(d)).item<bool>());
+    EXPECT_TRUE(torch::all(imagMat.h == torch::zeros_like(h)).item<bool>());
+
+    // Check that the resulting tensors are not complex
+    EXPECT_FALSE(imagMat.r.is_complex());
+    EXPECT_FALSE(imagMat.d.is_complex());
+    EXPECT_FALSE(imagMat.h.is_complex());
+}
+
+TEST(TensorMatHyperDualTest, ImagMethod_ComplexTensors) {
+    // Create complex tensors
+    auto r = torch::rand({2, 3, 4}, torch::dtype(torch::kComplexDouble));
+    auto d = torch::rand({2, 3, 4, 5}, torch::dtype(torch::kComplexDouble));
+    auto h = torch::rand({2, 3, 4, 5, 5}, torch::dtype(torch::kComplexDouble));
+
+    // Initialize TensorMatHyperDual with complex tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Extract the imaginary part
+    TensorMatHyperDual imagMat = tensorMat.imag();
+
+    // Check that the imaginary part matches the imaginary components of the original tensors
+    EXPECT_TRUE(torch::all(imagMat.r == torch::imag(r)).item<bool>());
+    EXPECT_TRUE(torch::all(imagMat.d == torch::imag(d)).item<bool>());
+    EXPECT_TRUE(torch::all(imagMat.h == torch::imag(h)).item<bool>());
+
+    // Check that the resulting tensors are not complex
+    EXPECT_FALSE(imagMat.r.is_complex());
+    EXPECT_FALSE(imagMat.d.is_complex());
+    EXPECT_FALSE(imagMat.h.is_complex());
+}
+
+TEST(TensorMatHyperDualTest, ImagMethod_MixedTensors) {
+    // Create mixed tensors (real and complex)
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5}, torch::dtype(torch::kComplexDouble));
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual with mixed tensors
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Extract the imaginary part
+    TensorMatHyperDual imagMat = tensorMat.imag();
+
+    // Check that real tensors result in zero tensors
+    EXPECT_TRUE(torch::all(imagMat.r == torch::zeros_like(r)).item<bool>());
+    EXPECT_TRUE(torch::all(imagMat.h == torch::zeros_like(h)).item<bool>());
+
+    // Check that complex tensors are converted to their imaginary components
+    EXPECT_TRUE(torch::all(imagMat.d == torch::imag(d)).item<bool>());
+
+    // Check that the resulting tensors are not complex
+    EXPECT_FALSE(imagMat.r.is_complex());
+    EXPECT_FALSE(imagMat.d.is_complex());
+    EXPECT_FALSE(imagMat.h.is_complex());
+}
+
+
+TEST(TensorMatHyperDualTest, AbsMethod_PositiveRealPart) {
+    // Create tensors with positive real values
+    auto r = torch::rand({2, 3, 4}) + 1.0; // Ensure all values are positive
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Compute the absolute value
+    TensorMatHyperDual absMat = tensorMat.abs();
+
+    // Check that the real part matches the original tensor
+    EXPECT_TRUE(torch::all(absMat.r == r).item<bool>());
+
+    // Check that the dual part remains unchanged
+    EXPECT_TRUE(torch::all(absMat.d == d).item<bool>());
+
+    // Check that the hyperdual part is zero
+    EXPECT_TRUE(torch::all(absMat.h == torch::zeros_like(h)).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, AbsMethod_NegativeRealPart) {
+    // Create tensors with negative real values
+    auto r = -torch::rand({2, 3, 4}) - 1.0; // Ensure all values are negative
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Compute the absolute value
+    TensorMatHyperDual absMat = tensorMat.abs();
+
+    // Check that the real part is the absolute value of the original tensor
+    EXPECT_TRUE(torch::all(absMat.r == torch::abs(r)).item<bool>());
+
+    // Check that the dual part is scaled by the sign of the real part
+    EXPECT_TRUE(torch::all(absMat.d == (-d)).item<bool>());
+
+    // Check that the hyperdual part is zero
+    EXPECT_TRUE(torch::all(absMat.h == torch::zeros_like(h)).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, AbsMethod_MixedRealPart) {
+    // Create tensors with mixed positive and negative real values
+    auto r = torch::randn({2, 3, 4}); // Random values, including negative and positive
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Compute the absolute value
+    TensorMatHyperDual absMat = tensorMat.abs();
+
+    // Check that the real part is the absolute value of the original tensor
+    EXPECT_TRUE(torch::all(absMat.r == torch::abs(r)).item<bool>());
+
+    // Check that the dual part is scaled by the sign of the real part
+    EXPECT_TRUE(torch::all(absMat.d == (torch::sign(r).unsqueeze(-1) * d)).item<bool>());
+
+    // Check that the hyperdual part is zero
+    EXPECT_TRUE(torch::all(absMat.h == torch::zeros_like(h)).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, AbsMethod_ZeroRealPart) {
+    // Create tensors with zero real values
+    auto r = torch::zeros({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 5});
+    auto h = torch::rand({2, 3, 4, 5, 5});
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Compute the absolute value
+    TensorMatHyperDual absMat = tensorMat.abs();
+ 
+    // Check that the real part is zero
+    EXPECT_TRUE(torch::all(absMat.r == r).item<bool>());
+
+    // Check that the dual part is zero
+    EXPECT_TRUE(torch::all(absMat.d == torch::zeros_like(d)).item<bool>());
+
+    // Check that the hyperdual part is zero
+    EXPECT_TRUE(torch::all(absMat.h == torch::zeros_like(h)).item<bool>());
+}
+
+
+TEST(TensorMatHyperDualTest, MaxMethod_DefaultDimension) {
+    // Create tensors
+    auto r = torch::rand({2, 3, 4}); // Real part
+    auto d = torch::rand({2, 3, 4, 5}); // Dual part
+    auto h = torch::rand({2, 3, 4, 5, 5}); // Hyperdual part
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Compute max along the default dimension (dim = 1)
+    TensorMatHyperDual maxMat = tensorMat.max();
+
+    // Compute expected results
+    auto max_result = torch::max(r, 1, /*keepdim=*/true);
+    auto max_values = std::get<0>(max_result);  // Maximum values
+    auto max_indices = std::get<1>(max_result); // Indices of the maximum values
+    auto dshape = max_indices.unsqueeze(-1).expand_as(d);
+    auto hshape = max_indices.unsqueeze(-1).unsqueeze(-1).expand_as(h);
+    auto expected_dual = torch::gather(d, 1, dshape);
+    auto expected_hyper = torch::gather(h, 1, hshape);
+
+    // Check real, dual, and hyperdual parts
+    EXPECT_TRUE(torch::all(maxMat.r == max_values).item<bool>());
+    EXPECT_TRUE(torch::all(maxMat.d == expected_dual).item<bool>());
+    EXPECT_TRUE(torch::all(maxMat.h == expected_hyper).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, MaxMethod_SpecifiedDimension) {
+    // Create tensors
+    auto r = torch::rand({2, 3, 4}); // Real part
+    auto d = torch::rand({2, 3, 4, 5}); // Dual part
+    auto h = torch::rand({2, 3, 4, 5, 5}); // Hyperdual part
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Compute max along a specified dimension (dim = 2)
+    TensorMatHyperDual maxMat = tensorMat.max(2);
+
+    // Compute expected results
+    auto max_result = torch::max(r, 2, /*keepdim=*/true);
+    auto max_values = std::get<0>(max_result);  // Maximum values
+    auto max_indices = std::get<1>(max_result); // Indices of the maximum values
+    auto dshape = max_indices.unsqueeze(-1).expand_as(d);
+    auto hshape = max_indices.unsqueeze(-1).unsqueeze(-1).expand_as(h);
+    auto expected_dual = torch::gather(d, 2, dshape);
+    auto expected_hyper = torch::gather(h, 2, hshape);
+
+    // Check real, dual, and hyperdual parts
+    EXPECT_TRUE(torch::all(maxMat.r == max_values).item<bool>());
+    EXPECT_TRUE(torch::all(maxMat.d == expected_dual).item<bool>());
+    EXPECT_TRUE(torch::all(maxMat.h == expected_hyper).item<bool>());
+}
+
+
+TEST(TensorMatHyperDualTest, MinMethod_DefaultDimension) {
+    // Create tensors
+    auto r = torch::rand({2, 3, 4}); // Real part
+    auto d = torch::rand({2, 3, 4, 5}); // Dual part
+    auto h = torch::rand({2, 3, 4, 5, 5}); // Hyperdual part
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Compute min along the default dimension (dim = 1)
+    TensorMatHyperDual minMat = tensorMat.min();
+
+    // Compute expected results
+    auto min_result = torch::min(r, 1, /*keepdim=*/true);
+    auto min_values = std::get<0>(min_result);  // Minimum values
+    auto min_indices = std::get<1>(min_result); // Indices of the minimum values
+
+    // Gather dual and hyperdual values based on min indices
+    auto dshape = min_indices.unsqueeze(-1).expand({2, 3, 4, 5});
+    auto hshape = min_indices.unsqueeze(-1).unsqueeze(-1).expand({2, 3, 4, 5, 5});
+    auto expected_dual_values = torch::gather(d, 1, dshape);
+    auto expected_hyper_values = torch::gather(h, 1, hshape);
+
+    // Check the real part
+    EXPECT_TRUE(torch::all(minMat.r == min_values).item<bool>());
+
+    // Check the dual part
+    EXPECT_TRUE(torch::all(minMat.d == expected_dual_values).item<bool>());
+
+    // Check the hyperdual part
+    EXPECT_TRUE(torch::all(minMat.h == expected_hyper_values).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, MinMethod_SpecifiedDimension) {
+    // Create tensors
+    auto r = torch::rand({2, 3, 4}); // Real part
+    auto d = torch::rand({2, 3, 4, 5}); // Dual part
+    auto h = torch::rand({2, 3, 4, 5, 5}); // Hyperdual part
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Compute min along a specified dimension (dim = 2)
+    TensorMatHyperDual minMat = tensorMat.min(2);
+
+    // Compute expected results
+    auto min_result = torch::min(r, 2, /*keepdim=*/true);
+    auto min_values = std::get<0>(min_result);  // Minimum values
+    auto min_indices = std::get<1>(min_result); // Indices of the minimum values
+
+    // Gather dual and hyperdual values based on min indices
+    auto dshape = min_indices.unsqueeze(-1).expand({2, 3, 4, 5});
+    auto hshape = min_indices.unsqueeze(-1).unsqueeze(-1).expand({2, 3, 4, 5, 5});
+    auto expected_dual_values = torch::gather(d, 2, dshape);
+    auto expected_hyper_values = torch::gather(h, 2, hshape);
+
+    // Check the real part
+    EXPECT_TRUE(torch::all(minMat.r == min_values).item<bool>());
+
+    // Check the dual part
+    EXPECT_TRUE(torch::all(minMat.d == expected_dual_values).item<bool>());
+
+    // Check the hyperdual part
+    EXPECT_TRUE(torch::all(minMat.h == expected_hyper_values).item<bool>());
+}
+
+TEST(TensorMatHyperDualTest, MinMethod_InvalidDimension) {
+    // Create tensors
+    auto r = torch::rand({2, 3, 4}); // Real part
+    auto d = torch::rand({2, 3, 4, 5}); // Dual part
+    auto h = torch::rand({2, 3, 4, 5, 5}); // Hyperdual part
+
+    // Initialize TensorMatHyperDual
+    TensorMatHyperDual tensorMat(r, d, h);
+
+    // Attempt to compute min along an invalid dimension
+    EXPECT_THROW({
+        TensorMatHyperDual minMat = tensorMat.min(3); // Invalid dimension
+    }, c10::Error);
+}
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
