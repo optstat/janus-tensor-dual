@@ -16864,6 +16864,239 @@ TEST(TensorMatHyperDualTest, ScalarSubtractionEmptyTensor) {
     EXPECT_TRUE(torch::equal(result.h, h));
 }
 
+TEST(TensorMatHyperDualTest, EqualityBasic) {
+    auto r1 = torch::rand({2, 2, 2});
+    auto r2 = r1.clone();
+    auto d = torch::rand({2, 2, 2, 2});
+    auto h = torch::rand({2, 2, 2, 2, 2});
+
+    TensorMatHyperDual t1(r1, d, h);
+    TensorMatHyperDual t2(r2, d, h);
+
+    auto result = t1 == t2;
+
+    auto expected = r1 == r2;
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+TEST(TensorMatHyperDualTest, EqualityPartial) {
+    auto r1 = torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}});
+    auto r2 = torch::tensor({{{1.0, 2.0}, {3.0, 5.0}}}); // Last element differs
+    auto d = torch::rand({1, 2, 2, 2});
+    auto h = torch::rand({1, 2, 2, 2, 2});
+
+    TensorMatHyperDual t1(r1, d, h);
+    TensorMatHyperDual t2(r2, d, h);
+
+    auto result = t1 == t2;
+
+    auto expected = torch::tensor({{{true, true}, {true, false}}});
+    EXPECT_TRUE(torch::equal(result, expected));
+}
+
+
+TEST(TensorMatHyperDualTest, EqualityDimensionMismatch) {
+    auto r1 = torch::rand({2, 3, 2});
+    auto r2 = torch::rand({3, 2, 2}); // Mismatched dimensions
+    auto d1 = torch::rand({2, 3, 2, 2});
+    auto h1 = torch::rand({2, 3, 2, 2, 2});
+    auto d2 = torch::rand({3, 2, 2, 2});
+    auto h2 = torch::rand({3, 2, 2, 2, 2});
+
+    TensorMatHyperDual t1(r1, d1, h1);
+    TensorMatHyperDual t2(r2, d2, h2);
+
+    EXPECT_THROW(t1 == t2, std::invalid_argument);
+}
+
+
+TEST(TensorMatHyperDualTest, EqualityDeviceMismatch) {
+    if (!torch::cuda::is_available()) {
+        GTEST_SKIP() << "CUDA is not available.";
+    }
+
+    auto r1 = torch::rand({2, 3, 2}, torch::TensorOptions().device(torch::kCPU));
+    auto r2 = torch::rand({2, 3, 2}, torch::TensorOptions().device(torch::kCUDA)); // Different device
+    auto d = torch::rand({2, 3, 2, 2});
+    auto h = torch::rand({2, 3, 2, 2, 2});
+
+    TensorMatHyperDual t1(r1, d, h);
+    TensorMatHyperDual t2(r2, d, h);
+
+    EXPECT_THROW(t1 == t2, c10::Error);
+}
+
+TEST(TensorMatHyperDualTest, UnaryNegationBasic) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 2});
+    auto h = torch::rand({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+    TensorMatHyperDual result = -t;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, -r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, -d));
+
+    // Validate the hyperdual part
+    EXPECT_TRUE(torch::allclose(result.h, -h));
+}
+
+
+TEST(TensorMatHyperDualTest, UnaryNegationEmptyTensors) {
+    auto r = torch::empty({0, 0, 0});
+    auto d = torch::empty({0, 0, 0, 0});
+    auto h = torch::empty({0, 0, 0, 0, 0});
+
+    TensorMatHyperDual t(r, d, h);
+    TensorMatHyperDual result = -t;
+
+    // Validate the real part
+    EXPECT_TRUE(result.r.numel() == 0);
+
+    // Validate the dual part
+    EXPECT_TRUE(result.d.numel() == 0);
+
+    // Validate the hyperdual part
+    EXPECT_TRUE(result.h.numel() == 0);
+}
+
+TEST(TensorMatHyperDualTest, UnaryNegationNonNumericTensors) {
+    auto r = torch::tensor({{{1, -2}, {3, -4}}}, torch::TensorOptions().dtype(torch::kInt32)); // Integer tensor
+    auto d = torch::rand({1, 2, 2, 3});
+    auto h = torch::rand({1, 2, 2, 3, 3});
+    TensorMatHyperDual t(r, d, h);
+    auto result = -t;
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, -r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, -d));
+
+    // Validate the hyperdual part
+    EXPECT_TRUE(torch::allclose(result.h, -h));
+}
+
+TEST(TensorMatHyperDualTest, ScalarMultiplicationBasic) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 22});
+    auto h = torch::rand({2, 3, 4, 22, 22});
+
+    TensorMatHyperDual t(r, d, h);
+    double scalar = 2.0;
+
+    TensorMatHyperDual result = t * scalar;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, r * scalar));
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, d * scalar));
+    // Validate the hyperdual part
+    EXPECT_TRUE(torch::allclose(result.h, h * scalar));
+}
+
+TEST(TensorMatHyperDualTest, ScalarMultiplicationEmptyTensors) {
+    auto r = torch::empty({0, 0, 0});
+    auto d = torch::empty({0, 0, 0, 0});
+    auto h = torch::empty({0, 0, 0, 0, 0});
+
+    TensorMatHyperDual t(r, d, h);
+    double scalar = 2.0;
+
+    TensorMatHyperDual result = t * scalar;
+
+    // Validate the real part
+    EXPECT_TRUE(result.r.numel() == 0);
+
+    // Validate the dual part
+    EXPECT_TRUE(result.d.numel() == 0);
+
+    // Validate the hyperdual part
+    EXPECT_TRUE(result.h.numel() == 0);
+}
+
+TEST(TensorMatHyperDualTest, ScalarMultiplicationNonNumericTensors) {
+    auto r = torch::tensor({{{1, -2}, {3, -4}}}, torch::TensorOptions().dtype(torch::kInt32)); // Integer tensor
+    auto d = torch::rand({1, 2, 2, 2});
+    auto h = torch::rand({1, 2, 2, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+    double scalar = 2.0;
+    auto result = t * scalar;
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, r * scalar));
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, d * scalar));
+    // Validate the hyperdual part
+    EXPECT_TRUE(torch::allclose(result.h, h * scalar));
+
+}
+
+TEST(TensorMatHyperDualTest, DivisionBasic) {
+    auto r1 = torch::rand({2, 3, 4});
+    auto d1 = torch::rand({2, 3, 4, 5});
+    auto h1 = torch::rand({2, 3, 4, 5, 5});
+
+    auto r2 = torch::rand({2, 3, 4});
+    auto d2 = torch::rand({2, 3, 4, 5});
+    auto h2 = torch::rand({2, 3, 4, 5, 5});
+
+    TensorMatHyperDual t1(r1, d1, h1);
+    TensorMatHyperDual t2(r2, d2, h2);
+
+    TensorMatHyperDual result = t1 / t2;
+
+    // Validate dimensions
+    EXPECT_EQ(result.r.sizes(), r1.sizes());
+    EXPECT_EQ(result.d.sizes(), d1.sizes());
+    EXPECT_EQ(result.h.sizes(), h1.sizes());
+}
+
+TEST(TensorMatHyperDualTest, DivisionByZero) {
+    auto r1 = torch::rand({2, 3, 4});
+    auto r2 = torch::zeros({2, 3, 4}); // Zero divisor
+
+    auto d1 = torch::rand({2, 3, 4, 5});
+    auto h1 = torch::rand({2, 3, 4, 5, 5});
+
+    TensorMatHyperDual t1(r1, d1, h1);
+    TensorMatHyperDual t2(r2, d1, h1);
+
+    TensorMatHyperDual result = t1 / t2;
+
+    // Validate dimensions
+    EXPECT_EQ(result.r.sizes(), r1.sizes());
+    EXPECT_EQ(result.d.sizes(), d1.sizes());
+    EXPECT_EQ(result.h.sizes(), h1.sizes());
+
+}
+
+TEST(TensorMatHyperDualTest, DivisionByTensorHyperDualBasic) {
+    auto r1 = torch::rand({2, 3, 4});
+    auto d1 = torch::rand({2, 3, 4, 2});
+    auto h1 = torch::rand({2, 3, 4, 2, 2});
+
+    auto r2 = torch::rand({2, 4});
+    auto d2 = torch::rand({2, 4, 2});
+    auto h2 = torch::rand({2, 4, 2, 2});
+
+    TensorMatHyperDual t1(r1, d1, h1);
+    TensorHyperDual t2(r2, d2, h2);
+
+    TensorMatHyperDual result = t1 / t2;
+
+    // Validate dimensions
+    EXPECT_EQ(result.r.sizes(), r1.sizes());
+    EXPECT_EQ(result.d.sizes(), d1.sizes());
+    EXPECT_EQ(result.h.sizes(), h1.sizes());
+}
+
+
+
+
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

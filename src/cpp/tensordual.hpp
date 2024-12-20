@@ -6351,7 +6351,8 @@ public:
      * @throws std::invalid_argument if the dimensions of the two objects do not match.
      */
     torch::Tensor operator==(const TensorMatHyperDual& other) const {
-        // Validate compatibility of dimensions
+
+        // Validate dimension compatibility
         if (this->r.sizes() != other.r.sizes()) {
             throw std::invalid_argument("TensorMatHyperDual objects must have matching dimensions for comparison.");
         }
@@ -6359,8 +6360,8 @@ public:
         // Perform element-wise comparison of the real parts
         auto mask = this->r == other.r;
 
-        // Optionally squeeze dimension 2 if necessary (assuming mask is 3D)
-        if (mask.size(2) == 1) {
+        // Squeeze unnecessary dimensions if applicable
+        if (mask.dim() > 2 && mask.size(2) == 1) {
             return torch::squeeze(mask, 2);
         }
 
@@ -6376,6 +6377,7 @@ public:
      * @return A new TensorMatHyperDual object with all components negated.
      */
     TensorMatHyperDual operator-() const {
+
         // Negate the real, dual, and hyperdual parts
         return TensorMatHyperDual(-this->r, -this->d, -this->h);
     }
@@ -6390,6 +6392,7 @@ public:
      * @return A new TensorMatHyperDual object with all components scaled by the scalar.
      */
     TensorMatHyperDual operator*(const double other) const {
+
         // Scale each component by the scalar
         auto real = this->r * other;
         auto dual = this->d * other;
@@ -6398,6 +6401,7 @@ public:
         // Return the scaled TensorMatHyperDual object
         return TensorMatHyperDual(real, dual, hyper);
     }
+
 
     /**
      * Overload the / operator for TensorMatHyperDual objects.
@@ -6411,12 +6415,6 @@ public:
      * @throws std::invalid_argument if the dimensions of the two objects do not match.
      */
     TensorMatHyperDual operator/(const TensorMatHyperDual& other) const {
-        // Validate compatibility of dimensions
-        if (this->r.sizes() != other.r.sizes() ||
-            this->d.sizes() != other.d.sizes() ||
-            this->h.sizes() != other.h.sizes()) {
-            throw std::invalid_argument("TensorMatHyperDual objects must have matching dimensions for division.");
-        }
 
         // Extract components
         auto r1 = this->r;
@@ -6438,7 +6436,7 @@ public:
 
         // Dual part of the result
         //-r1/r2^2 * d2 + r2^(-1) * d1
-        auto dn = torch::einsum("mij, mijk->mijk", {-r1*r2_inv2, d2}) +
+        auto dn = torch::einsum("mij, mij, mijk->mijk", {-r1, r2_inv2, d2}) +
                   torch::einsum("mij, mijk->mijk", {r2_inv, d1});
 
         auto d1d2 = torch::einsum("mijk, mijl->mijkl", {d1, d2});
@@ -6447,14 +6445,16 @@ public:
         
         // Hyperdual part of the result
         //-d1d2/r2^2 + 2r1/r2^3 * d2d2 + r1/r2^2 * h2 + r2^(-1) * h1 - r2^(-2) * d1d2
-        auto hn = torch::einsum("mijkl, mij->mijkl", {-d1d2, r2_inv2})+
-                  2*torch::einsum("", {r1*r2_inv3, d2d2})+
-                  torch::einsum("mij, mijkl->mijkl", {r1*r2_inv2, h2})+
-                  torch::einsum("mij, mijkl->mijkl", {r2_inv, h1})+
-                  torch::einsum("mij, mijkl->mijkl", {-r2_inv2, d1d2});
+        auto hn = torch::einsum("mijkl, mij->mijkl", {-d1d2, r2_inv2}) +
+          2 * torch::einsum("mijkl, mij->mijkl", {d2d2, r2_inv3}) +
+          torch::einsum("mij, mij, mijkl->mijkl", {r1 ,r2_inv2, h2}) +
+          torch::einsum("mij, mijkl->mijkl", {r2_inv, h1}) +
+          torch::einsum("mijkl, mij->mijkl", {-d1d2, r2_inv2});
         // Return the result as a new TensorMatHyperDual object
         return TensorMatHyperDual(rn, dn, hn);
     }
+
+
 
 
     /**
@@ -6473,7 +6473,7 @@ public:
         // Expand TensorHyperDual components to match TensorMatHyperDual dimensions
         auto r2 = other.r.unsqueeze(1);                  // Add singleton dimension
         auto d2 = other.d.unsqueeze(1);                  // Add singleton dimension
-        auto h2 = torch::zeros_like(this->h);            // Hyperdual part is zero
+        auto h2 = other.h.unsqueeze(1);                  // Add singleton dimension
 
         // Construct a TensorMatHyperDual object from the expanded TensorHyperDual
         TensorMatHyperDual mat_hyper_dual(r2, d2, h2);
