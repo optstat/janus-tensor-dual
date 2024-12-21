@@ -16,12 +16,22 @@ target_link_libraries(dualtest ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES})
 # Link libtorch
 target_link_libraries(dualtest "${TORCH_LIBRARIES}")
 set_property(TARGET dualtest PROPERTY CXX_STANDARD 17)
-add_test(NAME DualTest COMMAND ${CMAKE_BINARY_DIR}/bin/dualtest)
+add_test(NAME DualTest COMMAND dualtest)
+
+
 
 # Ensure the test executable is built when running 'make test'
 add_custom_target(run_tests
     COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target dualtest
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+)
+
+# Add an alias for the test target to ensure it works with `make test`
+add_custom_target(test
+    DEPENDS run_tests
+    COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+    #Run the ./bin/dualtest executable
+    COMMAND ${CMAKE_BINARY_DIR}/bin/dualtest
 )
 
 

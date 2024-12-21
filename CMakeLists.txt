@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "Suppress developer warnings")
 
-enable_testing()
+
 # Find libtorch.  Modify this line to find your own libtorch installation.
 set(Torch_DIR "/home/panos/Applications/libtorch/share/cmake/Torch")
 
