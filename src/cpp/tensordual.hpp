@@ -3020,9 +3020,9 @@ public:
     }
 private:
     void validateTensors(const torch::Tensor& r, const torch::Tensor& d, const torch::Tensor& h) const {
-        if (r.dim() != 2) throw std::invalid_argument("Real part must be a 3D tensor");
-        if (d.dim() != 3) throw std::invalid_argument("Dual part must be a 4D tensor");
-        if (h.dim() != 4) throw std::invalid_argument("Hyperdual part must be a 5D tensor");
+        if (r.dim() != 2) throw std::invalid_argument("Real part must be a 2D tensor");
+        if (d.dim() != 3) throw std::invalid_argument("Dual part must be a 3D tensor");
+        if (h.dim() != 4) throw std::invalid_argument("Hyperdual part must be a 4D tensor");
         if (r.device() != d.device() || d.device() != h.device()) {
             throw std::invalid_argument("All tensors must reside on the same device");
         }
@@ -6521,10 +6521,11 @@ public:
      * @throws std::invalid_argument if the scalar is zero.
      */
     TensorMatHyperDual operator/(const double other) const {
-        // Handle division by zero
+        // Ensure the scalar is not zero
         if (other == 0.0) {
-            throw std::invalid_argument("Division by zero is not allowed.");
+            throw std::invalid_argument("Division by zero is not allowed in TensorMatHyperDual.");
         }
+
 
         // Perform element-wise division for all components
         auto real = this->r / other;
@@ -6547,11 +6548,24 @@ public:
      * @return A new TensorMatHyperDual object with the indexed components.
      * @throws std::invalid_argument if the indices are invalid.
      */
+
     TensorMatHyperDual index(const std::vector<torch::indexing::TensorIndex>& indices) const {
+        
+
+        // Validate indices for the real part
+        if (indices.size() > this->r.dim()) {
+            throw std::invalid_argument("Too many indices for the real part of TensorMatHyperDual.");
+        }
+
         // Index the real part
         auto r = this->r.index(indices);
         if (r.dim() == 2) {  // If a column is missing, unsqueeze dimension 2
             r = r.unsqueeze(2);
+        }
+
+        // Validate indices for the dual part
+        if (indices.size() > this->d.dim()) {
+            throw std::invalid_argument("Too many indices for the dual part of TensorMatHyperDual.");
         }
 
         // Index the dual part
@@ -6560,22 +6574,37 @@ public:
             d = d.unsqueeze(2);
         }
 
+        // Validate indices for the hyperdual part
+        if (indices.size() > this->h.dim()) {
+            throw std::invalid_argument("Too many indices for the hyperdual part of TensorMatHyperDual.");
+        }
+
         // Index the hyperdual part
         auto h = this->h.index(indices);
         if (h.dim() == 4) {  // If a column is missing, unsqueeze dimension 2
             h = h.unsqueeze(2);
         }
 
+        // Validate indices: ensure all are slices or tensors
+        for (const auto& idx : indices) {
+            //Ensure the idx is not a integer
+            if (idx.is_integer()) {
+                throw std::invalid_argument("Indexing with integers is not allowed in TensorMatHyperDual.  Use Slice instead.");
+            }
+        }
+
+
+
         // Return a new TensorMatHyperDual object with the indexed components
         return TensorMatHyperDual(r, d, h);
     }
-
 
     /**
      * Index into the TensorMatHyperDual object along the first dimension using an integer index.
      *
      * This method extracts the slice corresponding to the specified index from the real, dual,
-     * and hyperdual parts of the TensorMatHyperDual object along the batch dimension (first dimension).
+     * and hyperdual parts of the TensorMatHyperDual object along the batch dimension (first dimension),
+     * ensuring that the output tensors preserve their dimensionality.
      *
      * @param index The integer index to select along the first dimension.
      * @return A new TensorMatHyperDual object representing the selected slice.
@@ -6588,9 +6617,9 @@ public:
         }
 
         // Index the real, dual, and hyperdual parts
-        auto real = this->r.index({index});
-        auto dual = this->d.index({index});
-        auto hyper = this->h.index({index});
+        auto real = this->r.index({index}).unsqueeze(0);      // Preserve batch dimension
+        auto dual = this->d.index({index}).unsqueeze(0);      // Preserve batch dimension
+        auto hyper = this->h.index({index}).unsqueeze(0);     // Preserve batch dimension
 
         // Return the selected slice as a new TensorMatHyperDual object
         return TensorMatHyperDual(real, dual, hyper);
@@ -6613,9 +6642,20 @@ public:
             throw std::invalid_argument("The mask must be a boolean tensor.");
         }
 
-        // Validate that the mask matches the size of the first dimension
-        if (mask.sizes() != this->r.sizes().slice(0, 1).vec()) {
-            throw std::invalid_argument("The mask must match the size of the first dimension of TensorMatHyperDual.");
+        // Validate that the mask is 1-dimensional
+        if (mask.dim() != 1) {
+            throw std::invalid_argument("The mask must be a 1-dimensional boolean tensor.");
+        }
+
+        // Validate that the mask matches the size of the batch dimension
+        if (mask.size(0) != this->r.size(0)) {
+            throw std::invalid_argument("The mask must have the same size as the batch dimension (" +
+                                        std::to_string(this->r.size(0)) + ").");
+        }
+
+        // Validate that the mask is on the same device as the tensors
+        if (mask.device() != this->r.device()) {
+            throw std::invalid_argument("The mask must be on the same device as the TensorMatHyperDual components.");
         }
 
         // Perform indexing on the real, dual, and hyperdual parts
@@ -6628,6 +6668,9 @@ public:
     }
 
 
+
+ 
+
     /**
      * Enable or disable gradient computation for the TensorMatHyperDual object.
      *
@@ -6638,11 +6681,24 @@ public:
      * @param req_grad A boolean value indicating whether gradients should be tracked.
      */
     void requires_grad_(bool req_grad) {
+        // Validate that tensors are defined
+        if (!r.defined() || !d.defined() || !h.defined()) {
+            throw std::runtime_error("One or more components of TensorMatHyperDual are undefined.");
+        }
+
+        // Validate that tensors are floating-point
+        if (!r.is_floating_point() || !d.is_floating_point() || !h.is_floating_point()) {
+            throw std::runtime_error("requires_grad_ can only be applied to floating-point tensors.");
+        }
+
+        // Set requires_grad for each tensor
         r.requires_grad_(req_grad);
         d.requires_grad_(req_grad);
         h.requires_grad_(req_grad);
     }
 
+
+    
     /**
      * Compute gradients for the TensorMatHyperDual object.
      *
@@ -6654,9 +6710,16 @@ public:
     void backward(const torch::optional<torch::Tensor>& grad_r = {}, 
                 const torch::optional<torch::Tensor>& grad_d = {}, 
                 const torch::optional<torch::Tensor>& grad_h = {}) {
-        // Check if gradients are required
+
+        // Compute gradients for the real part
         if (r.requires_grad()) {
             if (grad_r) {
+                if (grad_r->sizes() != r.sizes()) {
+                    throw std::runtime_error("Shape mismatch: grad_r must have the same shape as r.");
+                }
+                if (grad_r->device() != r.device()) {
+                    throw std::runtime_error("Device mismatch: grad_r must be on the same device as r.");
+                }
                 r.backward(grad_r.value());
             } else if (r.numel() == 1) {
                 r.backward();
@@ -6665,8 +6728,15 @@ public:
             }
         }
 
+        // Compute gradients for the dual part
         if (d.requires_grad()) {
             if (grad_d) {
+                if (grad_d->sizes() != d.sizes()) {
+                    throw std::runtime_error("Shape mismatch: grad_d must have the same shape as d.");
+                }
+                if (grad_d->device() != d.device()) {
+                    throw std::runtime_error("Device mismatch: grad_d must be on the same device as d.");
+                }
                 d.backward(grad_d.value());
             } else if (d.numel() == 1) {
                 d.backward();
@@ -6675,8 +6745,15 @@ public:
             }
         }
 
+        // Compute gradients for the hyperdual part
         if (h.requires_grad()) {
             if (grad_h) {
+                if (grad_h->sizes() != h.sizes()) {
+                    throw std::runtime_error("Shape mismatch: grad_h must have the same shape as h.");
+                }
+                if (grad_h->device() != h.device()) {
+                    throw std::runtime_error("Device mismatch: grad_h must be on the same device as h.");
+                }
                 h.backward(grad_h.value());
             } else if (h.numel() == 1) {
                 h.backward();
@@ -6689,45 +6766,63 @@ public:
 
 
 
+
     /**
      * Static member function to perform einsum on two TensorDual objects
      * Note this is more limited than the torch.einsum function
      * as it only supports two arguments
      */
     static TensorHyperDual einsum(const std::string& arg, 
-                                  const TensorMatHyperDual& first, 
-                                  const TensorHyperDual& second) {
+                                const TensorMatHyperDual& first, 
+                                const TensorHyperDual& second) {
+        // Validate einsum string
+        auto pos = arg.find(",");
+        auto pos2 = arg.find("->");
+        if (pos == std::string::npos || pos2 == std::string::npos) {
+            throw std::invalid_argument("Invalid einsum string: Must contain ',' and '->'.");
+        }
+        //Check for z and w in the einsum string
+        if (arg.find("z") != std::string::npos || arg.find("w") != std::string::npos) {
+            throw std::invalid_argument("Invalid einsum string: 'z' and 'w' are reserved characters.");
+        }
 
+        // Validate tensors
+        if (!first.r.defined() || !second.r.defined()) {
+            throw std::invalid_argument("Input tensors must be defined.");
+        }
+
+        if (first.r.numel() == 0 || second.r.numel() == 0) {
+            throw std::invalid_argument("Input tensors must be non-empty.");
+        }
+
+        // Compute real part
         auto r = torch::einsum(arg, {first.r, second.r});
 
-        // Find the position of the '->' in the einsum string
-        auto pos = arg.find(",");
+        // Parse einsum arguments
         auto arg1 = arg.substr(0, pos);
-        int pos2 = arg.find("->");
-
-        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg2 = arg.substr(pos + 1, pos2 - pos - 1);
         auto arg3 = arg.substr(pos2 + 2);
 
-
+        // Compute dual part
         auto darg1 = arg1 + "z," + arg2 + "->" + arg3 + "z";
-        auto d1 = torch::einsum(darg1, {first.d,  second.r});
-        auto darg2 = arg1+","+arg2+"z->"+arg3+"z";
+        auto d1 = torch::einsum(darg1, {first.d, second.r});
+        auto darg2 = arg1 + "," + arg2 + "z->" + arg3 + "z";
         auto d2 = torch::einsum(darg2, {first.r, second.d});
 
-        //Now for the hyper dual part
-        auto d1d2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
-        auto d1d2 = torch::einsum(d1d2arg, {first.d,  second.d});
+        // Compute hyperdual part
+        auto d1d2arg = arg1 + "z," + arg2 + "w->" + arg3 + "zw";
+        auto d1d2 = torch::einsum(d1d2arg, {first.d, second.d});
         auto h1r2arg = arg1 + "zw," + arg2 + "->" + arg3 + "zw";
-        auto h1r2 = torch::einsum(h1r2arg, {first.h,  second.r});
+        auto h1r2 = torch::einsum(h1r2arg, {first.h, second.r});
         auto r1h2arg = arg1 + "," + arg2 + "zw->" + arg3 + "zw";
-        auto r1h2 = torch::einsum(r1h2arg, {first.r,  second.h});
-        auto h = d1d2.unsqueeze(-1) + h1r2 + r1h2;
+        auto r1h2 = torch::einsum(r1h2arg, {first.r, second.h});
+        auto h = d1d2 + h1r2 + r1h2;
 
-
-
+        // Return TensorHyperDual
         return TensorHyperDual(std::move(r), std::move(d1 + d2), std::move(h));
     }
 
+
     /**
      * Static member function to perform einsum on two TensorDual objects
      * Note this is more limited than the torch.einsum function
@@ -6736,28 +6831,45 @@ public:
      * @param first The first TensorDual object.
      */
     static TensorMatHyperDual einsum(const std::string& arg, 
-                                     const TensorMatHyperDual& first, 
-                                     const torch::Tensor& second) {
+                                    const TensorMatHyperDual& first, 
+                                    const torch::Tensor& second) {
+        // Validate einsum string
+        auto pos = arg.find(",");
+        auto pos2 = arg.find("->");
+        if (pos == std::string::npos || pos2 == std::string::npos) {
+            throw std::invalid_argument("Invalid einsum string: Must contain ',' and '->'.");
+        }
+        //Check for z and w in the einsum string
+        if (arg.find("z") != std::string::npos || arg.find("w") != std::string::npos) {
+            throw std::invalid_argument("Invalid einsum string: 'z' and 'w' are reserved characters.");
+        }
 
+        // Parse einsum arguments
+        auto arg1 = arg.substr(0, pos);
+        auto arg2 = arg.substr(pos + 1, pos2 - pos - 1);
+        auto arg3 = arg.substr(pos2 + 2);
+
+        if (first.r.sizes() != second.sizes()) {
+            throw std::invalid_argument("Dimension mismatch between first.r and second for einsum.");
+        }
+
+        // Compute real part
         auto r = torch::einsum(arg, {first.r, second});
 
-        // Find the position of the '->' in the einsum string
-        auto pos = arg.find(",");
-        auto arg1 = arg.substr(0, pos);
-        int pos2 = arg.find("->");
-        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
-        auto arg3 = arg.substr(pos2 + 2);
-        //The result here should be 
-
+        // Compute dual part
         auto d1r1arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
-        auto d = torch::einsum(d1r1arg, {first.d,  second});
+        auto d = torch::einsum(d1r1arg, {first.d, second});
 
+        // Compute hyperdual part
         auto h1r1arg = arg1 + "zw," + arg2 + "->" + arg3 + "zw";
-        auto h = torch::einsum(h1r1arg, {first.h,  second});
+        auto h = torch::einsum(h1r1arg, {first.h, second});
 
+        // Return TensorMatHyperDual
         return TensorMatHyperDual(std::move(r), std::move(d), std::move(h));
     }
 
+
+
     /**
      * Static member function to perform einsum on two TensorDual objects
      * Note this is more limited than the torch.einsum function
@@ -6767,68 +6879,53 @@ public:
      * @param second The second TensorDual object.
      * @return A new TensorDual object representing the result of the einsum operation.
      */
-    static TensorMatHyperDual einsum(const std::string& arg, 
-                                     const TensorHyperDual& first, 
-                                     const TensorMatHyperDual& second) {
+    static TensorHyperDual einsum(const std::string& arg, 
+                                const TensorHyperDual& first, 
+                                const TensorMatHyperDual& second) {
+        // Validate einsum string
+        auto pos = arg.find(",");
+        auto pos2 = arg.find("->");
+        if (pos == std::string::npos || pos2 == std::string::npos) {
+            throw std::invalid_argument("Invalid einsum string: Must contain ',' and '->'.");
+        }
+        //Check for z and w in the einsum string
+        if (arg.find("z") != std::string::npos || arg.find("w") != std::string::npos) {
+            throw std::invalid_argument("Invalid einsum string: 'z' and 'w' are reserved characters.");
+        }
 
+        // Parse einsum arguments
+        auto arg1 = arg.substr(0, pos);
+        auto arg2 = arg.substr(pos + 1, pos2 - pos - 1);
+        auto arg3 = arg.substr(pos2 + 2);
+
+        // Validate tensors
+        if (!first.r.defined() || !second.r.defined()) {
+            throw std::invalid_argument("Input tensors must be defined.");
+        }
+
+        // Compute real part
         auto r = torch::einsum(arg, {first.r, second.r});
 
-        // Find the position of the '->' in the einsum string
-        auto pos = arg.find(",");
-        auto arg1 = arg.substr(0, pos);
-        int pos2 = arg.find("->");
-        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
-        auto arg3 = arg.substr(pos2 + 2);
-        
-
+        // Compute dual part
         auto d1r2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
-        auto d1r2 = torch::einsum(d1r2arg, {first.d,  second.r});
+        auto d1r2 = torch::einsum(d1r2arg, {first.d, second.r});
         auto r1d2arg = arg1 + "," + arg2 + "z->" + arg3 + "z";
         auto r1d2 = torch::einsum(r1d2arg, {first.r, second.d});
 
-        auto d1d2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
-        auto d1d2 = torch::einsum(d1d2arg, {first.d,  second.d});
+        // Compute hyperdual part
+        auto d1d2arg = arg1 + "z," + arg2 + "w->" + arg3 + "zw";
+        auto d1d2 = torch::einsum(d1d2arg, {first.d, second.d});
         auto h1r2arg = arg1 + "zw," + arg2 + "->" + arg3 + "zw";
-        auto h1r2 = torch::einsum(h1r2arg, {first.h,  second.r});
+        auto h1r2 = torch::einsum(h1r2arg, {first.h, second.r});
         auto r1h2arg = arg1 + "," + arg2 + "zw->" + arg3 + "zw";
-        auto r1h2 = torch::einsum(r1h2arg, {first.r,  second.h});
-        auto h = d1d2.unsqueeze(-1) + h1r2 + r1h2;
+        auto r1h2 = torch::einsum(r1h2arg, {first.r, second.h});
+        auto h = d1d2 + h1r2 + r1h2;
 
-        return TensorMatHyperDual(std::move(r), std::move(d1r2 + r1d2), std::move(h));
+        // Return TensorHyperDual
+        return TensorHyperDual(std::move(r), std::move(d1r2 + r1d2), std::move(h));
     }
+
     
-    /**
-     * Static member function to perform einsum on two TensorDual objects
-     * Note this is more limited than the torch.einsum function
-     * as it only supports two arguments
-     * @param arg The einsum string specifying the operation.
-     * @param first The first TensorDual object.
-     * @param second The second TensorDual object.
-     * @return A new TensorDual object representing the result of the einsum operation.
-     */
-    static TensorMatHyperDual einsum(const std::string& arg, 
-                                     const torch::Tensor& first, 
-                                     const TensorMatHyperDual& second) {
-
-        auto r = torch::einsum(arg, {first, second.r});
-
-        // Find the position of the '->' in the einsum string
-        auto pos = arg.find(",");
-        auto arg1 = arg.substr(0, pos);
-        int pos2 = arg.find("->");
-        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
-        auto arg3 = arg.substr(pos2 + 2);
-
-
-        auto r1d1arg = arg1 + "," + arg2 + "z->" + arg3 + "z";
-        auto r1d1 = torch::einsum(r1d1arg, {first,  second.d});
-
-        auto r1h1arg = arg1 + "," + arg2 + "zw->" + arg3 + "zw";
-
-        auto r1h1 = torch::einsum(r1h1arg, {first,  second.h});
-
-        return TensorMatHyperDual(std::move(r), std::move(r1d1), std::move(r1h1));
-    }
 
 
     /**
@@ -6842,34 +6939,46 @@ public:
      * @throws std::invalid_argument if the dimensions of the two objects are incompatible.
      */
     static TensorMatHyperDual einsum(const std::string& arg, 
-                                     const TensorMatHyperDual& first, 
-                                     const TensorMatHyperDual& second) {
+                                    const TensorMatHyperDual& first, 
+                                    const TensorMatHyperDual& second) {
+        // Validate einsum string
+        if (arg.find(",") == std::string::npos || arg.find("->") == std::string::npos) {
+            throw std::invalid_argument("Invalid einsum string: Must contain ',' and '->'.");
+        }
+        if (arg.find("z") != std::string::npos || arg.find("w") != std::string::npos) {
+            throw std::invalid_argument("Invalid einsum string: 'z' and 'w' are reserved characters.");
+        }
 
-        auto r = torch::einsum(arg, {first.r, second.r});
-
-        // Find the position of the '->' in the einsum string
+        // Parse the einsum arguments
         auto pos = arg.find(",");
+        auto pos2 = arg.find("->");
         auto arg1 = arg.substr(0, pos);
-        int pos2 = arg.find("->");
-        auto arg2 = arg.substr(pos + 1, pos2-pos-1);
+        auto arg2 = arg.substr(pos + 1, pos2 - pos - 1);
         auto arg3 = arg.substr(pos2 + 2);
 
+        // Compute real part
+        auto r = torch::einsum(arg, {first.r, second.r});
+
+        // Compute dual part
         auto r1d2arg = arg1 + "," + arg2 + "z->" + arg3 + "z";
-        auto r1d2 = torch::einsum(r1d2arg, {first.r,  second.d});
+        auto r1d2 = torch::einsum(r1d2arg, {first.r, second.d});
         auto d1r2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
         auto d1r2 = torch::einsum(d1r2arg, {first.d, second.r});
+        auto dual = r1d2 + d1r2;
 
-        auto d1d2arg = arg1 + "z," + arg2 + "->" + arg3 + "z";
-        auto d1d2 = torch::einsum(d1d2arg, {first.d,  second.d});
+        // Compute hyperdual part
+        auto d1d2arg = arg1 + "z," + arg2 + "w->" + arg3 + "zw";
+        auto d1d2 = torch::einsum(d1d2arg, {first.d, second.d});
         auto h1r2arg = arg1 + "zw," + arg2 + "->" + arg3 + "zw";
-        auto h1r2 = torch::einsum(h1r2arg, {first.h,  second.r});
+        auto h1r2 = torch::einsum(h1r2arg, {first.h, second.r});
         auto r1h2arg = arg1 + "," + arg2 + "zw->" + arg3 + "zw";
-        auto r1h2 = torch::einsum(r1h2arg, {first.r,  second.h});
+        auto r1h2 = torch::einsum(r1h2arg, {first.r, second.h});
+        auto hyperdual = 2 * d1d2 + h1r2 + r1h2;
 
-        return TensorMatHyperDual(std::move(r), 
-                                  std::move(r1d2 + d1r2), 
-                                  std::move(2*d1d2.unsqueeze(-1) + h1r2 + r1h2));
+        // Return the resulting TensorMatHyperDual
+        return TensorMatHyperDual(std::move(r), std::move(dual), std::move(hyperdual));
     }
+
 
     /**
      * In-place assignment to the TensorMatHyperDual object using a mask and a TensorHyperDual value.
@@ -6882,23 +6991,22 @@ public:
      * @param value A TensorHyperDual object whose values will be assigned to the masked elements.
      * @throws std::invalid_argument if the mask or value dimensions are incompatible.
      */
-    void index_put_(const torch::Tensor& mask, const TensorHyperDual& value) {
+    void index_put_(const torch::Tensor& mask, const TensorMatHyperDual& value) {
         // Validate that the mask is a boolean tensor
         if (mask.scalar_type() != torch::kBool) {
             throw std::invalid_argument("The mask must be a boolean tensor.");
         }
 
-        // Validate that the dimensions of the value match the broadcasted dimensions of the masked elements
-        if (value.r.sizes() != this->r.sizes().slice(1).vec() ||
-            value.d.sizes() != this->d.sizes().slice(1).vec() ||
-            value.h.sizes() != this->h.sizes().slice(1).vec()) {
-            throw std::invalid_argument("The value dimensions must match the broadcasted dimensions of the masked elements.");
+        // Validate that the mask matches the batch size
+        if (mask.size(0) != this->r.size(0)) {
+            throw std::invalid_argument("The mask must have the same size as the batch dimension of the TensorMatHyperDual object.");
         }
 
+
         // Perform in-place updates on the real, dual, and hyperdual parts
-        this->r.index_put_({mask}, value.r.squeeze());
-        this->d.index_put_({mask}, value.d.squeeze());
-        this->h.index_put_({mask}, value.h.squeeze());
+        this->r.index_put_({mask}, value.r);
+        this->d.index_put_({mask}, value.d);
+        this->h.index_put_({mask}, value.h);
     }
 
     /**
@@ -6912,45 +7020,15 @@ public:
      * @param value A TensorHyperDual object whose values will be assigned to the masked elements.
      * @throws std::invalid_argument if the mask or value dimensions are incompatible.
      */
-    void index_put_(const torch::indexing::TensorIndex& mask, const TensorHyperDual& value) {
-        // Ensure that the value dimensions are compatible
-        if (value.r.dim() != this->r.dim() - 1 || 
-            value.d.dim() != this->d.dim() - 1 || 
-            value.h.dim() != this->h.dim() - 1) {
-            throw std::invalid_argument("The value dimensions must be compatible with the TensorMatHyperDual structure.");
-        }
+    void index_put_(const torch::indexing::TensorIndex& mask, const TensorMatHyperDual& value) {
 
         // Perform in-place updates on the real, dual, and hyperdual parts
+        // If there are index errors, they will be caught by the underlying index_put_ method
         this->r.index_put_({mask}, value.r.squeeze());
         this->d.index_put_({mask}, value.d.squeeze());
         this->h.index_put_({mask}, value.h.squeeze());
     }
 
-    /**
-     * In-place assignment to the TensorMatHyperDual object using a vector of TensorIndex and a TensorMatHyperDual value.
-     *
-     * This method updates the elements of the real, dual, and hyperdual parts of the
-     * TensorMatHyperDual object in-place using a vector of TensorIndex and values from
-     * another TensorMatHyperDual object.
-     *
-     * @param mask A vector of TensorIndex specifying the elements to update.
-     * @param value A TensorMatHyperDual object whose values will be assigned to the masked elements.
-     * @throws std::invalid_argument if the mask or value dimensions are incompatible.
-     */
-    void index_put_(const std::vector<torch::indexing::TensorIndex>& mask, const TensorMatHyperDual& value) {
-        // Validate that the dimensions of the value match the expected shape for the masked elements
-        auto r_masked_shape = this->r.index(mask).sizes();
-        if (value.r.sizes() != r_masked_shape || 
-            value.d.sizes() != this->d.index(mask).sizes() || 
-            value.h.sizes() != this->h.index(mask).sizes()) {
-            throw std::invalid_argument("The value dimensions must match the shape of the selected elements in TensorMatHyperDual.");
-        }
-
-        // Perform in-place updates on the real, dual, and hyperdual parts
-        this->r.index_put_(mask, value.r);
-        this->d.index_put_(mask, value.d);
-        this->h.index_put_(mask, value.h);
-    }
 
     /**
      * In-place assignment to the TensorMatHyperDual object using a vector of TensorIndex and a scalar value.
@@ -6962,13 +7040,17 @@ public:
      * @param value A scalar value (double) to assign to the real part.
      */
     void index_put_(const std::vector<torch::indexing::TensorIndex>& mask, const double& value) {
-        // Update the real part with the scalar value
+        // If there are index errors, they will be caught by the underlying index_put_ method
+
+        // Perform in-place update on the real part
         this->r.index_put_({mask}, value);
 
         // Set the corresponding dual and hyperdual parts to zero
-        this->d.index_put_({mask}, 0.0);
-        this->h.index_put_({mask}, 0.0);
+        this->d.index_put_({mask}, torch::zeros_like(this->d.index({mask})));
+        this->h.index_put_({mask}, torch::zeros_like(this->h.index({mask})));
+
     }
+
 
     
     /**
@@ -6997,66 +7079,23 @@ public:
         this->h.index_put_({mask}, 0.0);
     }
 
-    /**
-     * Convert a TensorHyperDual to a TensorMatHyperDual by adding a singleton dimension.
-     *
-     * This method takes a TensorHyperDual object and creates a TensorMatHyperDual object
-     * by unsqueezing a specified dimension in the real, dual, and hyperdual parts.
-     *
-     * @param x The TensorHyperDual object to be converted.
-     * @param dim The dimension to unsqueeze (add a singleton dimension).
-     * @return A TensorMatHyperDual object with the specified dimension unsqueezed.
-     * @throws std::invalid_argument if the dimension is out of range.
-     */
-    static TensorMatHyperDual unsqueeze(const TensorHyperDual& x, int dim) {
-        // Validate that the dimension is within the valid range for unsqueezing
-        if (dim < 0 || dim > x.r.dim()) {
-            throw std::invalid_argument("Dimension out of range for unsqueeze operation.");
-        }
-
-        // Unsqueeze the real, dual, and hyperdual parts
-        auto r = x.r.unsqueeze(dim);
-        auto d = x.d.unsqueeze(dim);
-        auto h = x.h.unsqueeze(dim);
-
-        // Create and return a TensorMatHyperDual object
-        return TensorMatHyperDual(r, d, h);
-    }
-
 
 };
 
 
 
-/**
- * @brief Creates a batch identity matrix for the real part and initializes the dual and hyper-dual parts as zero tensors.
- *
- * This method generates a batch identity matrix for the real (`r`) part and initializes the dual (`d`) and hyper-dual (`h`)
- * tensors with appropriate shapes filled with zeros. The shapes are determined by the dimensions of the current object.
- *
- * @return TensorMatHyperDual A new TensorMatHyperDual object with the real part as a batch identity matrix and the
- * dual and hyper-dual parts as zero tensors.
- * @throws std::runtime_error If the real, dual, or hyper-dual tensors are undefined.
- */
-TensorMatHyperDual TensorHyperDual::eye() {
-    // Validate that the tensors are defined
-    if (!this->r.defined() || !this->d.defined() || !this->h.defined()) {
-        throw std::runtime_error("Cannot create eye: undefined real, dual, or hyper-dual tensors.");
-    }
 
-    // Validate that the real tensor has the required dimensions
-    if (this->r.dim() < 2) {
-        throw std::runtime_error("Cannot create eye: real tensor must have at least 2 dimensions.");
-    }
+TensorMatHyperDual TensorHyperDual::eye() {
+
 
     // Create the real part as a batch of identity matrices
     auto r = torch::eye(this->r.size(1), this->r.options()).repeat({this->r.size(0), 1, 1});
 
     // Create the dual part as a zero tensor with the appropriate shape
-    auto d = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(2), this->d.size(3)}, this->d.options());
+    auto d = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(1), this->d.size(2)}, this->d.options());
 
     // Create the hyper-dual part as a zero tensor with the appropriate shape
-    auto h = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(2), this->d.size(3), this->h.size(4)}, this->h.options());
+    auto h = torch::zeros({this->r.size(0), this->r.size(1), this->r.size(1), this->d.size(2), this->h.size(3)}, this->h.options());
 
     // Return the resulting TensorMatHyperDual object
     return TensorMatHyperDual(r, d, h);
@@ -7075,9 +7114,10 @@ TensorMatHyperDual TensorHyperDual::eye() {
  * @throws std::invalid_argument If the real or dual tensors are undefined or the specified dimension is invalid.
  */
 TensorMatDual TensorDual::unsqueeze(int dim) {
-    // Validate that the real and dual tensors are defined
-    if (!this->r.defined() || !this->d.defined()) {
-        throw std::invalid_argument("Cannot unsqueeze: undefined real or dual tensors.");
+
+    // Normalize negative dimension
+    if (dim < 0) {
+        dim += this->r.dim() + 1; // Normalize negative dimension
     }
 
     // Validate that the dimension is within the valid range
@@ -7093,6 +7133,7 @@ TensorMatDual TensorDual::unsqueeze(int dim) {
     return TensorMatDual(std::move(r), std::move(d));
 }
 
+
 /**
  * @brief Creates a batch identity matrix for the real part and initializes the dual part as zeros.
  *
@@ -7105,15 +7146,7 @@ TensorMatDual TensorDual::unsqueeze(int dim) {
  * @throws std::runtime_error If the real or dual tensors are undefined or have invalid dimensions.
  */
 TensorMatDual TensorDual::eye() {
-    // Validate that the real and dual tensors are defined
-    if (!this->r.defined() || !this->d.defined()) {
-        throw std::runtime_error("Cannot create eye: undefined real or dual tensors.");
-    }
 
-    // Validate the real tensor dimensions
-    if (this->r.dim() < 2) {
-        throw std::runtime_error("Cannot create eye: real tensor must have at least 2 dimensions.");
-    }
 
     // Create the real part as a batch of identity matrices
     auto r = torch::eye(this->r.size(1), this->r.options()).repeat({this->r.size(0), 1, 1});
@@ -7143,9 +7176,6 @@ TensorDual operator*(const torch::Tensor& tensor, const TensorDual& td) {
     if (!tensor.defined()) {
         throw std::invalid_argument("Cannot multiply: the torch::Tensor is undefined.");
     }
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot multiply: the TensorDual tensors are undefined.");
-    }
 
 
     // Compute the real and dual parts
@@ -7174,9 +7204,6 @@ TensorHyperDual operator*(const torch::Tensor& tensor, const TensorHyperDual& td
     if (!tensor.defined()) {
         throw std::invalid_argument("Cannot multiply: the torch::Tensor is undefined.");
     }
-    if (!td.r.defined() || !td.d.defined() || !td.h.defined()) {
-        throw std::invalid_argument("Cannot multiply: the TensorHyperDual tensors are undefined.");
-    }
 
 
     // Compute the real, dual, and hyper-dual parts
@@ -7204,9 +7231,6 @@ TensorDual operator/(const torch::Tensor& tensor, const TensorDual& td) {
     // Validate that the tensors are defined
     if (!tensor.defined()) {
         throw std::invalid_argument("Cannot divide: the torch::Tensor is undefined.");
-    }
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot divide: the TensorDual tensors are undefined.");
     }
 
     // Perform division for the real part
@@ -7278,9 +7302,6 @@ TensorDual operator+(const torch::Tensor& tensor, const TensorDual& td) {
     if (!tensor.defined()) {
         throw std::invalid_argument("Cannot add: the torch::Tensor is undefined.");
     }
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot add: the TensorDual tensors are undefined.");
-    }
 
     // Compute the real part by adding the tensor to the real part of TensorDual
     auto real = tensor + td.r;
@@ -7310,9 +7331,6 @@ TensorHyperDual operator+(const torch::Tensor& tensor, const TensorHyperDual& td
     if (!tensor.defined()) {
         throw std::invalid_argument("Cannot add: the torch::Tensor is undefined.");
     }
-    if (!td.r.defined() || !td.d.defined() || !td.h.defined()) {
-        throw std::invalid_argument("Cannot add: the TensorHyperDual tensors are undefined.");
-    }
 
     // Compute the real part by adding the tensor to the real part of TensorHyperDual
     auto real = tensor + td.r;
@@ -7337,10 +7355,6 @@ TensorHyperDual operator+(const torch::Tensor& tensor, const TensorHyperDual& td
  * @throws std::invalid_argument If the TensorDual's real or dual tensors are undefined.
  */
 TensorDual operator+(const double& scalar, const TensorDual& td) {
-    // Validate that the TensorDual's real and dual tensors are defined
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot add: the TensorDual's real or dual tensors are undefined.");
-    }
 
     // Compute the real part by adding the scalar to the real part of TensorDual
     auto real = td.r + scalar;
@@ -7367,10 +7381,6 @@ TensorDual operator+(const double& scalar, const TensorDual& td) {
  * @throws std::invalid_argument If the TensorHyperDual's real, dual, or hyper-dual tensors are undefined.
  */
 TensorHyperDual operator+(const double& scalar, const TensorHyperDual& td) {
-    // Validate that the TensorHyperDual's tensors are defined
-    if (!td.r.defined() || !td.d.defined() || !td.h.defined()) {
-        throw std::invalid_argument("Cannot add: the TensorHyperDual's tensors are undefined.");
-    }
 
     // Compute the real part by adding the scalar to the real part of TensorHyperDual
     auto real = td.r + scalar;
@@ -7401,10 +7411,6 @@ TensorDual operator-(const torch::Tensor& tensor, const TensorDual& td) {
     if (!tensor.defined()) {
         throw std::invalid_argument("Cannot subtract: the torch::Tensor is undefined.");
     }
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot subtract: the TensorDual's tensors are undefined.");
-    }
-
     // Compute the real part by subtracting the real part of TensorDual from the tensor
     auto real = tensor - td.r;
 
@@ -7435,9 +7441,6 @@ TensorHyperDual operator-(const torch::Tensor& tensor, const TensorHyperDual& td
     if (!tensor.defined()) {
         throw std::invalid_argument("Cannot subtract: the torch::Tensor is undefined.");
     }
-    if (!td.r.defined() || !td.d.defined() || !td.h.defined()) {
-        throw std::invalid_argument("Cannot subtract: the TensorHyperDual's tensors are undefined.");
-    }
 
     // Compute the real part by subtracting the real part of TensorHyperDual from the tensor
     auto real = tensor - td.r;
@@ -7464,13 +7467,6 @@ TensorHyperDual operator-(const torch::Tensor& tensor, const TensorHyperDual& td
  * @throws std::invalid_argument If the dimensions of `td` or `other` are incompatible for multiplication.
  */
 TensorDual operator*(const TensorDual& td, const TensorMatDual& other) {
-    // Validate that the tensors in TensorDual and TensorMatDual are defined
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot multiply: the TensorDual's tensors are undefined.");
-    }
-    if (!other.r.defined() || !other.d.defined()) {
-        throw std::invalid_argument("Cannot multiply: the TensorMatDual's tensors are undefined.");
-    }
 
     torch::Tensor r, d;
 
@@ -7540,13 +7536,6 @@ TensorDual operator*(const TensorMatDual& tmd, const TensorDual& other) {
  * @throws std::invalid_argument If the dimensions of `lhs` and `rhs` are incompatible for element-wise multiplication.
  */
 TensorMatDual operator*(const TensorMatDual& lhs, const TensorMatDual& rhs) {
-    // Validate that the tensors in both TensorMatDual objects are defined
-    if (!lhs.r.defined() || !lhs.d.defined()) {
-        throw std::invalid_argument("Cannot multiply: the left-hand TensorMatDual's tensors are undefined.");
-    }
-    if (!rhs.r.defined() || !rhs.d.defined()) {
-        throw std::invalid_argument("Cannot multiply: the right-hand TensorMatDual's tensors are undefined.");
-    }
 
     // Check for dimension compatibility
     if (lhs.r.sizes() != rhs.r.sizes()) {
@@ -7576,10 +7565,6 @@ TensorMatDual operator*(const TensorMatDual& lhs, const TensorMatDual& rhs) {
  * @throws std::invalid_argument If the TensorDual's real or dual tensors are undefined.
  */
 TensorDual operator-(const int& scalar, const TensorDual& td) {
-    // Validate that the TensorDual's tensors are defined
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot subtract: the TensorDual's tensors are undefined.");
-    }
 
     // Create a tensor from the scalar with the same options as TensorDual's real tensor
     auto scalar_tensor = torch::tensor({scalar}, td.r.options());
@@ -7606,10 +7591,6 @@ TensorDual operator-(const int& scalar, const TensorDual& td) {
  * @throws std::invalid_argument If the TensorDual's real or dual tensors are undefined.
  */
 TensorDual operator/(double& scalar, const TensorDual& td) {
-    // Validate that the TensorDual's tensors are defined
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot divide: the TensorDual's tensors are undefined.");
-    }
 
     // Compute the real part by dividing the scalar by the real part of TensorDual
     auto r = scalar / td.r;
@@ -7634,10 +7615,6 @@ TensorDual operator/(double& scalar, const TensorDual& td) {
  * @throws std::invalid_argument If the TensorDual's real or dual tensors are undefined.
  */
 TensorDual operator*(const double& scalar, const TensorDual& td) {
-    // Validate that the TensorDual's tensors are defined
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot multiply: the TensorDual's tensors are undefined.");
-    }
 
     // Compute the real part by multiplying the real part of TensorDual by the scalar
     auto real = td.r * scalar;
@@ -7661,10 +7638,6 @@ TensorDual operator*(const double& scalar, const TensorDual& td) {
  * @throws std::invalid_argument If the TensorMatDual's real or dual tensors are undefined.
  */
 TensorMatDual operator*(const double& scalar, const TensorMatDual& td) {
-    // Validate that the TensorMatDual's tensors are defined
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot multiply: the TensorMatDual's tensors are undefined.");
-    }
 
     // Compute the real part by multiplying the real part of TensorMatDual by the scalar
     auto real = td.r * scalar;
@@ -7692,13 +7665,6 @@ TensorMatDual operator*(const double& scalar, const TensorMatDual& td) {
  * @throws std::invalid_argument If the real or dual tensors of `base` or `exponent` are undefined.
  */
 TensorDual pow(const TensorDual& base, const TensorDual& exponent) {
-    // Validate that both base and exponent tensors are defined
-    if (!base.r.defined() || !base.d.defined()) {
-        throw std::invalid_argument("Cannot compute power: the base TensorDual's tensors are undefined.");
-    }
-    if (!exponent.r.defined() || !exponent.d.defined()) {
-        throw std::invalid_argument("Cannot compute power: the exponent TensorDual's tensors are undefined.");
-    }
 
     // Extract real and dual parts of base and exponent
     auto a = base.r;
@@ -7730,13 +7696,6 @@ TensorDual pow(const TensorDual& base, const TensorDual& exponent) {
  * @throws std::invalid_argument If the real or dual tensors of the input objects are undefined.
  */
 TensorDual max(const TensorDual& lhs, const TensorDual& rhs) {
-    // Validate that the tensors are defined
-    if (!lhs.r.defined() || !lhs.d.defined()) {
-        throw std::invalid_argument("Cannot compute max: the left-hand TensorDual's tensors are undefined.");
-    }
-    if (!rhs.r.defined() || !rhs.d.defined()) {
-        throw std::invalid_argument("Cannot compute max: the right-hand TensorDual's tensors are undefined.");
-    }
 
     // Compute the real part (element-wise maximum)
     auto r = torch::max(lhs.r, rhs.r);
@@ -7768,15 +7727,6 @@ TensorDual max(const TensorDual& lhs, const TensorDual& rhs) {
  * @throws std::invalid_argument If the dimensions of `lhs.r` and `rhs` are incompatible.
  */
 TensorDual max(const TensorDual& lhs, const torch::Tensor& rhs) {
-    // Validate that the real part of TensorDual is defined
-    if (!lhs.r.defined() || !rhs.defined()) {
-        throw std::invalid_argument("Cannot compute max: one or both tensors are undefined.");
-    }
-
-    // Check if the dimensions of lhs.r and rhs are compatible
-    if (lhs.r.sizes() != rhs.sizes()) {
-        throw std::invalid_argument("Cannot compute max: incompatible dimensions between lhs.r and rhs.");
-    }
 
     // Create a mask where the real part of lhs is greater than rhs
     auto mask = lhs.r > rhs;
@@ -7811,15 +7761,6 @@ TensorDual max(const TensorDual& lhs, const torch::Tensor& rhs) {
  * @throws std::invalid_argument If the TensorDual's real or dual tensors are undefined or if dimensions are incompatible.
  */
 TensorDual min(const TensorDual& lhs, const TensorDual& rhs) {
-    // Validate that the TensorDual's tensors are defined
-    if (!lhs.r.defined() || !lhs.d.defined() || !rhs.r.defined() || !rhs.d.defined()) {
-        throw std::invalid_argument("Cannot compute min: one or both TensorDual's tensors are undefined.");
-    }
-
-    // Check if the real parts' dimensions are compatible for element-wise operations
-    if (lhs.r.sizes() != rhs.r.sizes()) {
-        throw std::invalid_argument("Cannot compute min: incompatible dimensions between lhs.r and rhs.r.");
-    }
 
     // Compute the real part (element-wise minimum)
     auto r = torch::min(lhs.r, rhs.r);
@@ -7854,15 +7795,6 @@ TensorDual min(const TensorDual& lhs, const TensorDual& rhs) {
  * @throws std::invalid_argument If the TensorDual's real or dual tensors are undefined or if dimensions are incompatible.
  */
 TensorDual min(const TensorDual& lhs, const torch::Tensor& rhs) {
-    // Validate that the TensorDual's tensors are defined
-    if (!lhs.r.defined() || !lhs.d.defined() || !rhs.defined()) {
-        throw std::invalid_argument("Cannot compute min: one or both tensors are undefined.");
-    }
-
-    // Check if the dimensions of lhs.r and rhs are compatible
-    if (lhs.r.sizes() != rhs.sizes()) {
-        throw std::invalid_argument("Cannot compute min: incompatible dimensions between lhs.r and rhs.");
-    }
 
     // Create a mask where the real part of lhs is smaller than rhs
     auto mask = lhs.r < rhs;
@@ -7897,10 +7829,6 @@ TensorDual min(const TensorDual& lhs, const torch::Tensor& rhs) {
  * @throws std::invalid_argument If the TensorDual's real or dual tensors are undefined.
  */
 static TensorDual sign(TensorDual& td) {
-    // Validate that the real and dual tensors are defined
-    if (!td.r.defined() || !td.d.defined()) {
-        throw std::invalid_argument("Cannot compute sign: the TensorDual's tensors are undefined.");
-    }
 
     // Compute the real part: sign of the real part of TensorDual
     auto r = torch::sign(td.r);
@@ -7929,23 +7857,16 @@ static TensorDual sign(TensorDual& td) {
  */
 TensorDual pow(const TensorDual& base, const torch::Tensor& exponent)
 {
-    // Validate that the base tensor is defined
-    if (!base.r.defined() || !exponent.defined()) {
-        throw std::invalid_argument("Cannot compute power: one or both tensors are undefined.");
-    }
 
     // Compute the real part using torch::pow
     auto r = torch::pow(base.r, exponent);
-    torch::Tensor d;
-    if ( exponent.dim() == 1)
-      d = torch::einsum("mij, i->mij", {base.d, exponent * base.r.pow(exponent - 1)});
-    else 
-      d = torch::einsum("mij, mi->mij", {base.d, exponent * base.r.pow(exponent - 1)});
+    torch::Tensor d=torch::einsum("mij, mi->mij", {base.d, exponent * base.r.pow(exponent - 1)});
     // Compute the dual part using the chain rule
 
     // Return the resulting TensorDual
     return TensorDual(r, d);
 }
+
 /**
  * @brief Computes the power of a TensorDual object raised to a scalar.
  * @param base The base TensorDual object.
@@ -7955,10 +7876,6 @@ TensorDual pow(const TensorDual& base, const torch::Tensor& exponent)
  */
 TensorDual pow(const TensorDual& base, double exponent) 
 {
-    // Validate that the base tensor is defined
-    if (!base.r.defined()) {
-        throw std::invalid_argument("Cannot compute power: the base TensorDual's tensors are undefined.");
-    }
     //reshape the scalar to match the dimensions of the base tensor
     auto exp = torch::full_like(base.r, exponent);
     // Compute the real part using torch::pow
@@ -7991,10 +7908,6 @@ TensorDual pow(const TensorDual& base, double exponent)
  * @throws std::invalid_argument If the dimensions of `x.r`, `y.r`, `x.d`, or `y.d` are incompatible for the operation.
  */
 TensorMatDual ger(const TensorDual& x, const TensorDual& y) {
-    // Validate that the tensors are defined
-    if (!x.r.defined() || !x.d.defined() || !y.r.defined() || !y.d.defined()) {
-        throw std::invalid_argument("Cannot compute GER: one or more TensorDual tensors are undefined.");
-    }
 
     // Compute the real part using einsum: x.r @ y.r
     auto r = torch::einsum("mj, mi->mij", {x.r, y.r});

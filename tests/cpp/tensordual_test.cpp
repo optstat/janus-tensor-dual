@@ -17093,8 +17093,1166 @@ TEST(TensorMatHyperDualTest, DivisionByTensorHyperDualBasic) {
     EXPECT_EQ(result.h.sizes(), h1.sizes());
 }
 
+TEST(TensorMatHyperDualTest, ScalarDivisionBasic) {
+    auto r = torch::randn({2, 3, 4});
+    auto d = torch::randn({2, 3, 4, 2});
+    auto h = torch::randn({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+    double scalar = 2.0;
+
+    TensorMatHyperDual result = t / scalar;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, r / scalar));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, d / scalar));
+
+    // Validate the hyperdual part
+    EXPECT_TRUE(torch::allclose(result.h, h / scalar));
+}
+
+TEST(TensorMatHyperDualTest, ScalarDivisionByZero) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 2});
+    auto h = torch::rand({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+    double scalar = 0.0;
+
+    EXPECT_THROW(t / scalar, std::invalid_argument);
+}
+
+TEST(TensorMatHyperDualTest, ScalarDivisionEmptyTensors) {
+    auto r = torch::empty({0, 0, 0});
+    auto d = torch::empty({0, 0, 0, 0});
+    auto h = torch::empty({0, 0, 0, 0, 0});
+
+    TensorMatHyperDual t(r, d, h);
+    double scalar = 2.0;
+
+    TensorMatHyperDual result = t / scalar;
+
+    // Validate the real part
+    EXPECT_TRUE(result.r.numel() == 0);
+
+    // Validate the dual part
+    EXPECT_TRUE(result.d.numel() == 0);
+
+    // Validate the hyperdual part
+    EXPECT_TRUE(result.h.numel() == 0);
+}
 
 
+TEST(TensorMatHyperDualTest, BasicIndexing) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 2});
+    auto h = torch::rand({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Index the first row and specific columns
+    std::vector<torch::indexing::TensorIndex> indices = {torch::indexing::Slice(0, 1), torch::indexing::Slice(1, 3)};
+
+    TensorMatHyperDual result = t.index(indices);
+
+    // Validate dimensions
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({1, 2, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({1, 2, 4, 2}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({1, 2, 4, 2, 2}));
+}
+
+
+TEST(TensorMatHyperDualTest, IntegerIndexFails) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 2});
+    auto h = torch::rand({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Invalid integer index
+    std::vector<torch::indexing::TensorIndex> indices = {0};
+
+    EXPECT_THROW(t.index(indices), std::invalid_argument);
+}
+
+
+TEST(TensorMatHyperDualTest, MixedSlicesAndIntegersFails) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 2});
+    auto h = torch::rand({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Mixed slices and integers
+    std::vector<torch::indexing::TensorIndex> indices = {torch::indexing::Slice(0, 2), 1};
+
+    EXPECT_THROW(t.index(indices), std::invalid_argument);
+}
+
+TEST(TensorMatHyperDualTest, IndexingWithTensors) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 2});
+    auto h = torch::rand({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Tensor indices
+    auto index_tensor = torch::tensor({0, 1});
+    std::vector<torch::indexing::TensorIndex> indices = {index_tensor, torch::indexing::Slice()};
+
+    TensorMatHyperDual result = t.index(indices);
+
+    // Validate dimensions
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 4, 2}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({2, 3, 4, 2, 2}));
+}
+
+TEST(TensorMatHyperDualTest, IndexBasic) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 2});
+    auto h = torch::rand({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    TensorMatHyperDual result = t.index(0);
+
+    // Validate dimensions
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({1, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({1, 3, 4, 2}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({1, 3, 4, 2, 2}));
+}
+
+TEST(TensorMatHyperDualTest, IndexOutOfBounds) {
+    auto r = torch::rand({2, 3, 4});
+    auto d = torch::rand({2, 3, 4, 2});
+    auto h = torch::rand({2, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Index out of bounds
+    EXPECT_THROW(t.index(-1), std::out_of_range);
+    EXPECT_THROW(t.index(2), std::out_of_range);
+}
+
+TEST(TensorMatHyperDualTest, BooleanMaskBasic) {
+    auto r = torch::rand({5, 3, 4});
+    auto d = torch::rand({5, 3, 4, 2});
+    auto h = torch::rand({5, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Mask to select the first and last batch elements
+    auto mask = torch::tensor({true, false, false, false, true}, torch::kBool);
+
+    TensorMatHyperDual result = t.index(mask);
+
+    // Validate dimensions
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 4, 2}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({2, 3, 4, 2, 2}));
+}
+
+TEST(TensorMatHyperDualTest, BooleanMaskEmpty) {
+    auto r = torch::rand({5, 3, 4});
+    auto d = torch::rand({5, 3, 4, 2});
+    auto h = torch::rand({5, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Empty mask
+    auto mask = torch::tensor({}, torch::kBool);
+
+    EXPECT_THROW(t.index(mask), std::invalid_argument);
+}
+
+
+TEST(TensorMatHyperDualTest, BooleanMaskAllFalse) {
+    auto r = torch::rand({5, 3, 4});
+    auto d = torch::rand({5, 3, 4, 2});
+    auto h = torch::rand({5, 3, 4, 2, 2});
+
+    TensorMatHyperDual t(r, d, h);
+
+    // All false mask
+    auto mask = torch::tensor({false, false, false, false, false}, torch::kBool);
+
+    TensorMatHyperDual result = t.index(mask);
+
+    // Validate dimensions
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({0, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({0, 3, 4, 2}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({0, 3, 4, 2, 2}));
+}
+
+TEST(TensorMatHyperDualTest, BooleanMaskDeviceMismatch) {
+    auto r = torch::rand({5, 3, 4}, torch::kCUDA);
+    auto d = torch::rand({5, 3, 4, 2}, torch::kCUDA);
+    auto h = torch::rand({5, 3, 4, 2, 2}, torch::kCUDA);
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Mask on a different device (CPU)
+    auto mask = torch::tensor({true, false, false, false, true}, torch::kBool);
+
+    EXPECT_THROW(t.index(mask), std::invalid_argument);
+}
+
+TEST(TensorMatHyperDualTest, RequiresGradEnable) {
+    auto r = torch::rand({2, 3, 4}, torch::requires_grad(false));
+    auto d = torch::rand({2, 3, 4, 2}, torch::requires_grad(false));
+    auto h = torch::rand({2, 3, 4, 2, 2}, torch::requires_grad(false));
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Enable gradients
+    t.requires_grad_(true);
+
+    // Check requires_grad
+    EXPECT_TRUE(t.r.requires_grad());
+    EXPECT_TRUE(t.d.requires_grad());
+    EXPECT_TRUE(t.h.requires_grad());
+}
+
+TEST(TensorMatHyperDualTest, RequiresGradDisable) {
+    auto r = torch::rand({2, 3, 4}, torch::requires_grad(true));
+    auto d = torch::rand({2, 3, 4, 2}, torch::requires_grad(true));
+    auto h = torch::rand({2, 3, 4, 2, 2}, torch::requires_grad(true));
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Disable gradients
+    t.requires_grad_(false);
+
+    // Check requires_grad
+    EXPECT_FALSE(t.r.requires_grad());
+    EXPECT_FALSE(t.d.requires_grad());
+    EXPECT_FALSE(t.h.requires_grad());
+}
+
+TEST(TensorMatHyperDualTest, RequiresGradNonFloatingPoint) {
+    auto r = torch::randint(0, 10, {2, 3, 4}, torch::kInt32);
+    auto d = torch::randint(0, 10, {2, 3, 4, 2}, torch::kInt32);
+    auto h = torch::randint(0, 10, {2, 3, 4, 2, 2}, torch::kInt32);
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Attempt to enable gradients on non-floating-point tensors
+    EXPECT_THROW(t.requires_grad_(true), std::runtime_error);
+}
+
+
+TEST(TensorMatHyperDualTest, BackwardScalarTensors) {
+    auto r = torch::rand({1,1,1}, torch::requires_grad(true));
+    auto d = torch::rand({1,1,1,1}, torch::requires_grad(true));
+    auto h = torch::rand({1,1,1,1,1}, torch::requires_grad(true));
+
+    TensorMatHyperDual t(r, d, h);
+
+    // Compute gradients
+    t.backward();
+
+    EXPECT_TRUE(r.grad().defined());
+    EXPECT_TRUE(d.grad().defined());
+    EXPECT_TRUE(h.grad().defined());
+}
+
+TEST(TensorMatHyperDualTest, BackwardWithProvidedGradients) {
+    auto r = torch::rand({2, 3, 4}, torch::requires_grad(true));
+    auto d = torch::rand({2, 3, 4, 5}, torch::requires_grad(true));
+    auto h = torch::rand({2, 3, 4, 5, 5}, torch::requires_grad(true));
+
+    TensorMatHyperDual t(r, d, h);
+
+    auto grad_r = torch::ones_like(r);
+    auto grad_d = torch::ones_like(d);
+    auto grad_h = torch::ones_like(h);
+
+    // Compute gradients
+    t.backward(grad_r, grad_d, grad_h);
+
+    EXPECT_TRUE(r.grad().defined());
+    EXPECT_TRUE(d.grad().defined());
+    EXPECT_TRUE(h.grad().defined());
+}
+
+TEST(TensorMatHyperDualTest, BackwardShapeMismatch) {
+    auto r = torch::rand({2, 3, 4}, torch::requires_grad(true));
+    auto d = torch::rand({2, 3, 4, 2}, torch::requires_grad(true));
+    auto h = torch::rand({2, 3, 4, 2, 2}, torch::requires_grad(true));
+
+    TensorMatHyperDual t(r, d, h);
+
+    auto grad_r = torch::rand({3, 3}); // Shape mismatch
+
+    EXPECT_THROW(t.backward(grad_r), std::runtime_error);
+}
+
+TEST(TensorMatHyperDualTest, EinsumBasic) {
+    auto r1 = torch::rand({2, 3, 4});
+    auto d1 = torch::rand({2, 3, 4, 10});
+    auto h1 = torch::rand({2, 3, 4, 10, 10});
+    TensorMatHyperDual first(r1, d1, h1);
+
+    auto r2 = torch::rand({2, 3});
+    auto d2 = torch::rand({2, 3, 10});
+    auto h2 = torch::rand({2, 3, 10, 10});
+    TensorHyperDual second(r2, d2, h2);
+
+    auto result = TensorMatHyperDual::einsum("mik,mi->mk", first, second);
+
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 4, 10}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({2, 4, 10, 10}));
+}
+
+
+TEST(TensorMatHyperDualTest, TensorMatTensorEinsumBasic) {
+    auto r1 = torch::rand({2, 3, 4});
+    auto d1 = torch::rand({2, 3, 4, 5});
+    auto h1 = torch::rand({2, 3, 4, 5, 5});
+    TensorMatHyperDual first(r1, d1, h1);
+
+    auto second = torch::rand({2, 3, 4});
+
+    auto result = TensorMatHyperDual::einsum("mij,mij->mij", first, second);
+
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 4, 5}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({2, 3, 4, 5, 5}));
+}
+
+TEST(TensorHyperDualTest, EinsumBasic) {
+    auto r1 = torch::rand({2, 3});
+    auto d1 = torch::rand({2, 3, 7});
+    auto h1 = torch::rand({2, 3, 7, 7});
+    TensorHyperDual first(r1, d1, h1);
+
+    auto r2 = torch::rand({2, 3, 5});
+    auto d2 = torch::rand({2, 3, 5, 7});
+    auto h2 = torch::rand({2, 3, 5, 7, 7});
+    TensorMatHyperDual second(r2, d2, h2);
+
+    auto result = TensorMatHyperDual::einsum("mi,mij->mj", first, second);
+
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 5}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 5, 7}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({2, 5, 7, 7}));
+}
+
+TEST(TensorMatHyperDualTest, TensorMatDualTensorMatDualEinsumBasic) {
+    auto r1 = torch::rand({2, 3, 5});
+    auto d1 = torch::rand({2, 3, 5, 4});
+    auto h1 = torch::rand({2, 3, 5, 4, 4});
+    TensorMatHyperDual first(r1, d1, h1);
+
+    auto r2 = torch::rand({2, 5, 7});
+    auto d2 = torch::rand({2, 5, 7, 4});
+    auto h2 = torch::rand({2, 5, 7, 4, 4});
+    TensorMatHyperDual second(r2, d2, h2);
+
+    auto result = TensorMatHyperDual::einsum("mij,mjk->mik", first, second);
+
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 7}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 7, 4}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({2, 3, 7, 4, 4}));
+}
+
+TEST(TensorMatHyperDualTest, IndexPutValid) {
+    auto r = torch::rand({3, 4, 5});
+    auto d = torch::rand({3, 4, 5, 6});
+    auto h = torch::rand({3, 4, 5, 6, 6});
+    TensorMatHyperDual mat(r, d, h);
+
+    auto mask = torch::tensor({true, false, true}, torch::kBool);
+    auto value_r = torch::rand({2, 4, 5});
+    auto value_d = torch::rand({2, 4, 5, 6});
+    auto value_h = torch::rand({2, 4, 5, 6, 6});
+    TensorMatHyperDual value(value_r, value_d, value_h);
+
+    mat.index_put_(mask, value);
+
+    EXPECT_TRUE(torch::allclose(mat.r.index({mask}), value_r));
+    EXPECT_TRUE(torch::allclose(mat.d.index({mask}), value_d));
+    EXPECT_TRUE(torch::allclose(mat.h.index({mask}), value_h));
+}
+
+TEST(TensorMatHyperDualTest,  TensorMatDualTensorIndexPutValid) {
+    auto r = torch::rand({3, 4, 5});
+    auto d = torch::rand({3, 4, 5, 6});
+    auto h = torch::rand({3, 4, 5, 6, 6});
+    TensorMatHyperDual mat(r, d, h);
+
+    auto value_r = torch::rand({1, 4, 5});
+    auto value_d = torch::rand({1, 4, 5, 6});
+    auto value_h = torch::rand({1, 4, 5, 6, 6});
+    TensorMatHyperDual value(value_r, value_d, value_h);
+
+    mat.index_put_(torch::indexing::TensorIndex(0), value);
+
+    EXPECT_TRUE(torch::allclose(mat.r.index({0}), value_r));
+    EXPECT_TRUE(torch::allclose(mat.d.index({0}), value_d));
+    EXPECT_TRUE(torch::allclose(mat.h.index({0}), value_h));
+}
+
+TEST(TensorMatHyperDualTest, IndexPutScalarBasic) {
+    auto r = torch::rand({3, 4, 5});
+    auto d = torch::rand({3, 4, 5, 6});
+    auto h = torch::rand({3, 4, 5, 6, 6});
+    TensorMatHyperDual mat(r, d, h);
+
+    std::vector<torch::indexing::TensorIndex> mask = {0, torch::indexing::Slice(1, 3), torch::indexing::Slice()};
+    double value = 42.0;
+
+    mat.index_put_(mask, value);
+
+    EXPECT_TRUE(torch::allclose(mat.r.index({mask}), torch::full({1, 2, 5}, value, mat.r.options())));
+    EXPECT_TRUE(torch::allclose(mat.d.index({mask}), torch::zeros({1, 2, 5, 6}, mat.d.options())));
+    EXPECT_TRUE(torch::allclose(mat.h.index({mask}), torch::zeros({1, 2, 5, 6, 6}, mat.h.options())));
+}
+
+TEST(TensorHyperDualTest, EyeValid) {
+    auto r = torch::rand({2, 3});
+    auto d = torch::rand({2, 3, 5});
+    auto h = torch::rand({2, 3, 5, 5});
+    TensorHyperDual tensor(r, d, h);
+
+    auto result = tensor.eye();
+
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 3}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 3, 5}));
+    EXPECT_EQ(result.h.sizes(), torch::IntArrayRef({2, 3, 3, 5, 5}));
+
+    EXPECT_TRUE(torch::allclose(result.r, torch::eye(3).repeat({2, 1, 1})));
+    EXPECT_TRUE(torch::allclose(result.d, torch::zeros_like(result.d)));
+    EXPECT_TRUE(torch::allclose(result.h, torch::zeros_like(result.h)));
+}
+
+
+TEST(TensorDualTest, UnsqueezeValid) {
+    auto r = torch::rand({3, 4});
+    auto d = torch::rand({3, 4, 5});
+    TensorDual tensor(r, d);
+
+    int dim = 1;
+    auto result = tensor.unsqueeze(dim);
+
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({3, 1, 4}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({3, 1, 4, 5}));
+}
+
+TEST(TensorDualTest, UnsqueezeNegativeDimension) {
+    auto r = torch::rand({3, 4});
+    auto d = torch::rand({3, 4, 5});
+    TensorDual tensor(r, d);
+
+    int dim = -1; // Add singleton dimension at the end
+    auto result = tensor.unsqueeze(dim);
+
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({3, 4, 1}));
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({3, 4, 1, 5}));
+}
+
+TEST(TensorDualTest, UnsqueezeInvalidDimension) {
+    auto r = torch::rand({3, 4});
+    auto d = torch::rand({3, 4, 5});
+    TensorDual tensor(r, d);
+
+    int dim = 3; // Out of range for `r`
+    EXPECT_THROW(tensor.unsqueeze(dim), std::invalid_argument);
+}
+
+TEST(TensorDualTest, EyeBasicFunctionality) {
+    // Create a TensorDual object
+    auto r = torch::rand({2, 3}); // Batch size = 2, Rows = 3
+    auto d = torch::rand({2, 3, 5}); // Batch size = 2, Rows = 3, Dual dimension = 5
+    TensorDual tensor(r, d);
+
+    // Generate the identity matrix and zeros
+    auto result = tensor.eye();
+
+    // Check dimensions of the real part
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({2, 3, 3}));
+    EXPECT_TRUE(torch::allclose(result.r[0], torch::eye(3)));
+
+    // Check dimensions of the dual part
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 3, 3, 5}));
+    EXPECT_TRUE(torch::allclose(result.d, torch::zeros_like(result.d)));
+}
+
+TEST(TensorDualTest, EyeMinimalDimensions) {
+    // Create a TensorDual object with minimal valid dimensions
+    auto r = torch::rand({1, 2}); // Batch size = 1, Rows = 2
+    auto d = torch::rand({1, 2, 1}); // Batch size = 1, Rows = 2,  Dual dimension = 1
+    TensorDual tensor(r, d);
+
+    // Generate the identity matrix and zeros
+    auto result = tensor.eye();
+
+    // Check dimensions of the real part
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({1, 2, 2}));
+    EXPECT_TRUE(torch::allclose(result.r[0], torch::eye(2)));
+
+    // Check dimensions of the dual part
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({1, 2, 2, 1}));
+    EXPECT_TRUE(torch::allclose(result.d, torch::zeros_like(result.d)));
+}
+
+TEST(TensorDualTest, EyeLargeDimensions) {
+    // Create a TensorDual object with large dimensions
+    auto r = torch::rand({10, 100}); // Batch size = 10, Rows = 100, Columns = 100
+    auto d = torch::rand({10, 100, 20}); // Dual dimension = 20
+    TensorDual tensor(r, d);
+
+    // Generate the identity matrix and zeros
+    auto result = tensor.eye();
+
+    // Check dimensions of the real part
+    EXPECT_EQ(result.r.sizes(), torch::IntArrayRef({10, 100, 100}));
+    EXPECT_TRUE(torch::allclose(result.r[0], torch::eye(100)));
+
+    // Check dimensions of the dual part
+    EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({10, 100, 100, 20}));
+    EXPECT_TRUE(torch::allclose(result.d, torch::zeros_like(result.d)));
+}
+
+
+TEST(TensorDualTest, MultiplyTensorWithTensorDualBasic) {
+    // Create a torch::Tensor and a TensorDual
+    auto tensor = torch::tensor({1.0, 2.0, 3.0});
+    auto r = torch::tensor({{4.0, 5.0, 6.0}});
+    auto d = torch::tensor({{{1.0, 2.0}, {2.0, 3.0}, {3.0, 4.0}}});
+    TensorDual td(r, d);
+
+    // Perform multiplication
+    auto result = tensor * td;
+
+    // Check the real part
+    EXPECT_TRUE(torch::allclose(result.r, tensor * r));
+
+    // Check the dual part
+    auto expected_dual = tensor.unsqueeze(-1) * d;
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+
+TEST(TensorHyperDualTest, MultiplyTensorWithTensorHyperDualBasic) {
+    // Create a torch::Tensor and a TensorHyperDual
+    auto tensor = torch::tensor({1.0, 2.0, 3.0});
+    auto r = torch::tensor({{4.0, 5.0, 6.0}});
+    auto d = torch::tensor({{{1.0, 2.0}, {2.0, 3.0}, {3.0, 4.0}}});
+    auto h = torch::tensor({{{{1.0, 2.0}, {2.0, 3.0}}, 
+                            {{3.0, 4.0}, {4.0, 5.0}}, 
+                            {{5.0, 6.0}, {6.0, 7.0}}}});
+    TensorHyperDual td(r, d, h);
+
+    // Perform multiplication
+    auto result = tensor * td;
+
+    // Check the real part
+    EXPECT_TRUE(torch::allclose(result.r, tensor * r));
+
+    // Check the dual part
+    auto expected_dual = tensor.unsqueeze(-1) * d;
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+
+    // Check the hyper-dual part
+    auto expected_hyper = tensor.unsqueeze(-1).unsqueeze(-1) * h;
+    EXPECT_TRUE(torch::allclose(result.h, expected_hyper));
+}
+
+TEST(TensorDualTest, DivideTensorByTensorDualBasic) {
+    // Create a torch::Tensor and a TensorDual
+    auto tensor = torch::tensor({6.0, 12.0, 18.0});
+    auto r = torch::tensor({{2.0, 4.0, 6.0}});
+    auto d = torch::tensor({{{1.0, 2.0}, {2.0, 3.0}, {3.0, 4.0}}});
+    TensorDual td(r, d);
+
+    // Perform division
+    auto result = tensor / td;
+
+    // Check the real part
+    EXPECT_TRUE(torch::allclose(result.r, tensor / r));
+
+    // Check the dual part
+    auto expected_dual = -(tensor / r.square()).unsqueeze(-1) * d;
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+TEST(TensorHyperDualTest, DivideTensorByTensorHyperDualBasic) {
+    // Create a torch::Tensor and a TensorHyperDual
+    auto tensor = torch::tensor({{6.0, 12.0, 18.0}});
+    auto r = torch::tensor({{2.0, 4.0, 6.0}});
+    auto d = torch::tensor({{{1.0, 2.0}, {2.0, 3.0}, {3.0, 4.0}}});
+    auto h = torch::tensor({{{{1.0, 2.0}, {2.0, 3.0}}, 
+                            {{3.0, 4.0}, {4.0, 5.0}}, 
+                            {{5.0, 6.0}, {6.0, 7.0}}}});
+    TensorHyperDual td(r, d, h);
+
+    // Perform division
+    auto result = tensor / td;
+
+    // Check the real part
+    EXPECT_TRUE(torch::allclose(result.r, tensor / r));
+
+    // Check the dual part
+    auto expected_dual = -(tensor / r.square()).unsqueeze(-1) * d;
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+
+    // Check the hyper-dual part
+    auto expected_hyper = torch::einsum("mi, mi, mij, mik -> mijk", 
+                                        {tensor, r.pow(-3), d, d}) - 
+                          torch::einsum("mi, mi, mijk -> mijk", 
+                                        {tensor, r.pow(-2), h});
+    EXPECT_TRUE(torch::allclose(result.h, expected_hyper));
+}
+
+TEST(TensorDualTest, AddTensorToTensorDualBasic) {
+    // Create a torch::Tensor and a TensorDual
+    auto tensor = torch::tensor({1.0, 2.0, 3.0});
+    auto r = torch::tensor({{4.0, 5.0, 6.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual td(r, d);
+
+    // Perform addition
+    auto result = tensor + td;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, tensor + r));
+
+    // Validate the dual part (unchanged)
+    EXPECT_TRUE(torch::allclose(result.d, d));
+}
+
+TEST(TensorHyperDualTest, AddTensorToTensorHyperDualBasic) {
+    // Create a torch::Tensor and a TensorHyperDual
+    auto tensor = torch::tensor({1.0, 2.0, 3.0});
+    auto r = torch::tensor({{4.0, 5.0, 6.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    auto h = torch::tensor({{{{0.01, 0.02}, {0.03, 0.04}}, 
+                            {{0.05, 0.06}, {0.07, 0.08}}, 
+                            {{0.09, 0.10}, {0.11, 0.12}}}});
+    TensorHyperDual td(r, d, h);
+
+    // Perform addition
+    auto result = tensor + td;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, tensor + r));
+
+    // Validate the dual part (unchanged)
+    EXPECT_TRUE(torch::allclose(result.d, d));
+
+    // Validate the hyper-dual part (unchanged)
+    EXPECT_TRUE(torch::allclose(result.h, h));
+}
+
+TEST(TensorDualTest, AddScalarToTensorDualBasic) {
+    // Create a TensorDual
+    auto r = torch::tensor({{1.0, 2.0, 3.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual td(r, d);
+
+    // Perform addition with a scalar
+    double scalar = 5.0;
+    auto result = scalar + td;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, r + scalar));
+
+    // Validate the dual part (unchanged)
+    EXPECT_TRUE(torch::allclose(result.d, d));
+}
+
+
+TEST(TensorDualTest, AddScalarToNegativeRealTensorDual) {
+    // Create a TensorDual with negative real values
+    auto r = torch::tensor({{-1.0, -2.0, -3.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual td(r, d);
+
+    // Perform addition with a scalar
+    double scalar = 5.0;
+    auto result = scalar + td;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, r + scalar));
+
+    // Validate the dual part (unchanged)
+    EXPECT_TRUE(torch::allclose(result.d, d));
+}
+
+
+TEST(TensorHyperDualTest, AddScalarToTensorHyperDualBasic) {
+    // Create a TensorHyperDual
+    auto r = torch::tensor({{1.0, 2.0, 3.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    auto h = torch::tensor({{{{0.01, 0.02}, {0.03, 0.04}}, 
+                            {{0.05, 0.06}, {0.07, 0.08}}, 
+                            {{0.09, 0.10}, {0.11, 0.12}}}});
+    TensorHyperDual td(r, d, h);
+
+    // Perform addition with a scalar
+    double scalar = 5.0;
+    auto result = scalar + td;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, r + scalar));
+
+    // Validate the dual part (unchanged)
+    EXPECT_TRUE(torch::allclose(result.d, d));
+
+    // Validate the hyper-dual part (unchanged)
+    EXPECT_TRUE(torch::allclose(result.h, h));
+}
+
+TEST(TensorDualTest, SubtractTensorDualFromTensorBasic) {
+    // Create a TensorDual
+    auto r = torch::tensor({{1.0, 2.0, 3.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual td(r, d);
+
+    // Create the torch::Tensor
+    auto tensor = torch::tensor({5.0, 6.0, 7.0});
+
+    // Perform the subtraction
+    auto result = tensor - td;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, tensor - r));
+
+    // Validate the dual part (negated)
+    EXPECT_TRUE(torch::allclose(result.d, -d));
+}
+
+
+TEST(TensorHyperDualTest, SubtractTensorHyperDualFromTensorBasic) {
+    // Create a TensorHyperDual
+    auto r = torch::tensor({{1.0, 2.0, 3.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    auto h = torch::tensor({{{{0.01, 0.02}, {0.03, 0.04}}, {{0.05, 0.06}, {0.07, 0.08}}, {{0.09, 0.10}, {0.11, 0.12}}}});
+    TensorHyperDual td(r, d, h);
+
+    // Create the torch::Tensor
+    auto tensor = torch::tensor({5.0, 6.0, 7.0});
+
+    // Perform the subtraction
+    auto result = tensor - td;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, tensor - r));
+
+    // Validate the dual part (negated)
+    EXPECT_TRUE(torch::allclose(result.d, -d));
+
+    // Validate the hyper-dual part (negated)
+    EXPECT_TRUE(torch::allclose(result.h, -h));
+}
+
+
+TEST(TensorDualTest, MultiplyTensorDualByTensorMatDual_LeftMultiplication) {
+    // Create a TensorDual
+    auto r_td = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d_td = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, 
+                               {{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual td(r_td, d_td);
+
+    // Create a TensorMatDual
+    auto r_mat = torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, 
+                                {{5.0, 6.0}, {7.0, 8.0}}});
+    auto d_mat = torch::tensor({{{{0.1, 0.2}}, {{0.3, 0.4}}}, 
+                                {{{0.5, 0.6}}, {{0.7, 0.8}}}});
+    TensorMatDual mat(r_mat, d_mat);
+
+    // Perform the multiplication
+    auto result = td * mat;
+
+    // Expected real part
+    auto expected_r = torch::einsum("mi, mij -> mj", {r_td, r_mat});
+
+    // Expected dual part
+    auto expected_d = torch::einsum("mi, mijn -> mjn", {r_td, d_mat}) +
+                      torch::einsum("min, mij -> mjn", {d_td, r_mat});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorMatDualTest, MultiplyTensorMatDualByTensorDual_MatrixMultiplication) {
+    // Create a TensorMatDual
+    auto r_tmd = torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, 
+                                 {{5.0, 6.0}, {7.0, 8.0}}});
+    auto d_tmd = torch::tensor({{{{0.1, 0.2}}, {{0.3, 0.4}}}, 
+                                 {{{0.5, 0.6}}, {{0.7, 0.8}}}});
+    TensorMatDual tmd(r_tmd, d_tmd);
+
+    // Create a TensorDual
+    auto r_td = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+    auto d_td = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}, 
+                               {{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual td(r_td, d_td);
+
+    // Perform the multiplication
+    auto result = tmd * td;
+
+    // Expected real part
+    auto expected_r = torch::einsum("mij, mj -> mi", {r_tmd, r_td});
+
+    // Expected dual part
+    auto expected_d = torch::einsum("mijn, mj -> min", {d_tmd, r_td}) +
+                      torch::einsum("mij, mjn -> min", {r_tmd, d_td});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+TEST(TensorMatDualTest, ElementWiseMultiplication_Basic) {
+    // Create the first TensorMatDual
+    auto r_lhs = torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, 
+                                 {{5.0, 6.0}, {7.0, 8.0}}});
+    auto d_lhs = torch::tensor({{{{0.1, 0.2}, {0.3, 0.4}}, 
+                                  {{0.5, 0.6}, {0.7, 0.8}}}, 
+                                 {{{0.9, 1.0}, {1.1, 1.2}}, 
+                                  {{1.3, 1.4}, {1.5, 1.6}}}});
+    TensorMatDual lhs(r_lhs, d_lhs);
+
+    // Create the second TensorMatDual
+    auto r_rhs = torch::tensor({{{2.0, 3.0}, {4.0, 5.0}}, 
+                                 {{6.0, 7.0}, {8.0, 9.0}}});
+    auto d_rhs = torch::tensor({{{{0.2, 0.3}, {0.4, 0.5}}, 
+                                  {{0.6, 0.7}, {0.8, 0.9}}}, 
+                                 {{{1.0, 1.1}, {1.2, 1.3}}, 
+                                  {{1.4, 1.5}, {1.6, 1.7}}}});
+    TensorMatDual rhs(r_rhs, d_rhs);
+
+    // Perform element-wise multiplication
+    auto result = lhs * rhs;
+
+    // Compute expected results
+    auto expected_r = r_lhs * r_rhs;
+    auto expected_d = torch::einsum("mij, mijn -> mijn", {r_lhs, d_rhs}) +
+                      torch::einsum("mijn, mij -> mijn", {d_lhs, r_rhs});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, SubtractTensorDualFromScalar_Basic) {
+    // Create a TensorDual object
+    auto r = torch::tensor({{1.0, 2.0, 3.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual td(r, d);
+
+    // Perform subtraction with a scalar
+    int scalar = 5;
+    auto result = scalar - td;
+
+    // Compute expected results
+    auto expected_r = torch::tensor({5.0, 5.0, 5.0}) - r;
+    auto expected_d = -d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, ScalarDividedByTensorDual_Basic) {
+    // Create a TensorDual object
+    auto r = torch::tensor({{2.0, 4.0, 8.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual td(r, d);
+
+    // Perform scalar division
+    double scalar = 16.0;
+    auto result = scalar / td;
+
+    // Compute expected results
+    auto expected_r = scalar / r;
+    auto expected_d = -(scalar / r.square()).unsqueeze(-1) * d;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, ScalarTimesTensorDual_Basic) {
+    // Create a TensorDual object
+    auto r = torch::tensor({{1.0, 2.0, 3.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual td(r, d);
+
+    // Perform scalar multiplication
+    double scalar = 2.0;
+    auto result = scalar * td;
+
+    // Compute expected results
+    auto expected_r = r * scalar;
+    auto expected_d = d * scalar;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+TEST(TensorMatDualTest, ScalarTimesTensorMatDual_Basic) {
+    // Create a TensorMatDual object
+    auto r = torch::tensor({{{1.0, 2.0}, {3.0, 4.0}}, {{5.0, 6.0}, {7.0, 8.0}}});
+    auto d = torch::tensor({
+        {{{0.1, 0.2}, {0.3, 0.4}}, {{0.5, 0.6}, {0.7, 0.8}}},
+        {{{0.9, 1.0}, {1.1, 1.2}}, {{1.3, 1.4}, {1.5, 1.6}}}
+    });
+    TensorMatDual tmd(r, d);
+
+    // Perform scalar multiplication
+    double scalar = 2.0;
+    auto result = scalar * tmd;
+
+    // Compute expected results
+    auto expected_r = r * scalar;
+    auto expected_d = d * scalar;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+TEST(TensorDualTest, PowBasic) {
+    // Create base TensorDual
+    auto base_r = torch::tensor({{2.0, 3.0, 4.0}});
+    auto base_d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual base(base_r, base_d);
+
+    // Create exponent TensorDual
+    auto exp_r = torch::tensor({{2.0, 3.0, 1.5}});
+    auto exp_d = torch::tensor({{{0.01, 0.02}, {0.03, 0.04}, {0.05, 0.06}}});
+    TensorDual exponent(exp_r, exp_d);
+
+    // Perform power operation
+    auto result = pow(base, exponent);
+
+    // Compute expected real and dual parts
+    auto expected_real = torch::pow(base_r, exp_r);
+    auto expected_dual = torch::einsum("mi, mij->mij", {expected_real * torch::log(base_r), exp_d}) +
+                         torch::einsum("mi, mij->mij", {expected_real * (exp_r / base_r), base_d});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_real));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_dual));
+}
+
+TEST(TensorDualTest, TensorDualTensorDualMaxBasic) {
+    // Create the left-hand TensorDual
+    auto lhs_r = torch::tensor({{1.0, 3.0, 5.0}});
+    auto lhs_d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual lhs(lhs_r, lhs_d);
+
+    // Create the right-hand TensorDual
+    auto rhs_r = torch::tensor({{2.0, 2.0, 6.0}});
+    auto rhs_d = torch::tensor({{{0.7, 0.8}, {0.9, 1.0}, {1.1, 1.2}}});
+    TensorDual rhs(rhs_r, rhs_d);
+
+    // Compute the maximum
+    auto result = max(lhs, rhs);
+
+    // Expected real and dual parts
+    auto expected_r = torch::max(lhs_r, rhs_r);
+    auto expected_d = torch::tensor({{{0.7, 0.8}, {0.3, 0.4}, {1.1, 1.2}}}); // Based on which r was greater
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, TensorDualMaxWithTensorBasic) {
+    // Create the TensorDual
+    auto lhs_r = torch::tensor({{1.0, 3.0, 5.0}});
+    auto lhs_d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual lhs(lhs_r, lhs_d);
+
+    // Create the right-hand torch::Tensor
+    auto rhs = torch::tensor({{2.0, 2.0, 6.0}});
+
+    // Compute the maximum
+    auto result = max(lhs, rhs);
+
+    // Expected real and dual parts
+    auto expected_r = torch::max(lhs_r, rhs);
+    auto expected_d = torch::tensor({{{{0.0, 0.0}, {0.3, 0.4}, {0.0, 0.0}}}}); // Dual from lhs where lhs.r > rhs
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, TensorDualTensorDualMinBasic) {
+    // Create the left-hand TensorDual
+    auto lhs_r = torch::tensor({{1.0, 3.0, 5.0}});
+    auto lhs_d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual lhs(lhs_r, lhs_d);
+
+    // Create the right-hand TensorDual
+    auto rhs_r = torch::tensor({{2.0, 2.0, 6.0}});
+    auto rhs_d = torch::tensor({{{0.7, 0.8}, {0.9, 1.0}, {1.1, 1.2}}});
+    TensorDual rhs(rhs_r, rhs_d);
+
+    // Compute the minimum
+    auto result = min(lhs, rhs);
+
+    // Expected real and dual parts
+    auto expected_r = torch::min(lhs_r, rhs_r);
+    auto expected_d = torch::tensor({{{0.1, 0.2}, {0.9, 1.0}, {0.5, 0.6}}}); // Use lhs.d where lhs.r < rhs.r
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, TensorDualTensorMinTensorBasic) {
+    // Create the TensorDual object
+    auto lhs_r = torch::tensor({{1.0, 3.0, 5.0}});
+    auto lhs_d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual lhs(lhs_r, lhs_d);
+
+    // Create the right-hand tensor
+    auto rhs = torch::tensor({{2.0, 2.0, 6.0}});
+
+    // Compute the minimum
+    auto result = min(lhs, rhs);
+
+    // Expected real and dual parts
+    auto expected_r = torch::min(lhs_r, rhs);
+    auto expected_d = torch::tensor({{{0.1, 0.2}, {0.0, 0.0}, {0.5, 0.6}}}); // Use lhs.d where lhs.r < rhs
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, TensorDualSignBasic) {
+    // Create the TensorDual object
+    auto r = torch::tensor({{-3.0, 0.0, 4.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual td(r, d);
+
+    // Compute the sign
+    auto result = sign(td);
+
+    // Expected real and dual parts
+    auto expected_r = torch::sign(r);
+    auto expected_d = torch::zeros_like(d); // Dual part is zero except when r == 0
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, TensorDualPowWithScalarExponent) {
+    // Create the TensorDual object
+    auto r = torch::tensor({{2.0, 3.0, 4.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual base(r, d);
+
+    // Exponent tensor (scalar applied element-wise)
+    auto exponent = torch::tensor(2.0);
+
+    // Compute the power
+    auto result = pow(base, exponent);
+
+    // Expected real and dual parts
+    auto expected_r = torch::pow(r, exponent);
+    auto expected_d = torch::einsum("mij, mi->mij", {d, exponent * r.pow(exponent - 1)});
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+
+TEST(TensorDualTest, TensorDualPowExponent) {
+    // Create the TensorDual object
+    auto r = torch::tensor({{2.0, 3.0, 4.0}});
+    auto d = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}});
+    TensorDual base(r, d);
+
+    // Exponent scalar
+    double exponent = 2.0;
+
+    // Compute the power
+    auto result = pow(base, exponent);
+
+    // Expected real and dual parts
+    auto expected_r = torch::pow(r, exponent);
+    auto expected_d = d * exponent * torch::pow(r, exponent - 1).unsqueeze(-1);
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
+
+TEST(TensorDualTest, GerBasic) {
+    // Create the first TensorDual
+    auto r1 = torch::tensor({{1.0, 2.0}});
+    auto d1 = torch::tensor({{{0.1, 0.2}, {0.3, 0.4}}});
+    TensorDual x(r1, d1);
+
+    // Create the second TensorDual
+    auto r2 = torch::tensor({{3.0, 4.0}});
+    auto d2 = torch::tensor({{{0.5, 0.6}, {0.7, 0.8}}});
+    TensorDual y(r2, d2);
+
+    // Compute the generalized outer product
+    auto result = ger(x, y);
+
+    // Expected real and dual parts
+    auto expected_r = torch::einsum("mj, mi->mij", {r1, r2});
+    auto expected_d1 = torch::einsum("mj, mik->mijk", {r1, d2});
+    auto expected_d2 = torch::einsum("mjk, mi->mijk", {d1, r2});
+    auto expected_d = expected_d1 + expected_d2;
+
+    // Validate the real part
+    EXPECT_TRUE(torch::allclose(result.r, expected_r));
+
+    // Validate the dual part
+    EXPECT_TRUE(torch::allclose(result.d, expected_d));
+}
 
 
 int main(int argc, char **argv) {
