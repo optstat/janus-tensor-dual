@@ -4361,6 +4361,27 @@ public:
         return os;
     }
 
+    /**
+     * @brief Squeezes all dimensions of size 1 in the real and dual parts of the TensorDual.
+     *
+     * This method removes all dimensions of size 1 in the real (`r`) and dual (`d`) tensors.
+     * If specific dimensions need to be squeezed, consider adding a parameter to specify
+     * the target dimension(s) instead of using this method.
+     *
+     * @return TensorDual A new TensorDual object with squeezed real and dual parts.
+     * @throws std::runtime_error If the tensors are not defined or have invalid shapes.
+     */
+    TensorDual squeeze() const {
+
+        // Squeeze all dimensions of size 1 for both tensors
+        auto r_squeezed = this->r.squeeze();
+        auto d_squeezed = this->d.squeeze();
+
+        // Return the new TensorDual object
+        return TensorDual(r_squeezed, d_squeezed);
+    }
+
+
 
 
     /**
@@ -5891,13 +5912,33 @@ public:
         return os;
     }
 
+    //Forward declaration for eye function
+    TensorMatHyperDual eye();
 
+    /**
+     * @brief Squeezes all dimensions of size 1 in the real and dual parts of the TensorDual.
+     *
+     * This method removes all dimensions of size 1 in the real (`r`) and dual (`d`) tensors.
+     * If specific dimensions need to be squeezed, consider adding a parameter to specify
+     * the target dimension(s) instead of using this method.
+     *
+     * @return TensorDual A new TensorDual object with squeezed real and dual parts.
+     * @throws std::runtime_error If the tensors are not defined or have invalid shapes.
+     */
+    TensorHyperDual squeeze() const {
+
+        // Squeeze all dimensions of size 1 for both tensors
+        auto r_squeezed = this->r.squeeze();
+        auto d_squeezed = this->d.squeeze();
+        auto h_squeezed = this->h.squeeze();
+
+        // Return the new TensorDual object
+        return TensorHyperDual(r_squeezed, d_squeezed, h_squeezed);
+    }
 
 
 
      
-    //Forward declaration for eye function
-    TensorMatHyperDual eye();
     /**
      * Squeeze the specified dimensio n of the TensorHyperDual object.
      *
