@@ -1681,10 +1681,6 @@ public:
      * @throws std::invalid_argument If the dimensions of the two TensorDual objects do not match.
      */
     TensorDual operator/(const TensorDual& other) const {
-        // Validate tensor dimensions
-        if (this->r.sizes() != other.r.sizes() || this->d.sizes() != other.d.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: Tensors in TensorDual must have the same shape for division.");
-        }
 
         // Ensure the denominator is safe for division
         auto safe_r = torch::sign(other.r) * other.r.abs().clamp_min(1e-12);
