@@ -128,10 +128,13 @@ namespace janus {
      return input - mask.to(torch::kDouble) * input;
    }
 
+
+
+
    torch::Tensor custom_sign(const torch::Tensor& input, double threshold = 1e-6) 
    {
     
-    auto x = torch::real(input);
+    auto x = torch::real(input).to(torch::kDouble);
     // Create a tensor with the same shape as input, filled with 0
     auto output = torch::zeros_like(x);
     
@@ -148,10 +151,13 @@ namespace janus {
    }
 
 
+
+
    TensorDual custom_sign(const TensorDual& input, double threshold = 1e-6) 
    {
     
-    auto x = TensorDual(torch::real(input.r), torch::real(input.d));
+    auto x = TensorDual(torch::real(input.r).to(torch::kDouble), 
+                        torch::real(input.d).to(torch::kDouble));
     // Create a tensor with the same shape as input, filled with 0
     auto output = TensorDual::zeros_like(x);
     
@@ -171,7 +177,9 @@ namespace janus {
    TensorHyperDual custom_sign(const TensorHyperDual& input, double threshold = 1e-6) 
    {
     
-    auto x = TensorHyperDual(torch::real(input.r), torch::real(input.d), torch::real(input.h));
+    auto x = TensorHyperDual(torch::real(input.r).to(torch::kDouble), 
+                             torch::real(input.d).to(torch::kDouble), 
+                             torch::real(input.h).to(torch::kDouble));
     // Create a tensor with the same shape as input, filled with 0
     auto output = TensorHyperDual::zeros_like(x);
     
