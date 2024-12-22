@@ -1683,7 +1683,7 @@ public:
     TensorDual operator/(const TensorDual& other) const {
 
         // Ensure the denominator is safe for division
-        auto safe_r = torch::sign(other.r) * other.r.abs().clamp_min(1e-12);
+        auto safe_r = torch::sgn(other.r) * other.r.abs().clamp_min(1e-12);
     
         // Compute the real part
         auto r = this->r / safe_r;
@@ -1712,7 +1712,7 @@ public:
         auto othere = other.dim() != this->r.dim() ? other.unsqueeze(1) : other;
 
         // Ensure the denominator is safe for division
-        auto safe_other = torch::sign(other) * other.abs().clamp_min(1e-12);
+        auto safe_other = torch::sgn(other) * other.abs().clamp_min(1e-12);
 
 
         // Compute the real part
@@ -1739,7 +1739,7 @@ public:
     TensorDual operator/(double scalar) {
         // Check for division by zero
         auto tscalar = torch::tensor(scalar);
-        auto safe_scalar = torch::sign(tscalar) * tscalar.abs().clamp_min(1e-12);
+        auto safe_scalar = torch::sgn(tscalar) * tscalar.abs().clamp_min(1e-12);
 
         // Perform element-wise division
         return TensorDual(this->r / safe_scalar, this->d / safe_scalar);
@@ -1828,7 +1828,7 @@ public:
      */
     TensorDual reciprocal() const {
         // Compute the reciprocal of the real part, ensuring no division by zero
-        auto r_safe = torch::sign(r) * r.abs().clamp_min(1e-12);
+        auto r_safe = torch::sgn(r) * r.abs().clamp_min(1e-12);
         auto rrec = r_safe.reciprocal();  // Reciprocal of the real part
 
         // Compute the dual part using the chain rule
@@ -2380,7 +2380,7 @@ public:
         auto abs_r = torch::abs(r);
 
         // Compute the sign of the real part
-        auto sign_r = torch::sign(r).unsqueeze(-1);
+        auto sign_r = torch::sgn(r).unsqueeze(-1);
 
         // Adjust the dual part
         auto abs_d = sign_r * d;
@@ -2410,7 +2410,7 @@ public:
         }
 
         // Compute the sign of the real part
-        auto sign_r = torch::sign(r);
+        auto sign_r = torch::sgn(r);
 
         // Set the dual part to zero
         auto sign_d = torch::zeros_like(d);
@@ -2444,7 +2444,7 @@ public:
         }
 
         // Compute the signed logarithm of the real part
-        auto signed_log_r = torch::sign(r) * torch::log(torch::abs(r) + 1.0);
+        auto signed_log_r = torch::sgn(r) * torch::log(torch::abs(r) + 1.0);
 
         // Compute the scaling factor for the dual part: 1 / (|r| + 1)
         auto scaling_factor = (torch::abs(r) + 1.0).reciprocal();
@@ -2475,7 +2475,7 @@ public:
 
         // Compute the signed exponential of the real part
         auto exp_abs_r = torch::exp(torch::abs(r));
-        auto r_sloginv = torch::sign(r) * (exp_abs_r - 1.0);
+        auto r_sloginv = torch::sgn(r) * (exp_abs_r - 1.0);
 
         // Compute the scaling factor for the dual part: exp(|r|)
         auto scaling_factor = exp_abs_r;
@@ -3759,7 +3759,7 @@ public:
         auto abs_r = torch::abs(this->r);  // Compute |r|
 
         // First-order derivative
-        auto sign_r = torch::sign(this->r);  // Compute sign(r)
+        auto sign_r = torch::sgn(this->r);  // Compute sign(r)
         auto dn = sign_r.unsqueeze(-1) * this->d;  // sign(r) * d
 
         // Second-order derivative
@@ -3861,7 +3861,7 @@ public:
             sign_r = torch::sgn(this->r);
         }
         else {
-            sign_r = torch::sign(this->r);
+            sign_r = torch::sgn(this->r);
         }
 
         // Dual and hyperdual parts are zero
@@ -4958,10 +4958,6 @@ public:
      * @throws std::runtime_error If division by zero occurs in the real part.
      */
     TensorMatDual operator/(const TensorMatDual& other) const {
-        // Validate that the shapes match
-        if (this->r.sizes() != other.r.sizes() || this->d.sizes() != other.d.sizes()) {
-            throw std::invalid_argument("Cannot divide TensorMatDual objects: incompatible tensor shapes.");
-        }
 
         // Check for division by zero in the real part
         if (torch::any(other.r == 0).item<bool>()) {
@@ -5187,7 +5183,7 @@ public:
         auto abs_r = torch::abs(r);
 
         // Compute the sign of the real part
-        auto sign_r = torch::is_complex(r) ? torch::sign(torch::real(r)) : torch::sign(r);
+        auto sign_r = torch::is_complex(r) ? torch::sgn(torch::real(r)) : torch::sgn(r);
 
         // Adjust the dual part
         auto abs_d = sign_r.unsqueeze(-1) * d;
@@ -5764,7 +5760,7 @@ public:
         auto abs_r = torch::abs(this->r);
 
         // Compute the sign of the real part
-        auto sign_r = torch::sign(this->r);
+        auto sign_r = torch::sgn(this->r);
 
         // Scale the dual part by the sign of the real part
         auto abs_d = sign_r.unsqueeze(-1) * this->d;
@@ -7864,7 +7860,7 @@ TensorDual min(const TensorDual& lhs, const torch::Tensor& rhs) {
 static TensorDual sign(TensorDual& td) {
 
     // Compute the real part: sign of the real part of TensorDual
-    auto r = torch::sign(td.r);
+    auto r = torch::sgn(td.r);
 
     // Create a mask where the real part is zero
     auto maskz = td.r == 0;

@@ -14224,7 +14224,7 @@ TEST(TensorMatDualTest, Division_MismatchedTensors) {
     TensorMatDual tmd2(real_tensor2, dual_tensor2);
 
     //Expect a c10 error
-    EXPECT_THROW(tmd1 / tmd2, std::invalid_argument);
+    EXPECT_THROW(tmd1 / tmd2, c10::Error);
 }
 
 // Test case for division with zeros in the denominator

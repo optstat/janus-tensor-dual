@@ -139,7 +139,7 @@ namespace janus {
     auto mask = torch::abs(x) > threshold;
     
     // Apply the sign function to elements above the threshold
-    auto sign_tensor = torch::sign(x);
+    auto sign_tensor = torch::sgn(x);
     
     // Use where to combine the results
     output = torch::where(mask, sign_tensor, output);
