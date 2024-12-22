@@ -1712,10 +1712,6 @@ public:
      * @throws std::invalid_argument If the input tensor cannot be broadcast to match `r`.
      */
     TensorDual operator/(const torch::Tensor& other) const {
-        //Validate tensor dimensions
-        if (r.sizes() != other.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: The input tensor must have the same shape as the real part of the TensorDual.");
-        }
         // Adjust dimensions if needed to make `other` broadcast-compatible
         auto othere = other.dim() != this->r.dim() ? other.unsqueeze(1) : other;
 

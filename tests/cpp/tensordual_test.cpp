@@ -4147,14 +4147,9 @@ TEST(TensorDualTest, DivisionWithTensorDimensionMismatch) {
 
     EXPECT_THROW(
         {
-            try {
-                TensorDual result = x / other;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: The input tensor must have the same shape as the real part of the TensorDual.", e.what());
-                throw;
-            }
+            TensorDual result = x / other;
         },
-        std::invalid_argument
+        c10::Error
     );
 }
 
