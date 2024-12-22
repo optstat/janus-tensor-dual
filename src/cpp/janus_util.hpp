@@ -146,6 +146,7 @@ namespace janus {
     
     // Use where to combine the results
     output = torch::where(mask, sign_tensor, output);
+    std::cerr << "Output from custom_sign tensor = " << output << std::endl;
     
     return output;
    }
@@ -169,7 +170,7 @@ namespace janus {
     
     // Use where to combine the results
     output = TensorDual::where(mask, sign_tensor, output);
-    
+    std::cerr << "Output from custom_sign TensorDual = " << output << std::endl;
     return output;
    }
 
@@ -191,7 +192,7 @@ namespace janus {
     
     // Use where to combine the results
     output = TensorHyperDual::where(mask, sign_tensor, output);
-    
+    std::cerr << "Output from custom_sign TensorHyperDual = " << output << std::endl;
     return output;
    }
 

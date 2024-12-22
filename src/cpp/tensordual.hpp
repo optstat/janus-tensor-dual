@@ -3055,6 +3055,25 @@ public:
 
     TensorMatHyperDual eye();
 
+    /**
+     * Overload the stream insertion operator for TensorMatHyperDual.
+     *
+     * This method provides a formatted string representation of the TensorMatHyperDual object, 
+     * displaying the real, dual, and hyperdual parts.
+     *
+     * @param os The output stream.
+     * @param obj The TensorMatHyperDual object to be printed.
+     * @return The output stream with the object data appended.
+     */
+    friend std::ostream& operator<<(std::ostream& os, const TensorHyperDual& obj) {
+        os << "TensorHyperDual {" << std::endl;
+        os << "  r: " << obj.r << std::endl;
+        os << "  d: " << obj.d << std::endl;
+        os << "  h: " << obj.h << std::endl;
+        os << "}";
+        return os;
+    }
+
 
     /**
      * Sum the TensorHyperDual along the specified dimension.
@@ -5923,6 +5942,7 @@ public:
         // Return the new TensorDual object
         return TensorHyperDual(r_squeezed, d_squeezed, h_squeezed);
     }
+
 
 
 
