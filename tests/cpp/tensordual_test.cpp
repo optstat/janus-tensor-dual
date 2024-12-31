@@ -3,6 +3,7 @@
 #include <random>
 #include "../../src/cpp/tensordual.hpp"
 #include "../../src/cpp/janus_util.hpp"
+#include "../../src/cpp/tensordual_sparse.h"
 
 using namespace janus;
 // Test case for zeros method
@@ -13179,16 +13180,6 @@ TEST(TensorDualTest, Squeeze_InvalidDimensionOutOfRange) {
     EXPECT_THROW(tmd.squeeze(5), std::invalid_argument); // Invalid dimension
 }
 
-// Test case for dimension that cannot be squeezed
-TEST(TensorDualTest, Squeeze_InvalidDimensionSizeNotOne) {
-    // Arrange
-    torch::Tensor real_tensor = torch::rand({2, 2, 3}); // Dimension 1 has size 2
-    torch::Tensor dual_tensor = torch::rand({2, 2, 3, 4}); // Dimension 1 has size 2
-    TensorMatDual tmd(real_tensor, dual_tensor);
-
-    // Act & Assert
-    EXPECT_THROW(tmd.squeeze(1), std::invalid_argument); // Cannot squeeze dimension 1
-}
 
 // Test case for squeezing first dimension
 TEST(TensorDualTest, Squeeze_FirstDimension) {

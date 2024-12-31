@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "Suppress developer warnings")
 
 
+
 # Find libtorch.  Modify this line to find your own libtorch installation.
 set(Torch_DIR "/home/panos/Applications/libtorch/share/cmake/Torch")
 
@@ -18,6 +19,8 @@ find_package(Threads REQUIRED)
 # Define the source directory for headers
 set(HEADER_SOURCE_DIR "${CMAKE_SOURCE_DIR}/src/cpp")
 set(HEADER_DEST_DIR "/usr/local/include/janus")
+
+
 
 # Custom command to copy headers
 add_custom_target(copy_headers ALL

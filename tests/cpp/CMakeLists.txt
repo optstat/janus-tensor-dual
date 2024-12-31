@@ -10,11 +10,18 @@ add_executable(dualtest ${SOURCE_FILE})
 find_package(GTest REQUIRED)
 include_directories(src/cpp ${GTEST_INCLUDE_DIRS})
 
+
+# Include CUDA headers and link CUDA libraries
+target_include_directories(dualtest PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+
 # Link GTest
-target_link_libraries(dualtest ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES})
+target_link_libraries(dualtest PRIVATE CUDA::cudart ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES})
 
 # Link libtorch
-target_link_libraries(dualtest "${TORCH_LIBRARIES}")
+# Find CUDA Toolkit
+find_package(CUDAToolkit REQUIRED)
+
+
 set_property(TARGET dualtest PROPERTY CXX_STANDARD 17)
 add_test(NAME DualTest COMMAND dualtest)
 
@@ -33,5 +40,6 @@ add_custom_target(test
     #Run the ./bin/dualtest executable
     COMMAND ${CMAKE_BINARY_DIR}/bin/dualtest
 )
+
 
 

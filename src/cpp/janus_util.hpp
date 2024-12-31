@@ -4,6 +4,7 @@
 #include <torch/torch.h>
 #include "tensordual.hpp"
 #include <iostream>
+#include <taco.h>
 
 using namespace janus;
 
@@ -50,10 +51,293 @@ namespace janus {
    auto eps = std::numeric_limits<double>::epsilon();
    auto feps = std::numeric_limits<float>::epsilon();
 
+   bool isCOOTensor(const torch::Tensor& tensor) {
+    return tensor.layout() == torch::kSparse;
+  }
+ 
+  taco::TensorBase fromLibTorch3D(const torch::Tensor& tensor) {
+    // Ensure the input tensor is on the CPU for processing
+    taco::TensorBase dt;
+    switch (tensor.scalar_type()) {
+            case torch::kFloat:
+                dt = ConvertLibTorchToTaco3D<float>(tensor);
+                break;
+            case torch::kDouble:
+                dt = ConvertLibTorchToTaco3D<double>(tensor);
+                break;
+            case torch::kInt:
+                dt = ConvertLibTorchToTaco3D<int>(tensor);
+                break;
+            case torch::kLong:
+                dt = ConvertLibTorchToTaco3D<long>(tensor);
+                break;
+            case torch::kBool:
+                dt = ConvertLibTorchToTaco3D<bool>(tensor);
+                break;
+            default:
+                throw std::invalid_argument("Unsupported data type for dual tensor.");
+    }
+
+  }
+
+
+  taco::TensorBase fromLibTorch2D(const torch::Tensor& tensor) {
+    // Ensure the input tensor is on the CPU for processing
+    taco::TensorBase dt;
+    switch (tensor.scalar_type()) {
+            case torch::kFloat:
+                dt = ConvertLibTorchToTaco2D<float>(tensor);
+                break;
+            case torch::kDouble:
+                dt = ConvertLibTorchToTaco2D<double>(tensor);
+                break;
+            case torch::kInt:
+                dt = ConvertLibTorchToTaco2D<int>(tensor);
+                break;
+            case torch::kLong:
+                dt = ConvertLibTorchToTaco2D<long>(tensor);
+                break;
+            case torch::kBool:
+                dt = ConvertLibTorchToTaco2D<bool>(tensor);
+                break;
+            default:
+                throw std::invalid_argument("Unsupported data type for dual tensor.");
+    }
+
+  }
+
+
+    torch::Tensor convertToCOO(const torch::Tensor& dense_tensor) {
+        //If it is already a COO tensor return it
+        if (isCOOTensor(dense_tensor)) {
+            return dense_tensor;
+        }
+        // Ensure the input tensor is on the CPU for processing
+        auto cpu_tensor = dense_tensor.cpu();
+
+        // Convert the dense tensor to sparse COO format
+        auto sparse_tensor = cpu_tensor.to_sparse().coalesce();
+
+        // Move the sparse tensor back to the original device
+        sparse_tensor = sparse_tensor.to(dense_tensor.device());
+
+        return sparse_tensor;
+    }
+
+
   torch::Tensor bmax(torch::Tensor &x, torch::Tensor &y)
   {
     return torch::where(x > y, x, y);
   }
+
+
+
+    template <typename T>
+    taco::Tensor<T> ConvertLibTorchToTaco2D(const torch::Tensor& libtorch_tensor) {
+        // Ensure the LibTorch tensor is in COO format and on CPU
+        auto coo_tensor = libtorch_tensor.coalesce().cpu();
+        auto indices = coo_tensor.indices();
+        auto values = coo_tensor.values();
+
+        // Check if the LibTorch tensor type matches the template type T
+        if (values.scalar_type() != torch::CppTypeToScalarType<T>()) {
+            throw std::runtime_error("Mismatch between LibTorch tensor type and TACO tensor type.");
+        }
+
+        // Initialize TACO tensor
+        int rows = libtorch_tensor.size(0);
+        int cols = libtorch_tensor.size(1);
+        taco::Tensor<T> taco_tensor = taco::Tensor<T>({rows, cols}, taco::Format({taco::Sparse, taco::Sparse}));
+
+        // Insert non-zero elements into TACO tensor
+        for (int64_t i = 0; i < values.size(0); ++i) {
+            int row = indices[0][i].item<int>();
+            int col = indices[1][i].item<int>();
+            T value = values[i].item<T>(); // Use template type T for values
+            taco_tensor.insert({row, col}, value);
+        }
+
+        // Pack the tensor
+        taco_tensor.pack();
+        return taco_tensor;
+    }
+
+
+    template <typename T>
+    torch::Tensor ConvertTacoToLibTorch2D(const taco::Tensor<T>& taco_tensor) {
+        // Extract dimensions
+        int64_t rows = taco_tensor.getDimension(0);
+        int64_t cols = taco_tensor.getDimension(1);
+
+        // Prepare vectors to hold indices and values
+        std::vector<int64_t> row_indices;
+        std::vector<int64_t> col_indices;
+        std::vector<T> values;
+
+        // Iterate over non-zero elements
+        for (auto& value : taco_tensor) {
+            auto coords = value.first; // Extract coordinates
+            row_indices.push_back(coords[0]);
+            col_indices.push_back(coords[1]);
+            values.push_back(value.second);
+        }
+
+        // Create LibTorch tensors
+        auto options = torch::TensorOptions().dtype(torch::CppTypeToScalarType<T>()).device(torch::kCPU);
+
+        // Indices
+        auto row_tensor = torch::from_blob(row_indices.data(), {static_cast<int64_t>(row_indices.size())}, options.dtype(torch::kLong)).clone();
+        auto col_tensor = torch::from_blob(col_indices.data(), {static_cast<int64_t>(col_indices.size())}, options.dtype(torch::kLong)).clone();
+        auto indices = torch::stack({row_tensor, col_tensor});
+
+        // Values
+        auto value_tensor = torch::from_blob(values.data(), {static_cast<int64_t>(values.size())}, options).clone();
+
+        // Create sparse COO tensor
+        return torch::sparse_coo_tensor(indices, value_tensor, {rows, cols}, options);
+    }
+
+    template <typename T>
+    taco::Tensor<T> ConvertLibTorchToTaco3D(const torch::Tensor& libtorch_tensor) {
+        // Ensure the LibTorch tensor is in COO format and on CPU
+        auto coo_tensor = libtorch_tensor.coalesce().cpu();
+        auto indices = coo_tensor.indices();
+        auto values = coo_tensor.values();
+
+        // Initialize TACO tensor
+        int dim1 = libtorch_tensor.size(0);
+        int dim2 = libtorch_tensor.size(1);
+        int dim3 = libtorch_tensor.size(2);
+        auto taco_tensor = taco::Tensor<T>({dim1, dim2, dim3}, taco::Format({taco::Sparse, taco::Sparse, taco::Sparse}));
+
+        // Insert non-zero elements into TACO tensor
+        for (int64_t i = 0; i < values.size(0); ++i) {
+            int idx1 = indices[0][i].item<int>();
+            int idx2 = indices[1][i].item<int>();
+            int idx3 = indices[2][i].item<int>();
+            double value = values[i].item<double>();
+            taco_tensor.insert({idx1, idx2, idx3}, value);
+        }
+
+        // Pack the tensor
+        taco_tensor.pack();
+        return taco_tensor;
+    }
+
+    template <typename T>
+    torch::Tensor ConvertTacoToLibTorch3D(const taco::Tensor<T>& taco_tensor) {
+        // Extract dimensions
+        int64_t dim1 = taco_tensor.getDimension(0);
+        int64_t dim2 = taco_tensor.getDimension(1);
+        int64_t dim3 = taco_tensor.getDimension(2);
+
+        // Prepare vectors to hold indices and values
+        std::vector<int64_t> idx1_indices;
+        std::vector<int64_t> idx2_indices;
+        std::vector<int64_t> idx3_indices;
+        std::vector<T> values;
+
+        // Iterate over non-zero elements
+        for (auto& value : taco_tensor) {
+            auto coords = value.first; // Extract coordinates
+            idx1_indices.push_back(coords[0]);
+            idx2_indices.push_back(coords[1]);
+            idx3_indices.push_back(coords[2]);
+            values.push_back(value.second); // Use template type T for values
+        }
+
+        // Create LibTorch tensors for indices
+        auto options = torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU);
+        auto idx1_tensor = torch::from_blob(idx1_indices.data(), {static_cast<int64_t>(idx1_indices.size())}, options).clone();
+        auto idx2_tensor = torch::from_blob(idx2_indices.data(), {static_cast<int64_t>(idx2_indices.size())}, options).clone();
+        auto idx3_tensor = torch::from_blob(idx3_indices.data(), {static_cast<int64_t>(idx3_indices.size())}, options).clone();
+        auto indices = torch::stack({idx1_tensor, idx2_tensor, idx3_tensor});
+
+        // Create LibTorch tensor for values
+        auto value_options = torch::TensorOptions().dtype(torch::CppTypeToScalarType<T>()).device(torch::kCPU);
+        auto value_tensor = torch::from_blob(values.data(), {static_cast<int64_t>(values.size())}, value_options).clone();
+
+        // Create sparse COO tensor
+        return torch::sparse_coo_tensor(indices, value_tensor, {dim1, dim2, dim3});
+    }
+
+    template <typename T>
+    void ConvertLibTorchToTaco4D(const torch::Tensor& libtorch_tensor, taco::Tensor<T>& taco_tensor) {
+        // Ensure the LibTorch tensor is in COO format and on CPU
+        auto coo_tensor = libtorch_tensor.coalesce().cpu();
+        auto indices = coo_tensor.indices();
+        auto values = coo_tensor.values();
+
+        // Check if the LibTorch tensor type matches the template type T
+        if (values.scalar_type() != torch::CppTypeToScalarType<T>()) {
+            throw std::runtime_error("Mismatch between LibTorch tensor type and TACO tensor type.");
+        }
+
+        // Initialize TACO tensor with appropriate dimensions
+        int64_t dim1 = libtorch_tensor.size(0);
+        int64_t dim2 = libtorch_tensor.size(1);
+        int64_t dim3 = libtorch_tensor.size(2);
+        int64_t dim4 = libtorch_tensor.size(3);
+        taco_tensor = taco::Tensor<T>({dim1, dim2, dim3, dim4}, taco::Format({taco::Sparse, taco::Sparse, taco::Sparse, taco::Sparse}));
+
+        // Insert non-zero elements into TACO tensor
+        for (int64_t i = 0; i < values.size(0); ++i) {
+            int64_t idx1 = indices[0][i].item<int64_t>();
+            int64_t idx2 = indices[1][i].item<int64_t>();
+            int64_t idx3 = indices[2][i].item<int64_t>();
+            int64_t idx4 = indices[3][i].item<int64_t>();
+            T value = values[i].item<T>(); // Use template type T for values
+            taco_tensor.insert({idx1, idx2, idx3, idx4}, value);
+        }
+
+        // Pack the tensor to finalize the storage format
+        taco_tensor.pack();
+    }
+
+    template <typename T>
+    torch::Tensor ConvertTacoToLibTorch4D(const taco::Tensor<T>& taco_tensor) {
+        // Extract dimensions
+        int64_t dim1 = taco_tensor.getDimension(0);
+        int64_t dim2 = taco_tensor.getDimension(1);
+        int64_t dim3 = taco_tensor.getDimension(2);
+        int64_t dim4 = taco_tensor.getDimension(3);
+
+        // Prepare vectors to hold indices and values
+        std::vector<int64_t> idx1_indices;
+        std::vector<int64_t> idx2_indices;
+        std::vector<int64_t> idx3_indices;
+        std::vector<int64_t> idx4_indices;
+        std::vector<T> values;
+
+        // Iterate over non-zero elements
+        for (auto& value : taco_tensor) {
+            auto coords = value.first; // Extract coordinates
+            idx1_indices.push_back(coords[0]);
+            idx2_indices.push_back(coords[1]);
+            idx3_indices.push_back(coords[2]);
+            idx4_indices.push_back(coords[3]);
+            values.push_back(value.second); // Use template type T for values
+        }
+
+        // Create LibTorch tensors for indices
+        auto options = torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU);
+        auto idx1_tensor = torch::from_blob(idx1_indices.data(), {static_cast<int64_t>(idx1_indices.size())}, options).clone();
+        auto idx2_tensor = torch::from_blob(idx2_indices.data(), {static_cast<int64_t>(idx2_indices.size())}, options).clone();
+        auto idx3_tensor = torch::from_blob(idx3_indices.data(), {static_cast<int64_t>(idx3_indices.size())}, options).clone();
+        auto idx4_tensor = torch::from_blob(idx4_indices.data(), {static_cast<int64_t>(idx4_indices.size())}, options).clone();
+        auto indices = torch::stack({idx1_tensor, idx2_tensor, idx3_tensor, idx4_tensor});
+
+        // Create LibTorch tensor for values
+        auto value_options = torch::TensorOptions().dtype(torch::CppTypeToScalarType<T>()).device(torch::kCPU);
+        auto value_tensor = torch::from_blob(values.data(), {static_cast<int64_t>(values.size())}, value_options).clone();
+
+        // Create sparse COO tensor in LibTorch
+        return torch::sparse_coo_tensor(indices, value_tensor, {dim1, dim2, dim3, dim4});
+    }
+
+
+
+
 
   // Function to generate Chebyshev nodes
   torch::Tensor chebyshev_nodes(int N) {
@@ -134,7 +418,10 @@ namespace janus {
    torch::Tensor custom_sign(const torch::Tensor& input, double threshold = 1e-6) 
    {
     
-    auto x = torch::real(input).to(torch::kDouble);
+    auto x = torch::real(input);
+    std::cerr << "Input to custom_sign tensor = " << x << std::endl;
+    //assert that the x type is real not complex
+    assert(x.is_complex() == false);
     // Create a tensor with the same shape as input, filled with 0
     auto output = torch::zeros_like(x);
     
@@ -157,8 +444,10 @@ namespace janus {
    TensorDual custom_sign(const TensorDual& input, double threshold = 1e-6) 
    {
     
-    auto x = TensorDual(torch::real(input.r).to(torch::kDouble), 
-                        torch::real(input.d).to(torch::kDouble));
+    auto x = TensorDual(torch::real(input.r), 
+                        torch::real(input.d));
+    assert(x.r.is_complex() == false);
+    std::cerr << "Input to custom_sign TensorDual = " << x << std::endl;
     // Create a tensor with the same shape as input, filled with 0
     auto output = TensorDual::zeros_like(x);
     
@@ -178,9 +467,11 @@ namespace janus {
    TensorHyperDual custom_sign(const TensorHyperDual& input, double threshold = 1e-6) 
    {
     
-    auto x = TensorHyperDual(torch::real(input.r).to(torch::kDouble), 
-                             torch::real(input.d).to(torch::kDouble), 
-                             torch::real(input.h).to(torch::kDouble));
+    auto x = TensorHyperDual(torch::real(input.r), 
+                             torch::real(input.d), 
+                             torch::real(input.h));
+    std::cerr << "Input to custom_sign TensorHyperDual = " << x << std::endl;
+    assert(x.r.is_complex() == false);
     // Create a tensor with the same shape as input, filled with 0
     auto output = TensorHyperDual::zeros_like(x);
     
@@ -202,7 +493,9 @@ namespace janus {
    {
      torch::Tensor a_sign, b_sign;
      a_sign = custom_sign(torch::real(a));
+     std::cerr << "a_sign = " << a_sign << std::endl;
      b_sign = custom_sign(torch::real(b));
+     std::cerr << "b_sign = " << b_sign << std::endl;
      //If the number is very small assume the sign is positive to ensure compatibility with matlab
      auto result = (b_sign >= 0) * ((a_sign >= 0) * a + (a_sign < 0) * -a) +
              (b_sign < 0)* ((a_sign >= 0) *-a + (a_sign < 0) *a);
@@ -288,9 +581,12 @@ namespace janus {
 
    TensorDual signcond(const TensorDual &a, const TensorDual &b) 
    {
+     std::cerr << "signcond TensorDual" << std::endl;
      torch::Tensor a_sign, b_sign;
      a_sign = custom_sign(torch::real(a.r));
+     std::cerr << "a_sign = " << a_sign << std::endl;
      b_sign = custom_sign(torch::real(b.r));
+     std::cerr << "b_sign = " << b_sign << std::endl;
      //If the number is very small assume the sign is positive to ensure compatibility with matlab
 
      auto result = TensorDual::einsum("mi,mi->mi", (b_sign >= 0) , (TensorDual::einsum("mi,mi->mi", (a_sign >= 0) , a))) + 
@@ -906,6 +1202,254 @@ torch::Tensor compute_batch_jacobian2d2d(torch::Tensor& output, torch::Tensor& i
 
 }
 
+class ComplexTensorSparse2D {
+private:
+    taco::Tensor<double> real; // Real part
+    taco::Tensor<double> imag; // Imaginary part
+
+public:
+    // Constructor from libtorch complex tensor
+    ComplexTensorSparse2D(torch::Tensor tens) {
+        //Make sure the tensor is complex
+        assert(tens.is_complex() && "Input tensor must be complex");
+        //Make sure the tensor is 2D
+        assert(tens.dim() == 2 && "Input tensor must be 2D");
+        //Make sure the tensor is sparse
+        assert(tens.is_sparse() && "Input tensor must be sparse");
+        // Initialize real and imaginary parts
+        real = fromLibTorch2D(torch::real(tens));
+        imag = fromLibTorch2D(tens.sizes());
+        //Detect the device and move accordingly
+        if (tens.device().is_cuda()) {
+            real = real.cuda();
+            imag = imag.cuda();
+        }
+        else {
+            real = real.cpu();
+            imag = imag.cpu();
+        }
+
+    }
+
+    ComplexTensorSparse2D(taco::Tensor<double> r, taco::Tensor<double> i) : real(r), imag(i) {
+        assert(r.getDimension() == 2 && "Real part must be 2D");
+        assert(i.getDimension() == 2 && "Imaginary part must be 2D");
+    }
+
+
+    // Pack tensors
+    void pack() {
+        real.pack();
+        imag.pack();
+    }
+
+
+    taco::Tensor<double> getReal() { return real; }
+    taco::Tensor<double> getImag() { return imag; }
+    
+    /**
+     * sqrt function
+     */
+    ComplexTensorSparse2D sqrt() const {
+        auto r = taco::sqrt(taco::square(real) + taco::square(imag));
+        auto theta = taco::atan2(imag, real);
+        auto rn = r * taco::cos(theta / 2);
+        auto in = r * taco::sin(theta / 2);
+        rn.pack();
+        in.pack();
+        return ComplexTensorSparse2D(rn, in);
+    }
+
+    ComplexTensorSparse2D operator+(const ComplexTensorSparse2D& other) const {
+        return ComplexTensorSparse2D(real + other.real, imag + other.imag);
+    }
+
+    ComplexTensorSparse2D operator-(const ComplexTensorSparse2D& other) const {
+        return ComplexTensorSparse2D(real - other.real, imag - other.imag);
+    }
+
+    ComplexTensorSparse2D operator*(const ComplexTensorSparse2D& other) const {
+        return ComplexTensorSparse2D(real * other.real - imag * other.imag, real * other.imag + imag * other.real);
+    }
+
+    ComplexTensorSparse2D operator/(const ComplexTensorSparse2D& other) const {
+        auto denom = other.real * other.real + other.imag * other.imag;
+        return ComplexTensorSparse2D((real * other.real + imag * other.imag) / denom, (imag * other.real - real * other.imag) / denom);
+    }
+
+    // Access real part
+    taco::Tensor<double>& getReal() { return real; }
+
+    // Access imaginary part
+    taco::Tensor<double>& getImag() { return imag; }
+};
+
+
+
+class ComplexTensorSparse3D {
+private:
+    taco::Tensor<double> real; // Real part
+    taco::Tensor<double> imag; // Imaginary part
+
+public:
+    // Constructor from libtorch complex tensor
+    ComplexTensorSparse3D(torch::Tensor tens) {
+        //Make sure the tensor is complex
+        assert(tens.is_complex() && "Input tensor must be complex");
+        //Make sure the tensor is 2D
+        assert(tens.dim() == 3 && "Input tensor must be 3D");
+        //Make sure the tensor is sparse
+        assert(tens.is_sparse() && "Input tensor must be sparse");
+        // Initialize real and imaginary parts
+        real = fromLibTorch2D(torch::real(tens));
+        imag = fromLibTorch2D(tens.sizes());
+        //Detect the device and move accordingly
+        if (tens.device().is_cuda()) {
+            real = real.cuda();
+            imag = imag.cuda();
+        }
+        else {
+            real = real.cpu();
+            imag = imag.cpu();
+        }
+
+    }
+
+    ComplexTensorSparse3D(taco::Tensor<double> r, taco::Tensor<double> i) : real(r), imag(i) {
+        assert(r.getDimension() == 3 && "Real part must be 3D");
+        assert(i.getDimension() == 3 && "Imaginary part must be 3D");
+    }
+
+
+    // Pack tensors
+    void pack() {
+        real.pack();
+        imag.pack();
+    }
+
+
+    taco::Tensor<double> getReal() { return real; }
+    taco::Tensor<double> getImag() { return imag; }
+    
+    /**
+     * sqrt function
+     */
+    ComplexTensorSparse3D sqrt() const {
+        auto r = taco::sqrt(taco::square(real) + taco::square(imag));
+        auto theta = taco::atan2(imag, real);
+        auto rn = r * taco::cos(theta / 2);
+        auto in = r * taco::sin(theta / 2);
+        rn.pack();
+        in.pack();
+        return ComplexTensorSparse3D(rn, in);
+    }
+
+    ComplexTensorSparse3D operator+(const ComplexTensorSparse3D& other) const {
+        return ComplexTensorSparse3D(real + other.real, imag + other.imag);
+    }
+
+    ComplexTensorSparse3D operator-(const ComplexTensorSparse3D& other) const {
+        return ComplexTensorSparse3D(real - other.real, imag - other.imag);
+    }
+
+    ComplexTensorSparse3D operator*(const ComplexTensorSparse3D& other) const {
+        return ComplexTensorSparse3D(real * other.real - imag * other.imag, real * other.imag + imag * other.real);
+    }
+
+    ComplexTensorSparse3D operator/(const ComplexTensorSparse3D& other) const {
+        auto denom = other.real * other.real + other.imag * other.imag;
+        return ComplexTensorSparse3D((real * other.real + imag * other.imag) / denom, (imag * other.real - real * other.imag) / denom);
+    }
+
+    // Access real part
+    taco::Tensor<double>& getReal() { return real; }
+
+    // Access imaginary part
+    taco::Tensor<double>& getImag() { return imag; }
+};
+
+
+class ComplexTensorSparse4D {
+private:
+    taco::Tensor<double> real; // Real part
+    taco::Tensor<double> imag; // Imaginary part
+
+public:
+    // Constructor from libtorch complex tensor
+    ComplexTensorSparse4D(torch::Tensor tens) {
+        //Make sure the tensor is complex
+        assert(tens.is_complex() && "Input tensor must be complex");
+        //Make sure the tensor is 2D
+        assert(tens.dim() == 4 && "Input tensor must be 4D");
+        //Make sure the tensor is sparse
+        assert(tens.is_sparse() && "Input tensor must be sparse");
+        // Initialize real and imaginary parts
+        real = fromLibTorch2D(torch::real(tens));
+        imag = fromLibTorch2D(tens.sizes());
+        //Detect the device and move accordingly
+        if (tens.device().is_cuda()) {
+            real = real.cuda();
+            imag = imag.cuda();
+        }
+        else {
+            real = real.cpu();
+            imag = imag.cpu();
+        }
+
+    }
+
+    ComplexTensorSparse4D(taco::Tensor<double> r, taco::Tensor<double> i) : real(r), imag(i) {
+        assert(r.getDimension() == 4 && "Real part must be 3D");
+        assert(i.getDimension() == 4 && "Imaginary part must be 3D");
+    }
+
+
+    // Pack tensors
+    void pack() {
+        real.pack();
+        imag.pack();
+    }
+
+
+    taco::Tensor<double> getReal() { return real; }
+    taco::Tensor<double> getImag() { return imag; }
+    
+    /**
+     * sqrt function
+     */
+    ComplexTensorSparse4D sqrt() const {
+        auto r = taco::sqrt(taco::square(real) + taco::square(imag));
+        auto theta = taco::atan2(imag, real);
+        auto rn = r * taco::cos(theta / 2);
+        auto in = r * taco::sin(theta / 2);
+        rn.pack();
+        in.pack();
+        return ComplexTensorSparse3D(rn, in);
+    }
+
+    ComplexTensorSparse4D operator+(const ComplexTensorSparse4D& other) const {
+        return ComplexTensorSparse4D(real + other.real, imag + other.imag);
+    }
+
+    ComplexTensorSparse4D operator-(const ComplexTensorSparse4D& other) const {
+        return ComplexTensorSparse4D(real - other.real, imag - other.imag);
+    }
+
+    ComplexTensorSparse4D operator*(const ComplexTensorSparse4D& other) const {
+        return ComplexTensorSparse4D(real * other.real - imag * other.imag, real * other.imag + imag * other.real);
+    }
+
+    ComplexTensorSparse4D operator/(const ComplexTensorSparse4D& other) const {
+        auto denom = other.real * other.real + other.imag * other.imag;
+        return ComplexTensorSparse4D((real * other.real + imag * other.imag) / denom, (imag * other.real - real * other.imag) / denom);
+    }
+
+    // Access real part
+    taco::Tensor<double>& getReal() { return real; }
+
+    // Access imaginary part
+    taco::Tensor<double>& getImag() { return imag; }
+};
 
    
 }; // namespace janus

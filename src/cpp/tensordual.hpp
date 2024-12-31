@@ -5,7 +5,7 @@
 #include <type_traits> // For std::is_scalar
 #include <vector>
 #include <sstream>  // For std::ostringstream
-
+#include <taco.h>
 using TensorIndex = torch::indexing::TensorIndex;
 using Slice = torch::indexing::Slice;
 
