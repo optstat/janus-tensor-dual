@@ -50,23 +50,10 @@ ExternalProject_Add(
                    unzip -q ${CMAKE_BINARY_DIR}/downloads/libtorch.zip -d ${LIBTORCH_INSTALL_DIR}
 
 )
-
-# Fetch TACO
-include(FetchContent)
-FetchContent_Declare(
-    taco
-    GIT_REPOSITORY https://github.com/tensor-compiler/taco.git
-    GIT_TAG master
-    SOURCE_DIR ${CMAKE_BINARY_DIR}/taco-src
-    BINARY_DIR ${CMAKE_BINARY_DIR}/taco-build
-)
-FetchContent_MakeAvailable(taco)
-
-# Force parallel build for TACO
-add_custom_target(taco_build ALL
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/taco-build --parallel ${NUM_CPUS}
-    DEPENDS taco
-)
+# Set options for TACO
+set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
+set(OPENMP ON CACHE BOOL "Enable OpenMP")
+add_subdirectory(third_party/taco)
 
 # Add subdirectory for tests
 if(EXISTS ${CMAKE_SOURCE_DIR}/tests/cpp)
