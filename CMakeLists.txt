@@ -80,7 +80,7 @@ set(PYBIND11_DIR ${CMAKE_BINARY_DIR}/pybind11/src/pybind11_project)
 set(BATS_DIR ${CMAKE_BINARY_DIR}/bats/src/bats_project)
 
 # Pass dependency paths to TACO
-add_definitions(-DPYBIND11_DIR=${PYBIND11_DIR} -DBATS_DIR=${BATS_DIR})
+add_definitions(-DPYBIND11_DIR=${PYBIND11_DIR} -DBATS_DIR=${BATS_DIR} )
 
 # Add TACO subdirectory
 add_subdirectory(third_party/taco)
@@ -115,3 +115,22 @@ install(DIRECTORY ${HEADER_SOURCE_DIR}/
         DESTINATION ${CMAKE_INSTALL_PREFIX}/include/janus
         FILES_MATCHING PATTERN "*.h"
 )
+
+# Define the location of the test binary
+set(TEST_BINARY "${CMAKE_BINARY_DIR}/bin/dualtest")
+
+# Add a custom target to run the tests
+add_custom_target(
+    test
+    COMMAND ${TEST_BINARY}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running tests with ./bin/dualtest"
+    VERBATIM
+)
+
+# Ensure the `test` target depends on building the `dualtest` binary
+if(TARGET dualtest)
+    add_dependencies(test dualtest)
+else()
+    message(WARNING "Target 'dualtest' does not exist. Ensure you define it properly.")
+endif()
