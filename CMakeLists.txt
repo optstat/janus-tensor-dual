@@ -1,36 +1,90 @@
 cmake_minimum_required(VERSION 3.10)
-project(DualTestProject)
+project(JanusTensorDual VERSION 1.0 LANGUAGES CXX)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
-set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "Suppress developer warnings")
 
+# Enable CMP0077 policy for consistent variable handling
+if(POLICY CMP0077)
+    cmake_policy(SET CMP0077 NEW)
+endif()
 
+include(ExternalProject)
+include(ProcessorCount)
 
-# Find libtorch.  Modify this line to find your own libtorch installation.
-set(Torch_DIR "/home/panos/Applications/libtorch/share/cmake/Torch")
+# Define paths
+set(EXTERNAL_PROJECT_DIR "${CMAKE_BINARY_DIR}/external")
+set(LIBTORCH_INSTALL_DIR "${CMAKE_BINARY_DIR}/libtorch")
 
-find_package(Torch REQUIRED)
+# Get the number of available processors
+ProcessorCount(NUM_CPUS)
+if(NOT NUM_CPUS OR NUM_CPUS EQUAL 0)
+    set(NUM_CPUS 1)  # Fallback to 1 if the processor count cannot be determined
+endif()
 
 # Add pthread
 find_package(Threads REQUIRED)
 
-# Define the source directory for headers
-set(HEADER_SOURCE_DIR "${CMAKE_SOURCE_DIR}/src/cpp")
-set(HEADER_DEST_DIR "/usr/local/include/janus")
+# Option to enable CUDA for LibTorch
+option(USE_CUDA "Enable CUDA support for LibTorch" ON)
+set(LIBTORCH_VERSION 2.5.0)
+if(USE_CUDA)
+    set(LIBTORCH_DOWNLOAD_URL https://download.pytorch.org/libtorch/cu118/libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}%2Bcu118.zip)
+else()
+    set(LIBTORCH_DOWNLOAD_URL https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}.zip)
+endif()
 
+# ExternalProject to download and extract LibTorch
+ExternalProject_Add(
+    libtorch_project
+    PREFIX ${CMAKE_BINARY_DIR}/libtorch_download
+    URL ${LIBTORCH_DOWNLOAD_URL}
+    DOWNLOAD_COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/downloads &&
+                     ${CMAKE_COMMAND} -E echo "Downloading LibTorch to ${CMAKE_BINARY_DIR}/downloads/libtorch.zip..." &&
+                     curl -L -o ${CMAKE_BINARY_DIR}/downloads/libtorch.zip ${LIBTORCH_DOWNLOAD_URL}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBTORCH_INSTALL_DIR} &&
+                   ${CMAKE_COMMAND} -E echo_append "Installing LibTorch..." &&
+                   unzip -q ${CMAKE_BINARY_DIR}/downloads/libtorch.zip -d ${LIBTORCH_INSTALL_DIR}
 
+)
 
-# Custom command to copy headers
-add_custom_target(copy_headers ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${HEADER_DEST_DIR}
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${HEADER_SOURCE_DIR} ${HEADER_DEST_DIR}
-    COMMENT "Copying header files to ${HEADER_DEST_DIR}"
+# Fetch TACO
+include(FetchContent)
+FetchContent_Declare(
+    taco
+    GIT_REPOSITORY https://github.com/tensor-compiler/taco.git
+    GIT_TAG master
+    SOURCE_DIR ${CMAKE_BINARY_DIR}/taco-src
+    BINARY_DIR ${CMAKE_BINARY_DIR}/taco-build
+)
+FetchContent_MakeAvailable(taco)
+
+# Force parallel build for TACO
+add_custom_target(taco_build ALL
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/taco-build --parallel ${NUM_CPUS}
+    DEPENDS taco
 )
 
 # Add subdirectory for tests
-add_subdirectory(tests/cpp)
+if(EXISTS ${CMAKE_SOURCE_DIR}/tests/cpp)
+    add_subdirectory(tests/cpp)
 
-# Install rules for header files
-install(DIRECTORY ${HEADER_SOURCE_DIR}/ DESTINATION include/janus FILES_MATCHING PATTERN "*.hpp")
+    # Check if the `tests` target exists before adding dependencies
+    if(TARGET tests)
+        add_dependencies(tests taco_build libtorch_project)
+    endif()
+else()
+    message(WARNING "Tests directory 'tests/cpp' does not exist. Skipping.")
+endif()
+
+
+
+# Install headers only when `make install` is run
+set(HEADER_SOURCE_DIR "${CMAKE_SOURCE_DIR}/src/cpp")
+install(DIRECTORY ${HEADER_SOURCE_DIR}/
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/include/janus
+        FILES_MATCHING PATTERN "*.h"
+)

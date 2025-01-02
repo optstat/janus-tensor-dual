@@ -4,6 +4,7 @@
 #include <complex>
 //Utility class to implement dual tensor operations only necessary for QR decomposition
 //This is a simplified version of the Dual class in the original codebase
+#include <cublas_v2.h>
 #include <cusparse.h>
 #include <memory>
 #include <vector>
@@ -109,6 +110,48 @@ public:
         convertCOOToCSR(row_indices, col_indices, values, dual_row_ptr_, dual_col_indices_, dual_values_);
     }
 
+    VectorDualSparse<T> sum() const {
+        // Create result vector with reduced size
+        VectorDualSparse<T> result(batch_size_, 1, dual_dim_);
+
+        // Scalars for cuSPARSE operations
+        const T alpha = static_cast<T>(1.0);
+        const T beta = static_cast<T>(0.0);
+
+        // Primal part: Sum over real dimension (N)
+        for (int b = 0; b < batch_size_; ++b) {
+            // Create sparse vector descriptors
+            cusparseSpVecDescr_t vec_in, vec_out;
+            cusparseCreateSpVec(&vec_in, size_, nnz_, row_offsets_[b], col_indices_[b],
+                                primal_data_ + values_offsets_[b], CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F);
+
+            T* result_primal = result.primal_data_ + b;  // Output location for batch `b`
+            cusparseCreateDnVec(&vec_out, 1, result_primal, CUDA_R_32F);
+
+            // Execute sparse-to-dense reduction
+            cusparseReduce(handle_, vec_in, vec_out, alpha, beta);
+        }
+
+        // Dual part: Sum over real dimension (N) for each dual component (D)
+        for (int b = 0; b < batch_size_; ++b) {
+            for (int d = 0; d < dual_dim_; ++d) {
+                cusparseSpVecDescr_t vec_in, vec_out;
+                cusparseCreateSpVec(&vec_in, size_, nnz_, row_offsets_[b], col_indices_[b],
+                                    dual_data_ + dual_offsets_[b] + d * nnz_, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F);
+
+                T* result_dual = result.dual_data_ + b * dual_dim_ + d;  // Output location for dual part
+                cusparseCreateDnVec(&vec_out, 1, result_dual, CUDA_R_32F);
+
+                // Execute sparse-to-dense reduction
+                cusparseReduce(handle_, vec_in, vec_out, alpha, beta);
+            }
+        }
+
+        // Return the summed vector
+        return result;
+    }
+
+
     // Getters for sparse data
     const thrust::device_vector<int>& primalRowPtr() const { return primal_row_ptr_; }
     const thrust::device_vector<int>& primalColIndices() const { return primal_col_indices_; }
@@ -117,7 +160,8 @@ public:
     const thrust::device_vector<int>& dualRowPtr() const { return dual_row_ptr_; }
     const thrust::device_vector<int>& dualColIndices() const { return dual_col_indices_; }
     const thrust::device_vector<ComplexT>& dualValues() const { return dual_values_; }
-};
+}; // class VectorDualSparse
+
 
 template <typename T>
 class MatrixSparse {
@@ -226,7 +270,9 @@ public:
     const thrust::device_vector<int>& rowPtr() const { return row_ptr_; }
     const thrust::device_vector<int>& colIndices() const { return col_indices_; }
     const thrust::device_vector<ComplexT>& values() const { return values_; }
-};
+}; // class MatrixSparse
+
+
 
 
 

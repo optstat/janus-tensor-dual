@@ -3,7 +3,7 @@
 #include <random>
 #include "../../src/cpp/tensordual.hpp"
 #include "../../src/cpp/janus_util.hpp"
-#include "../../src/cpp/tensordual_sparse.h"
+#include "../../src/cpp/cudatensordense.hpp"
 
 using namespace janus;
 // Test case for zeros method

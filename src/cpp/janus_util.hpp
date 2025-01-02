@@ -55,56 +55,6 @@ namespace janus {
     return tensor.layout() == torch::kSparse;
   }
  
-  taco::TensorBase fromLibTorch3D(const torch::Tensor& tensor) {
-    // Ensure the input tensor is on the CPU for processing
-    taco::TensorBase dt;
-    switch (tensor.scalar_type()) {
-            case torch::kFloat:
-                dt = ConvertLibTorchToTaco3D<float>(tensor);
-                break;
-            case torch::kDouble:
-                dt = ConvertLibTorchToTaco3D<double>(tensor);
-                break;
-            case torch::kInt:
-                dt = ConvertLibTorchToTaco3D<int>(tensor);
-                break;
-            case torch::kLong:
-                dt = ConvertLibTorchToTaco3D<long>(tensor);
-                break;
-            case torch::kBool:
-                dt = ConvertLibTorchToTaco3D<bool>(tensor);
-                break;
-            default:
-                throw std::invalid_argument("Unsupported data type for dual tensor.");
-    }
-
-  }
-
-
-  taco::TensorBase fromLibTorch2D(const torch::Tensor& tensor) {
-    // Ensure the input tensor is on the CPU for processing
-    taco::TensorBase dt;
-    switch (tensor.scalar_type()) {
-            case torch::kFloat:
-                dt = ConvertLibTorchToTaco2D<float>(tensor);
-                break;
-            case torch::kDouble:
-                dt = ConvertLibTorchToTaco2D<double>(tensor);
-                break;
-            case torch::kInt:
-                dt = ConvertLibTorchToTaco2D<int>(tensor);
-                break;
-            case torch::kLong:
-                dt = ConvertLibTorchToTaco2D<long>(tensor);
-                break;
-            case torch::kBool:
-                dt = ConvertLibTorchToTaco2D<bool>(tensor);
-                break;
-            default:
-                throw std::invalid_argument("Unsupported data type for dual tensor.");
-    }
-
-  }
 
 
     torch::Tensor convertToCOO(const torch::Tensor& dense_tensor) {
@@ -335,6 +285,58 @@ namespace janus {
         return torch::sparse_coo_tensor(indices, value_tensor, {dim1, dim2, dim3, dim4});
     }
 
+  taco::TensorBase fromLibTorch3D(const torch::Tensor& tensor) {
+    // Ensure the input tensor is on the CPU for processing
+    taco::TensorBase dt;
+    switch (tensor.scalar_type()) {
+            case torch::kFloat:
+                dt = ConvertLibTorchToTaco3D<float>(tensor);
+                break;
+            case torch::kDouble:
+                dt = ConvertLibTorchToTaco3D<double>(tensor);
+                break;
+            case torch::kInt:
+                dt = ConvertLibTorchToTaco3D<int>(tensor);
+                break;
+            case torch::kLong:
+                dt = ConvertLibTorchToTaco3D<long>(tensor);
+                break;
+            case torch::kBool:
+                dt = ConvertLibTorchToTaco3D<bool>(tensor);
+                break;
+            default:
+                throw std::invalid_argument("Unsupported data type for dual tensor.");
+    }
+    return dt;
+
+  }
+
+
+  taco::TensorBase fromLibTorch2D(const torch::Tensor& tensor) {
+    // Ensure the input tensor is on the CPU for processing
+    taco::TensorBase dt;
+    switch (tensor.scalar_type()) {
+            case torch::kFloat:
+                dt = ConvertLibTorchToTaco2D<float>(tensor);
+                break;
+            case torch::kDouble:
+                dt = ConvertLibTorchToTaco2D<double>(tensor);
+                break;
+            case torch::kInt:
+                dt = ConvertLibTorchToTaco2D<int>(tensor);
+                break;
+            case torch::kLong:
+                dt = ConvertLibTorchToTaco2D<long>(tensor);
+                break;
+            case torch::kBool:
+                dt = ConvertLibTorchToTaco2D<bool>(tensor);
+                break;
+            default:
+                throw std::invalid_argument("Unsupported data type for dual tensor.");
+    }
+    return dt;
+
+  }
 
 
 
@@ -1218,22 +1220,13 @@ public:
         assert(tens.is_sparse() && "Input tensor must be sparse");
         // Initialize real and imaginary parts
         real = fromLibTorch2D(torch::real(tens));
-        imag = fromLibTorch2D(tens.sizes());
-        //Detect the device and move accordingly
-        if (tens.device().is_cuda()) {
-            real = real.cuda();
-            imag = imag.cuda();
-        }
-        else {
-            real = real.cpu();
-            imag = imag.cpu();
-        }
+        imag = fromLibTorch2D(torch::imag(tens));
 
     }
 
     ComplexTensorSparse2D(taco::Tensor<double> r, taco::Tensor<double> i) : real(r), imag(i) {
-        assert(r.getDimension() == 2 && "Real part must be 2D");
-        assert(i.getDimension() == 2 && "Imaginary part must be 2D");
+        assert(r.getOrder() == 2 && "Real part must be 2D");
+        assert(i.getOrder() == 2 && "Imaginary part must be 2D");
     }
 
 
@@ -1244,44 +1237,112 @@ public:
     }
 
 
-    taco::Tensor<double> getReal() { return real; }
-    taco::Tensor<double> getImag() { return imag; }
+    taco::Tensor<double>& getReal() { return real; }
+    taco::Tensor<double>& getImag() { return imag; }
     
     /**
      * sqrt function
      */
     ComplexTensorSparse2D sqrt() const {
-        auto r = taco::sqrt(taco::square(real) + taco::square(imag));
-        auto theta = taco::atan2(imag, real);
-        auto rn = r * taco::cos(theta / 2);
-        auto in = r * taco::sin(theta / 2);
+        // Define TACO index variables
+        taco::IndexVar i("i"), j("j");
+        taco::Tensor<double> r("r", {real.getDimension(0), real.getDimension(1)});
+        r(i, j) = taco::sqrt(taco::square(real(i, j)) + taco::square(imag(i, j)));
+        taco::Tensor<double> theta("theta", {real.getDimension(0), real.getDimension(1)});
+        theta(i, j) = taco::atan2(imag(i, j), real(i, j));
+        // Compute the real and imaginary parts of the square root
+        taco::Tensor<double> rn("rn", {real.getDimension(0), real.getDimension(1)});
+        rn(i, j) = r(i, j) * taco::cos(theta(i, j) / 2);
+
+        taco::Tensor<double> in("in", {imag.getDimension(0), imag.getDimension(1)});
+        in(i, j) = r(i, j) * taco::sin(theta(i, j) / 2);
         rn.pack();
         in.pack();
         return ComplexTensorSparse2D(rn, in);
     }
 
     ComplexTensorSparse2D operator+(const ComplexTensorSparse2D& other) const {
-        return ComplexTensorSparse2D(real + other.real, imag + other.imag);
+        // Define TACO index variables
+        taco::IndexVar i("i"), j("j");
+
+        // Create tensors for the result
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1)});
+
+        // Define addition expressions
+        resultReal(i, j) = real(i, j) + other.real(i, j);
+        resultImag(i, j) = imag(i, j) + other.imag(i, j);
+
+        // Pack tensors to finalize
+        resultReal.pack();
+        resultImag.pack();
+
+        // Return the new ComplexTensorSparse2D object
+        return ComplexTensorSparse2D(resultReal, resultImag);
     }
 
+
     ComplexTensorSparse2D operator-(const ComplexTensorSparse2D& other) const {
-        return ComplexTensorSparse2D(real - other.real, imag - other.imag);
+        // Define TACO index variables
+        taco::IndexVar i("i"), j("j");
+
+        // Create tensors for the result
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1)});
+
+        // Define subtraction expressions
+        resultReal(i, j) = real(i, j) - other.real(i, j);
+        resultImag(i, j) = imag(i, j) - other.imag(i, j);
+
+        // Pack tensors to finalize
+        resultReal.pack();
+        resultImag.pack();
+
+        // Return the new ComplexTensorSparse2D object
+        return ComplexTensorSparse2D(resultReal, resultImag);
     }
 
     ComplexTensorSparse2D operator*(const ComplexTensorSparse2D& other) const {
-        return ComplexTensorSparse2D(real * other.real - imag * other.imag, real * other.imag + imag * other.real);
+        // Define TACO index variables
+        taco::IndexVar i("i"), j("j");
+
+        // Create tensors for the result
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1)});
+
+        // Define multiplication expressions
+        resultReal(i, j) = real(i, j) * other.real(i, j) - imag(i, j) * other.imag(i, j);
+        resultImag(i, j) = real(i, j) * other.imag(i, j) + imag(i, j) * other.real(i, j);
+
+        // Pack tensors to finalize
+        resultReal.pack();
+        resultImag.pack();
+
+        // Return the new ComplexTensorSparse2D object
+        return ComplexTensorSparse2D(resultReal, resultImag);
     }
 
     ComplexTensorSparse2D operator/(const ComplexTensorSparse2D& other) const {
-        auto denom = other.real * other.real + other.imag * other.imag;
-        return ComplexTensorSparse2D((real * other.real + imag * other.imag) / denom, (imag * other.real - real * other.imag) / denom);
+        // Define TACO index variables
+        taco::IndexVar i("i"), j("j");
+
+        // Create tensors for the result
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1)});
+
+        // Define division expressions
+        auto denom = other.real(i, j) * other.real(i, j) + other.imag(i, j) * other.imag(i, j);
+        resultReal(i, j) = (real(i, j) * other.real(i, j) + imag(i, j) * other.imag(i, j)) / denom;
+        resultImag(i, j) = (imag(i, j) * other.real(i, j) - real(i, j) * other.imag(i, j)) / denom;
+
+        // Pack tensors to finalize
+        resultReal.pack();
+        resultImag.pack();
+
+        // Return the new ComplexTensorSparse2D object
+        return ComplexTensorSparse2D(resultReal, resultImag);
     }
 
-    // Access real part
-    taco::Tensor<double>& getReal() { return real; }
-
-    // Access imaginary part
-    taco::Tensor<double>& getImag() { return imag; }
 };
 
 
@@ -1302,22 +1363,13 @@ public:
         assert(tens.is_sparse() && "Input tensor must be sparse");
         // Initialize real and imaginary parts
         real = fromLibTorch2D(torch::real(tens));
-        imag = fromLibTorch2D(tens.sizes());
-        //Detect the device and move accordingly
-        if (tens.device().is_cuda()) {
-            real = real.cuda();
-            imag = imag.cuda();
-        }
-        else {
-            real = real.cpu();
-            imag = imag.cpu();
-        }
+        imag = fromLibTorch2D(torch::imag(tens));
 
     }
 
     ComplexTensorSparse3D(taco::Tensor<double> r, taco::Tensor<double> i) : real(r), imag(i) {
-        assert(r.getDimension() == 3 && "Real part must be 3D");
-        assert(i.getDimension() == 3 && "Imaginary part must be 3D");
+        assert(r.getOrder() == 3 && "Real part must be 3D");
+        assert(i.getOrder() == 3 && "Imaginary part must be 3D");
     }
 
 
@@ -1328,37 +1380,84 @@ public:
     }
 
 
-    taco::Tensor<double> getReal() { return real; }
-    taco::Tensor<double> getImag() { return imag; }
     
     /**
      * sqrt function
      */
     ComplexTensorSparse3D sqrt() const {
-        auto r = taco::sqrt(taco::square(real) + taco::square(imag));
-        auto theta = taco::atan2(imag, real);
-        auto rn = r * taco::cos(theta / 2);
-        auto in = r * taco::sin(theta / 2);
+        // Define TACO index variables for the 3D tensor
+        taco::IndexVar i("i"), j("j"), k("k");
+
+        // Create tensors for the magnitude (r) and angle (theta)
+        taco::Tensor<double> r("r", {real.getDimension(0), real.getDimension(1), real.getDimension(2)});
+        taco::Tensor<double> theta("theta", {real.getDimension(0), real.getDimension(1), real.getDimension(2)});
+
+        // Define expressions for r and theta
+        r(i, j, k) = taco::sqrt(taco::square(real(i, j, k)) + taco::square(imag(i, j, k)));
+        theta(i, j, k) = taco::atan2(imag(i, j, k), real(i, j, k));
+
+        // Create tensors for the resulting real (rn) and imaginary (in) parts
+        taco::Tensor<double> rn("rn", {real.getDimension(0), real.getDimension(1), real.getDimension(2)});
+        taco::Tensor<double> in("in", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2)});
+
+        // Define expressions for the real and imaginary parts of the square root
+        rn(i, j, k) = r(i, j, k) * taco::cos(theta(i, j, k) / 2);
+        in(i, j, k) = r(i, j, k) * taco::sin(theta(i, j, k) / 2);
+
+        // Pack tensors to finalize computations
+        r.pack();
+        theta.pack();
         rn.pack();
         in.pack();
+
+        // Return the result as a new ComplexTensorSparse3D object
         return ComplexTensorSparse3D(rn, in);
     }
 
+
     ComplexTensorSparse3D operator+(const ComplexTensorSparse3D& other) const {
-        return ComplexTensorSparse3D(real + other.real, imag + other.imag);
+        taco::IndexVar i("i"), j("j"), k("k");
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1), real.getDimension(2)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2)});
+        resultReal(i, j, k) = real(i, j, k) + other.real(i, j, k);
+        resultImag(i, j, k) = imag(i, j, k) + other.imag(i, j, k);
+        resultReal.pack();
+        resultImag.pack();
+        return ComplexTensorSparse3D(resultReal, resultImag);
     }
 
     ComplexTensorSparse3D operator-(const ComplexTensorSparse3D& other) const {
-        return ComplexTensorSparse3D(real - other.real, imag - other.imag);
+        taco::IndexVar i("i"), j("j"), k("k");
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1), real.getDimension(2)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2)});
+        resultReal(i, j, k) = real(i, j, k) - other.real(i, j, k);
+        resultImag(i, j, k) = imag(i, j, k) - other.imag(i, j, k);
+        resultReal.pack();
+        resultImag.pack();
+        return ComplexTensorSparse3D(resultReal, resultImag);
     }
 
     ComplexTensorSparse3D operator*(const ComplexTensorSparse3D& other) const {
-        return ComplexTensorSparse3D(real * other.real - imag * other.imag, real * other.imag + imag * other.real);
+        taco::IndexVar i("i"), j("j"), k("k");
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1), real.getDimension(2)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2)});
+        resultReal(i, j, k) = real(i, j, k) * other.real(i, j, k) - imag(i, j, k) * other.imag(i, j, k);
+        resultImag(i, j, k) = real(i, j, k) * other.imag(i, j, k) + imag(i, j, k) * other.real(i, j, k);
+        resultReal.pack();
+        resultImag.pack();
+        return ComplexTensorSparse3D(resultReal, resultImag);
     }
 
     ComplexTensorSparse3D operator/(const ComplexTensorSparse3D& other) const {
-        auto denom = other.real * other.real + other.imag * other.imag;
-        return ComplexTensorSparse3D((real * other.real + imag * other.imag) / denom, (imag * other.real - real * other.imag) / denom);
+        taco::IndexVar i("i"), j("j"), k("k");
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1), real.getDimension(2)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2)});
+        auto denom = other.real(i, j, k) * other.real(i, j, k) + other.imag(i, j, k) * other.imag(i, j, k);
+        resultReal(i, j, k) = (real(i, j, k) * other.real(i, j, k) + imag(i, j, k) * other.imag(i, j, k)) / denom;
+        resultImag(i, j, k) = (imag(i, j, k) * other.real(i, j, k) - real(i, j, k) * other.imag(i, j, k)) / denom;
+        resultReal.pack();
+        resultImag.pack();
+        return ComplexTensorSparse3D(resultReal, resultImag);
     }
 
     // Access real part
@@ -1385,22 +1484,13 @@ public:
         assert(tens.is_sparse() && "Input tensor must be sparse");
         // Initialize real and imaginary parts
         real = fromLibTorch2D(torch::real(tens));
-        imag = fromLibTorch2D(tens.sizes());
-        //Detect the device and move accordingly
-        if (tens.device().is_cuda()) {
-            real = real.cuda();
-            imag = imag.cuda();
-        }
-        else {
-            real = real.cpu();
-            imag = imag.cpu();
-        }
+        imag = fromLibTorch2D(torch::imag(tens));
 
     }
 
     ComplexTensorSparse4D(taco::Tensor<double> r, taco::Tensor<double> i) : real(r), imag(i) {
-        assert(r.getDimension() == 4 && "Real part must be 3D");
-        assert(i.getDimension() == 4 && "Imaginary part must be 3D");
+        assert(r.getOrder() == 4 && "Real part must be 4D");
+        assert(i.getOrder() == 4 && "Imaginary part must be 4D");
     }
 
 
@@ -1411,37 +1501,83 @@ public:
     }
 
 
-    taco::Tensor<double> getReal() { return real; }
-    taco::Tensor<double> getImag() { return imag; }
     
     /**
      * sqrt function
      */
     ComplexTensorSparse4D sqrt() const {
-        auto r = taco::sqrt(taco::square(real) + taco::square(imag));
-        auto theta = taco::atan2(imag, real);
-        auto rn = r * taco::cos(theta / 2);
-        auto in = r * taco::sin(theta / 2);
+        // Define TACO index variables for the 4D tensor
+        taco::IndexVar i("i"), j("j"), k("k"), l("l");
+
+        // Create tensors for the magnitude (r) and angle (theta)
+        taco::Tensor<double> r("r", {real.getDimension(0), real.getDimension(1), real.getDimension(2), real.getDimension(3)});
+        taco::Tensor<double> theta("theta", {real.getDimension(0), real.getDimension(1), real.getDimension(2), real.getDimension(3)});
+
+        // Define expressions for r and theta
+        r(i, j, k, l) = taco::sqrt(taco::square(real(i, j, k, l)) + taco::square(imag(i, j, k, l)));
+        theta(i, j, k, l) = taco::atan2(imag(i, j, k, l), real(i, j, k, l));
+
+        // Create tensors for the resulting real (rn) and imaginary (in) parts
+        taco::Tensor<double> rn("rn", {real.getDimension(0), real.getDimension(1), real.getDimension(2), real.getDimension(3)});
+        taco::Tensor<double> in("in", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2), imag.getDimension(3)});
+
+        // Define expressions for the real and imaginary parts of the square root
+        rn(i, j, k, l) = r(i, j, k, l) * taco::cos(theta(i, j, k, l) / 2);
+        in(i, j, k, l) = r(i, j, k, l) * taco::sin(theta(i, j, k, l) / 2);
+
+        // Pack tensors to finalize computations
+        r.pack();
+        theta.pack();
         rn.pack();
         in.pack();
-        return ComplexTensorSparse3D(rn, in);
+
+        // Return the result as a new ComplexTensorSparse4D object
+        return ComplexTensorSparse4D(rn, in);
     }
 
     ComplexTensorSparse4D operator+(const ComplexTensorSparse4D& other) const {
-        return ComplexTensorSparse4D(real + other.real, imag + other.imag);
+        taco::IndexVar i("i"), j("j"), k("k"), l("l");
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1), real.getDimension(2), real.getDimension(3)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2), imag.getDimension(3)});
+        resultReal(i, j, k, l) = real(i, j, k, l) + other.real(i, j, k, l);
+        resultImag(i, j, k, l) = imag(i, j, k, l) + other.imag(i, j, k, l);
+        resultReal.pack();
+        resultImag.pack();
+        return ComplexTensorSparse4D(resultReal, resultImag);
     }
 
     ComplexTensorSparse4D operator-(const ComplexTensorSparse4D& other) const {
-        return ComplexTensorSparse4D(real - other.real, imag - other.imag);
+        taco::IndexVar i("i"), j("j"), k("k"), l("l");
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1), real.getDimension(2), real.getDimension(3)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2), imag.getDimension(3)});
+        resultReal(i, j, k, l) = real(i, j, k, l) - other.real(i, j, k, l);
+        resultImag(i, j, k, l) = imag(i, j, k, l) - other.imag(i, j, k, l);
+        resultReal.pack();
+        resultImag.pack();
+        return ComplexTensorSparse4D(resultReal, resultImag);
     }
 
     ComplexTensorSparse4D operator*(const ComplexTensorSparse4D& other) const {
-        return ComplexTensorSparse4D(real * other.real - imag * other.imag, real * other.imag + imag * other.real);
+        taco::IndexVar i("i"), j("j"), k("k"), l("l");
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1), real.getDimension(2), real.getDimension(3)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2), imag.getDimension(3)});
+        resultReal(i, j, k, l) = real(i, j, k, l) * other.real(i, j, k, l) - imag(i, j, k, l) * other.imag(i, j, k, l);
+        resultImag(i, j, k, l) = real(i, j, k, l) * other.imag(i, j, k, l) + imag(i, j, k, l) * other.real(i, j, k, l);
+        resultReal.pack();
+        resultImag.pack();
+        return ComplexTensorSparse4D(resultReal, resultImag);
     }
 
     ComplexTensorSparse4D operator/(const ComplexTensorSparse4D& other) const {
-        auto denom = other.real * other.real + other.imag * other.imag;
-        return ComplexTensorSparse4D((real * other.real + imag * other.imag) / denom, (imag * other.real - real * other.imag) / denom);
+        taco::IndexVar i("i"), j("j"), k("k"), l("l");
+        taco::Tensor<double> resultReal("resultReal", {real.getDimension(0), real.getDimension(1), real.getDimension(2), real.getDimension(3)});
+        taco::Tensor<double> resultImag("resultImag", {imag.getDimension(0), imag.getDimension(1), imag.getDimension(2), imag.getDimension(3)});
+        auto denom = other.real(i, j, k, l) * other.real(i, j, k, l) + other.imag(i, j, k, l) * other.imag(i, j, k, l);
+        resultReal(i, j, k, l) = (real(i, j, k, l) * other.real(i, j, k, l) + imag(i, j, k, l) * other.imag(i, j, k, l)) / denom;
+        resultImag(i, j, k, l) = (imag(i, j, k, l) * other.real(i, j, k, l) - real(i, j, k, l) * other.imag(i, j, k, l)) / denom;
+        resultReal.pack();
+        resultImag.pack();
+        return ComplexTensorSparse4D(resultReal, resultImag);
     }
 
     // Access real part
