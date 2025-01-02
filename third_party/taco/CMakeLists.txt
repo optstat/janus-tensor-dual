@@ -150,9 +150,6 @@ else()
   set(TACO_GIT_SHORTHASH "")
 endif()
 
-if(NOT EXISTS "${TACO_PROJECT_DIR}/python_bindings/pybind11/CMakeLists.txt")
-  message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
-endif()
 
 if(PYTHON)
   add_subdirectory(python_bindings)

@@ -50,10 +50,50 @@ ExternalProject_Add(
                    unzip -q ${CMAKE_BINARY_DIR}/downloads/libtorch.zip -d ${LIBTORCH_INSTALL_DIR}
 
 )
+
+# Clone pybind11 submodule
+ExternalProject_Add(
+    pybind11_project
+    PREFIX ${CMAKE_BINARY_DIR}/pybind11
+    GIT_REPOSITORY https://github.com/pybind/pybind11.git
+    GIT_TAG master
+    UPDATE_COMMAND ""  # Disable update to avoid network issues during rebuilds
+    CONFIGURE_COMMAND ""  # pybind11 doesn't require a configure step
+    BUILD_COMMAND ""  # No build step needed for pybind11
+    INSTALL_COMMAND ""  # No install step needed for pybind11
+)
+
+# Clone bats-core submodule
+ExternalProject_Add(
+    bats_project
+    PREFIX ${CMAKE_BINARY_DIR}/bats
+    GIT_REPOSITORY https://github.com/bats-core/bats-core.git
+    GIT_TAG master
+    UPDATE_COMMAND ""
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+)
+
+# Add the paths to your TACO project
+set(PYBIND11_DIR ${CMAKE_BINARY_DIR}/pybind11/src/pybind11_project)
+set(BATS_DIR ${CMAKE_BINARY_DIR}/bats/src/bats_project)
+
+# Pass dependency paths to TACO
+add_definitions(-DPYBIND11_DIR=${PYBIND11_DIR} -DBATS_DIR=${BATS_DIR})
+
+# Add TACO subdirectory
+add_subdirectory(third_party/taco)
+
+# Ensure dependencies are built before TACO
+add_dependencies(taco pybind11_project bats_project)
+
+# Include directories (if required by TACO)
+include_directories(${PYBIND11_DIR} ${BATS_DIR})
 # Set options for TACO
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
 set(OPENMP ON CACHE BOOL "Enable OpenMP")
-add_subdirectory(third_party/taco)
+
 
 # Add subdirectory for tests
 if(EXISTS ${CMAKE_SOURCE_DIR}/tests/cpp)
