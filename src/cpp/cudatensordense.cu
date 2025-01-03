@@ -16,18 +16,37 @@
 #include <thrust/execution_policy.h>
 #include <memory>
 #include <vector>
+#include <complex>
+#include <thrust/device_ptr.h>
+#include <thrust/transform.h>
+#include <thrust/functional.h>
+#include <thrust/complex.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/device_vector.h>
+#include <cublas_v2.h>
+#include <cuda_runtime.h>
+#include <stdexcept>
+#include <iostream>
 
 
 namespace janus {
 
+#include <thrust/complex.h>
+#include <thrust/device_ptr.h>
+#include <thrust/transform.h>
+#include <vector>
+#include <stdexcept>
+#include <cublas_v2.h>
+#include <cuda_runtime.h>
+
 template <typename T>
-class VectorDense {
+class VectorDenseCuda {
 private:
     int batch_size_;  // Batch dimension (M)
     int size_;        // Vector length (N)
 
-    T* data_;         // Real data [M, N]
-    bool owns_memory_; // Indicates if memory is managed internally
+    thrust::complex<T>* data_;  // Data [M, N] (complex)
+    bool owns_memory_;          // Indicates if memory is managed internally
 
     // cuBLAS handle
     cublasHandle_t handle_;
@@ -35,7 +54,7 @@ private:
 
 public:
     // Constructor with external memory
-    VectorDense(int batch_size, int size, T* data)
+    VectorDenseCuda(int batch_size, int size, thrust::complex<T>* data)
         : batch_size_(batch_size), size_(size), data_(data), owns_memory_(false) {
         if (!data_) {
             throw std::invalid_argument("Data pointer is null");
@@ -44,13 +63,13 @@ public:
     }
 
     // Constructor with internal memory allocation
-    VectorDense(int batch_size, int size)
+    VectorDenseCuda(int batch_size, int size)
         : batch_size_(batch_size), size_(size), owns_memory_(true) {
         if (batch_size <= 0 || size <= 0) {
             throw std::invalid_argument("Batch size and vector size must be positive.");
         }
 
-        size_t data_size = batch_size * size * sizeof(T);
+        size_t data_size = batch_size * size * sizeof(thrust::complex<T>);
         if (cudaMalloc(&data_, data_size) != cudaSuccess) {
             throw std::runtime_error("Failed to allocate GPU memory for data.");
         }
@@ -59,7 +78,7 @@ public:
     }
 
     // Destructor
-    ~VectorDense() {
+    ~VectorDenseCuda() {
         if (owns_memory_ && data_) {
             cudaFree(data_);
         }
@@ -72,157 +91,59 @@ public:
     }
 
     // Initialize data from host
-    void initialize(const T* host_data, size_t data_size) {
+    void initialize(const thrust::complex<T>* host_data, size_t data_size) {
         if (data_size != batch_size_ * size_) {
             throw std::invalid_argument("Input size does not match vector dimensions.");
         }
 
-        cudaMemcpyAsync(data_, host_data, data_size * sizeof(T), cudaMemcpyHostToDevice, stream_);
+        cudaMemcpyAsync(data_, host_data, data_size * sizeof(thrust::complex<T>), cudaMemcpyHostToDevice, stream_);
         cudaStreamSynchronize(stream_);
     }
 
     // Elementwise addition
-    VectorDense elementwiseAdd(const VectorDense& other) const {
+    VectorDenseCuda elementwiseAdd(const VectorDenseCuda& other) const {
         if (batch_size_ != other.batch_size_ || size_ != other.size_) {
             throw std::invalid_argument("Vector dimensions do not match for elementwise addition.");
         }
 
-        VectorDense result(batch_size_, size_);
-
+        VectorDenseCuda result(batch_size_, size_);
         int total_elements = batch_size_ * size_;
-        thrust::device_ptr<T> d_ptr1(data_);
-        thrust::device_ptr<T> d_ptr2(other.data_);
-        thrust::device_ptr<T> d_ptr_result(result.data_);
+
+        thrust::device_ptr<thrust::complex<T>> d_ptr1(data_);
+        thrust::device_ptr<thrust::complex<T>> d_ptr2(other.data_);
+        thrust::device_ptr<thrust::complex<T>> d_ptr_result(result.data_);
 
         thrust::transform(
-            d_ptr1,
-            d_ptr1 + total_elements,
+            d_ptr1, d_ptr1 + total_elements,
             d_ptr2,
             d_ptr_result,
-            thrust::plus<T>());
+            thrust::plus<thrust::complex<T>>());
 
         return result;
     }
 
     // Elementwise multiplication
-    VectorDense elementwiseMultiply(const VectorDense& other) const {
+    VectorDenseCuda elementwiseMultiply(const VectorDenseCuda& other) const {
         if (batch_size_ != other.batch_size_ || size_ != other.size_) {
             throw std::invalid_argument("Vector dimensions do not match for elementwise multiplication.");
         }
 
-        VectorDense result(batch_size_, size_);
-
+        VectorDenseCuda result(batch_size_, size_);
         int total_elements = batch_size_ * size_;
 
-        // Perform elementwise multiplication
         thrust::transform(
             thrust::device_pointer_cast(data_),
             thrust::device_pointer_cast(data_ + total_elements),
             thrust::device_pointer_cast(other.data_),
             thrust::device_pointer_cast(result.data_),
-            thrust::multiplies<T>());
+            thrust::multiplies<thrust::complex<T>>());
 
         return result;
     }
-
-
-    // Compute the sum of the vector along the size dimension
-    VectorDense sum() const {
-        VectorDense result(batch_size_, 1);
-
-        // Allocate a vector of ones on the GPU
-        T* ones;
-        cudaMalloc(&ones, size_ * sizeof(T));
-        thrust::device_vector<T> host_ones(size_, static_cast<T>(1.0));
-        cudaMemcpy(ones, host_ones.data(), size_ * sizeof(T), cudaMemcpyHostToDevice);
-
-        // Use cuBLAS to compute the sum for each batch
-        for (int b = 0; b < batch_size_; ++b) {
-            cublasSdot(handle_,             // cuBLAS handle
-                    size_,               // Number of elements to sum
-                    data_ + b * size_,   // Pointer to the batch data
-                    1,                   // Stride for data_
-                    ones,                // Pointer to vector of ones
-                    1,                   // Stride for ones vector
-                    result.data_ + b);   // Pointer to store the result
-        }
-
-        // Free the vector of ones
-        cudaFree(ones);
-
-        return result;
-    }
-
-
-
-    VectorDense sign() const {
-        VectorDense result(batch_size_, size_); // Create an output vector
-        int total_elements = batch_size_ * size_; // Total number of elements
-
-        // Use Thrust to apply sign element-wise
-        thrust::transform(
-            thrust::device_pointer_cast(data_),
-            thrust::device_pointer_cast(data_ + total_elements),
-            thrust::device_pointer_cast(result.data_),
-            [] __device__ (T x) {
-                return (x > 0) - (x < 0); // Sign computation
-            });
-
-        return result; // Return the result
-    }
-
-
-    static VectorDense where(const VectorDense& condition, 
-                             const VectorDense& if_true, 
-                             const VectorDense& if_false) {
-        if (condition.batchSize() != if_true.batchSize() || condition.batchSize() != if_false.batchSize() ||
-            condition.size() != if_true.size() || condition.size() != if_false.size()) {
-            throw std::invalid_argument("Input dimensions must match.");
-        }
-
-        VectorDense result(condition.batchSize(), condition.size());
-        int total_elements = condition.batchSize() * condition.size();
-
-        // Use Thrust's zip iterator to combine condition, if_true, and if_false
-        auto condition_begin = thrust::device_pointer_cast(condition.data());
-        auto if_true_begin = thrust::device_pointer_cast(if_true.data());
-        auto if_false_begin = thrust::device_pointer_cast(if_false.data());
-        auto result_begin = thrust::device_pointer_cast(result.data());
-
-        thrust::transform(
-            thrust::make_zip_iterator(thrust::make_tuple(condition_begin, if_true_begin, if_false_begin)),
-            thrust::make_zip_iterator(thrust::make_tuple(condition_begin + total_elements,
-                                                        if_true_begin + total_elements,
-                                                        if_false_begin + total_elements)),
-            result_begin,
-            [] __device__ (thrust::tuple<T, T, T> tup) {
-                T cond = thrust::get<0>(tup);
-                T a = thrust::get<1>(tup);
-                T b = thrust::get<2>(tup);
-                return cond ? a : b;
-            });
-
-        return result;
-    }
-
-    static VectorDense zeros_like(const VectorDense& other) {
-        VectorDense result(other.batchSize(), other.size());
-        cudaMemset(result.data(), 0, other.batchSize() * other.size() * sizeof(T));
-        return result;
-    }
-
-    VectorDense custom_sign(const VectorDense& input, double threshold = 1e-6) 
-    {
-        auto mask = input.abs() > threshold;
-        auto sign_vector = input.sign();
-        auto output = VectorDense::where(mask, sign_vector, VectorDense::zeros_like(input));
-        return output;
-    }
-    
 
     // Accessors
-    T* data() { return data_; }
-    const T* data() const { return data_; }
+    thrust::complex<T>* data() { return data_; }
+    const thrust::complex<T>* data() const { return data_; }
     int batchSize() const { return batch_size_; }
     int size() const { return size_; }
 
@@ -241,294 +162,216 @@ private:
 };
 
 
+
+#define CUDA_CHECK(call) do { \
+    cudaError_t err = call; \
+    if (err != cudaSuccess) { \
+        throw std::runtime_error(cudaGetErrorString(err)); \
+    } \
+} while (0)
+
+#define CUBLAS_CHECK(call) do { \
+    cublasStatus_t err = call; \
+    if (err != CUBLAS_STATUS_SUCCESS) { \
+        throw std::runtime_error("cuBLAS error"); \
+    } \
+} while (0)
+
 template <typename T>
-class VectorDualDense {
+struct BroadcastDualMultiply {
+    const thrust::complex<T>* real;
+    const thrust::complex<T>* dual;
+    int real_size, dual_size;
+
+    BroadcastDualMultiply(const thrust::complex<T>* real, 
+                          const thrust::complex<T>* dual, int real_size, int dual_size)
+        : real(real), dual(dual), real_size(real_size), dual_size(dual_size) {}
+
+    __device__ thrust::complex<float> operator()(int idx) const {
+        int batch_idx = idx / (real_size * dual_size);
+        int real_idx = (idx / dual_size) % real_size;
+        int dual_idx = idx % dual_size;
+
+        int real_offset = batch_idx * real_size + real_idx;  // Corresponding real tensor index
+        return real[real_offset] * dual[idx];
+    }
+};
+
+
+template <typename T>
+void multiplyDualTensor(const thrust::complex<T>* real,
+                        const thrust::complex<T>* dual,
+                        thrust::complex<T>* result,
+                        int batch_size, int real_size, int dual_size) {
+    int total_elements = batch_size * real_size * dual_size;
+
+    thrust::transform(
+        thrust::make_counting_iterator(0),
+        thrust::make_counting_iterator(total_elements),
+        thrust::device_pointer_cast(result),
+        [=] __device__(int idx) {
+            int batch_idx = idx / (real_size * dual_size);
+            int real_idx = (idx / dual_size) % real_size;
+            //int dual_idx = idx % dual_size;
+
+            int real_offset = batch_idx * real_size + real_idx;  // Corresponding real tensor index
+            return real[real_offset] * dual[idx];
+        });
+}
+
+
+template <typename T>
+class VectorDualDenseCuda {
 private:
-    using ComplexT = std::complex<T>;
+    int batch_size_;             // Batch dimension (M)
+    int real_size_;              // Vector length (N)
+    int dual_size_;              // Dual dimension (D)
 
-    // Dimensions
-    int batch_size_;  // M
-    int size_;        // N (length of each vector)
-    int dual_dim_;    // D (number of dual components)
+    thrust::complex<T>* real_;   // Real part [M, N]
+    thrust::complex<T>* dual_;   // Dual part [M, N, D]
+    bool owns_memory_;           // Indicates if memory is managed internally
 
-    // Primal and Dual Data
-    ComplexT* primal_data_;  // [M, N]
-    ComplexT* dual_data_;    // [M, N, D]
-    bool owns_memory_;       // Indicates if memory is managed internally
-
-    // cuBLAS handle
-    cublasHandle_t handle_;
-    cudaStream_t stream_;
+    cudaStream_t stream_;        // CUDA stream for asynchronous operations
 
 public:
     // Constructor with external memory
-    VectorDualDense(int batch_size, int size, int dual_dim, ComplexT* primal_data, ComplexT* dual_data)
-        : batch_size_(batch_size), size_(size), dual_dim_(dual_dim),
-          primal_data_(primal_data), dual_data_(dual_data), owns_memory_(false) {
-        if (!primal_data_ || !dual_data_) {
-            throw std::invalid_argument("Primal or dual data pointer is null");
+    VectorDualDenseCuda(int batch_size, int real_size, int dual_size,
+         thrust::complex<T>* real, thrust::complex<T>* dual)
+        : batch_size_(batch_size), real_size_(real_size), dual_size_(dual_size),
+          real_(real), dual_(dual), owns_memory_(false) {
+        if (!real_ || !dual_) {
+            throw std::invalid_argument("Real or dual data pointer is null.");
         }
-        initializeHandles();
+        initializeStream();
     }
 
     // Constructor with internal memory allocation
-    VectorDualDense(int batch_size, int size, int dual_dim)
-        : batch_size_(batch_size), size_(size), dual_dim_(dual_dim), owns_memory_(true) {
-        if (batch_size <= 0 || size <= 0 || dual_dim <= 0) {
-            throw std::invalid_argument("All dimensions must be positive.");
+    VectorDualDenseCuda(int batch_size, int real_size, int dual_size)
+        : batch_size_(batch_size), real_size_(real_size), dual_size_(dual_size), owns_memory_(true) {
+        if (batch_size <= 0 || real_size <= 0 || dual_size <= 0) {
+            throw std::invalid_argument("Batch size, vector size, and dual size must be positive.");
         }
 
-        size_t primal_size = batch_size * size * sizeof(ComplexT);
-        size_t dual_size = batch_size * size * dual_dim * sizeof(ComplexT);
+        size_t real_data_size = batch_size * real_size * sizeof(thrust::complex<T>);
+        size_t dual_data_size = batch_size * real_size * dual_size * sizeof(thrust::complex<T>);
 
-        if (cudaMalloc(&primal_data_, primal_size) != cudaSuccess) {
-            throw std::runtime_error("Failed to allocate GPU memory for primal data.");
+        if (cudaMalloc(&real_, real_data_size) != cudaSuccess ||
+            cudaMalloc(&dual_, dual_data_size) != cudaSuccess) {
+            throw std::runtime_error("Failed to allocate GPU memory for dual number components.");
         }
 
-        if (cudaMalloc(&dual_data_, dual_size) != cudaSuccess) {
-            cudaFree(primal_data_);
-            throw std::runtime_error("Failed to allocate GPU memory for dual data.");
-        }
-
-        initializeHandles();
+        initializeStream();
     }
 
-    ~VectorDualDense() {
+    // Destructor
+    ~VectorDualDenseCuda() {
         if (owns_memory_) {
-            if (primal_data_) cudaFree(primal_data_);
-            if (dual_data_) cudaFree(dual_data_);
+            if (real_) cudaFree(real_);
+            if (dual_) cudaFree(dual_);
         }
-        cublasDestroy(handle_);
-        cudaStreamDestroy(stream_);
+        if (stream_) {
+            cudaStreamDestroy(stream_);
+        }
     }
 
-    void initialize(const ComplexT* primal, const ComplexT* dual, size_t primal_size, size_t dual_size) {
-        if (primal_size != batch_size_ * size_ ||
-            dual_size != batch_size_ * size_ * dual_dim_) {
-            throw std::invalid_argument("Input sizes do not match tensor dimensions.");
+    void initialize(const thrust::complex<T>* host_real, const thrust::complex<T>* host_dual) {
+        size_t real_size = batch_size_ * real_size_ * sizeof(thrust::complex<T>);
+        size_t dual_size = batch_size_ * real_size_ * dual_size_ * sizeof(thrust::complex<T>);
+
+        cudaError_t real_status = cudaMemcpyAsync(real_, host_real, real_size, cudaMemcpyHostToDevice, stream_);
+        cudaError_t dual_status = cudaMemcpyAsync(dual_, host_dual, dual_size, cudaMemcpyHostToDevice, stream_);
+
+        if (real_status != cudaSuccess || dual_status != cudaSuccess) {
+            throw std::runtime_error("Failed to copy data to device.");
         }
 
-        if (primal) {
-            cudaMemcpyAsync(primal_data_, primal, primal_size * sizeof(ComplexT), cudaMemcpyHostToDevice, stream_);
-        }
-        if (dual) {
-            cudaMemcpyAsync(dual_data_, dual, dual_size * sizeof(ComplexT), cudaMemcpyHostToDevice, stream_);
-        }
         cudaStreamSynchronize(stream_);
     }
 
-    template <typename U>
-    VectorDualDense<U> indexGet(int start_row, int end_row) const {
-        // Validate row range
-        if (start_row < 0 || end_row > batch_size_ || start_row >= end_row) {
-            throw std::invalid_argument("Invalid row range for selection.");
+    // Elementwise addition
+    VectorDualDenseCuda elementwiseAdd(const VectorDualDenseCuda& other) const {
+        if (batch_size_ != other.batch_size_ || real_size_ != other.real_size_ || dual_size_ != other.dual_size_) {
+            throw std::invalid_argument("Dual dimensions do not match for elementwise addition.");
         }
 
-        // Calculate the number of rows in the selected range
-        int selected_batch_size = end_row - start_row;
+        VectorDualDenseCuda result(batch_size_, real_size_, dual_size_);
+        
+        int real_total_elements = batch_size_ * real_size_;
+        int dual_total_elements = batch_size_ * real_size_ * dual_size_;
 
-        // Calculate offsets in the primal and dual data
-        ComplexT* selected_primal_data = primal_data_ + start_row * size_;
-        ComplexT* selected_dual_data = dual_data_ + start_row * size_ * dual_dim_;
+        thrust::device_ptr<thrust::complex<T>> real1(real_);
+        thrust::device_ptr<thrust::complex<T>> real2(other.real_);
+        thrust::device_ptr<thrust::complex<T>> real_result(result.real_);
 
-        // Create a new VectorDualDense instance sharing the data with the original
-        return VectorDualDense<T>(selected_batch_size, size_, dual_dim_, selected_primal_data, selected_dual_data);
-    }
+        thrust::device_ptr<thrust::complex<T>> dual1(dual_);
+        thrust::device_ptr<thrust::complex<T>> dual2(other.dual_);
+        thrust::device_ptr<thrust::complex<T>> dual_result(result.dual_);
 
-    template <typename U>
-    void indexPut(int start_row, int end_row, const VectorDualDense<U>& data) {
-        // Validate row range
-        if (start_row < 0 || end_row > batch_size_ || start_row >= end_row) {
-            throw std::invalid_argument("Invalid row range for index_put.");
-        }
-
-        // Validate dimensions of the input data
-        if (data.batch_size() != (end_row - start_row) || data.size() != size_ || data.dual_dim() != dual_dim_) {
-            throw std::invalid_argument("Input data dimensions do not match the target range.");
-        }
-
-        // Compute offsets in the primal and dual tensors
-        ComplexT* target_primal_data = primal_data_ + start_row * size_;
-        ComplexT* target_dual_data = dual_data_ + start_row * size_ * dual_dim_;
-
-        // Compute data sizes
-        size_t primal_size = data.batch_size() * size_ * sizeof(ComplexT);
-        size_t dual_size = data.batch_size() * size_ * dual_dim_ * sizeof(ComplexT);
-
-        // Copy data for the primal part
-        cudaMemcpyAsync(target_primal_data, data.primal_data(), primal_size, cudaMemcpyDeviceToDevice, stream_);
-
-        // Copy data for the dual part
-        cudaMemcpyAsync(target_dual_data, data.dual_data(), dual_size, cudaMemcpyDeviceToDevice, stream_);
-
-        // Synchronize to ensure data transfer is complete
-        cudaStreamSynchronize(stream_);
-    }
-
-    VectorDualDense<T> elementwiseAdd(const VectorDualDense<T>& other) const {
-        if (batch_size_ != other.batch_size_ || size_ != other.size_ || dual_dim_ != other.dual_dim_) {
-            throw std::invalid_argument("Tensor dimensions do not match for elementwise addition.");
-        }
-
-        VectorDualDense<T> result(batch_size_, size_, dual_dim_);
-
-        int total_primal_elements = batch_size_ * size_;
-        int total_dual_elements = total_primal_elements * dual_dim_;
-
-        // Perform elementwise addition for the primal part
-        thrust::transform(
-            thrust::device_pointer_cast(primal_data_),
-            thrust::device_pointer_cast(primal_data_ + total_primal_elements),
-            thrust::device_pointer_cast(other.primal_data_),
-            thrust::device_pointer_cast(result.primal_data_),
-            thrust::plus<ComplexT>());
-
-        // Perform elementwise addition for the dual part
-        thrust::transform(
-            thrust::device_pointer_cast(dual_data_),
-            thrust::device_pointer_cast(dual_data_ + total_dual_elements),
-            thrust::device_pointer_cast(other.dual_data_),
-            thrust::device_pointer_cast(result.dual_data_),
-            thrust::plus<ComplexT>());
-
-        return result;
-    }
-
-    VectorDualDense<T> elementwiseMultiply(const VectorDualDense<T>& other) const {
-        if (batch_size_ != other.batch_size_ || size_ != other.size_ || dual_dim_ != other.dual_dim_) {
-            throw std::invalid_argument("Tensor dimensions do not match for elementwise multiplication.");
-        }
-
-        VectorDualDense<T> result(batch_size_, size_, dual_dim_);
-
-        int total_primal_elements = batch_size_ * size_;
-        int total_dual_elements = total_primal_elements * dual_dim_;
-
-        // Perform elementwise multiplication for primal part
-        thrust::transform(
-            thrust::device_pointer_cast(primal_data_),
-            thrust::device_pointer_cast(primal_data_ + total_primal_elements),
-            thrust::device_pointer_cast(other.primal_data_),
-            thrust::device_pointer_cast(result.primal_data_),
-            thrust::multiplies<ComplexT>());
-
-        // Perform elementwise multiplication for dual part using the product rule
-        thrust::for_each(
-            thrust::counting_iterator<int>(0),
-            thrust::counting_iterator<int>(total_dual_elements),
-            [=] __device__(int idx) {
-                int primal_idx = idx / dual_dim_;
-                int dual_idx = idx % dual_dim_;
-
-                result.dual_data_[idx] =
-                    dual_data_[idx] * other.primal_data_[primal_idx] +
-                    primal_data_[primal_idx] * other.dual_data_[idx];
-            });
-
-        return result;
-    }
-
-    VectorDualDense<T> elementwiseSquare() const {
-        // Create result vector
-        VectorDualDense<T> result(batch_size_, size_, dual_dim_);
-
-        int total_primal_elements = batch_size_ * size_;
-        int total_dual_elements = total_primal_elements * dual_dim_;
-
-        // Elementwise square for primal part
-        thrust::transform(
-            thrust::device_pointer_cast(primal_data_),
-            thrust::device_pointer_cast(primal_data_ + total_primal_elements),
-            thrust::device_pointer_cast(result.primal_data_),
-            [] __device__(ComplexT x) {
-                return x * x;
-            });
-
-        // Elementwise square for dual part (product rule)
-        thrust::for_each(
-            thrust::counting_iterator<int>(0),
-            thrust::counting_iterator<int>(total_dual_elements),
-            [=] __device__(int idx) {
-                int primal_idx = idx / dual_dim_;
-                result.dual_data_[idx] = 2.0 * primal_data_[primal_idx] * dual_data_[idx];
-            });
+        thrust::transform(real1, real1 + real_total_elements, real2, real_result, thrust::plus<thrust::complex<T>>());
+        thrust::transform(dual1, dual1 + dual_total_elements, dual2, dual_result, thrust::plus<thrust::complex<T>>());
 
         return result;
     }
 
 
-    VectorDualDense<T> sum() const {
-        // Create result vector
-        VectorDualDense<T> result(batch_size_, 1, dual_dim_);
 
-        // Scalars for cuBLAS
-        ComplexT alpha = ComplexT(1.0, 0.0);
-        ComplexT beta = ComplexT(0.0, 0.0);
-
-        // Primal part: Sum over real dimension (N)
-        for (int b = 0; b < batch_size_; ++b) {
-            cublasZgemv(handle_,
-                        CUBLAS_OP_T,  // Transpose to sum over columns (rows in memory layout)
-                        size_, 1,     // Rows = N, Columns = 1
-                        &alpha,
-                        primal_data_ + b * size_, size_,
-                        thrust::raw_pointer_cast(thrust::make_constant_iterator(ComplexT(1.0, 0.0))), 1,
-                        &beta,
-                        result.primal_data_ + b, 1);  // Store in result
+    VectorDualDenseCuda elementwiseMultiply(const VectorDualDenseCuda& other) const {
+        if (batch_size_ != other.batch_size_ || real_size_ != other.real_size_ || dual_size_ != other.dual_size_) {
+            throw std::invalid_argument("Dual dimensions do not match for elementwise multiplication.");
         }
+        //The real part is multiplied elementwise
+        VectorDualDenseCuda result(batch_size_, real_size_, dual_size_);
+        int total_elements_real = batch_size_ * real_size_;
 
-        // Dual part: Sum over real dimension (N) for each dual dimension (D)
-        for (int b = 0; b < batch_size_; ++b) {
-            for (int d = 0; d < dual_dim_; ++d) {
-                cublasZgemv(handle_,
-                            CUBLAS_OP_T,  // Transpose to sum over columns (rows in memory layout)
-                            size_, 1,     // Rows = N, Columns = 1
-                            &alpha,
-                            dual_data_ + b * size_ * dual_dim_ + d * size_, size_,
-                            thrust::raw_pointer_cast(thrust::make_constant_iterator(ComplexT(1.0, 0.0))), 1,
-                            &beta,
-                            result.dual_data_ + b * dual_dim_ + d, 1);  // Store in result
-            }
-        }
+        thrust::transform(
+            thrust::device_pointer_cast(real_),
+            thrust::device_pointer_cast(real_ + total_elements_real),
+            thrust::device_pointer_cast(other.real_),
+            thrust::device_pointer_cast(result.real_),
+            thrust::multiplies<thrust::complex<T>>());
 
-        // Return the summed vector
+        //Now get the dual part
+        int total_elements_dual = batch_size_ * real_size_ * dual_size_;
+        //Create a holder for the data
+        thrust::device_vector<thrust::complex<T>> result_dual1(total_elements_dual);
+        thrust::device_vector<thrust::complex<T>> result_dual2(total_elements_dual);
+        multiplyDualTensor<T>(real_,
+                              other.dual_,
+                              thrust::raw_pointer_cast(result_dual1.data()), 
+                              batch_size_, real_size_, dual_size_);
+        multiplyDualTensor<T>(other.real_,
+                              dual_,
+                              thrust::raw_pointer_cast(result_dual2.data()), 
+                              batch_size_, real_size_, dual_size_); 
+
+        //Now add the two results
+        thrust::transform(
+            thrust::device_pointer_cast(result_dual1.data()),
+            thrust::device_pointer_cast(result_dual1.data() + total_elements_dual),
+            thrust::device_pointer_cast(result_dual2.data()),
+            thrust::device_pointer_cast(result.dual_),
+            thrust::plus<thrust::complex<T>>());
+
+
         return result;
     }
 
-    
+    // Accessors
+    thrust::complex<T>* real() { return real_; }
+    const thrust::complex<T>* real() const { return real_; }
+    thrust::complex<T>* dual() { return dual_; }
+    const thrust::complex<T>* dual() const { return dual_; }
+    int batchSize() const { return batch_size_; }
+    int size() const { return real_size_; }
+    int dualSize() const { return dual_size_; }
 
 private:
-    void initializeHandles() {
-        if (cublasCreate(&handle_) != CUBLAS_STATUS_SUCCESS) {
-            throw std::runtime_error("Failed to create cuBLAS handle.");
-        }
+    // Initialize CUDA stream
+    void initializeStream() {
         if (cudaStreamCreate(&stream_) != cudaSuccess) {
-            cublasDestroy(handle_);
             throw std::runtime_error("Failed to create CUDA stream.");
         }
-        cublasSetStream(handle_, stream_);
     }
-
-public:
-    // Disable copy constructor and copy assignment
-    VectorDualDense(const VectorDualDense&) = delete;
-    VectorDualDense& operator=(const VectorDualDense&) = delete;
-
-    // Enable move constructor and move assignment
-    VectorDualDense(VectorDualDense&&) noexcept = default;
-    VectorDualDense& operator=(VectorDualDense&&) noexcept = default;
-
-    // Getters for dimensions
-    int batch_size() const { return batch_size_; }
-    int size() const { return size_; }
-    int dual_dim() const { return dual_dim_; }
-
-    // Getters for data pointers
-    ComplexT* primal_data() { return primal_data_; }
-    ComplexT* dual_data() { return dual_data_; }
-
-    const ComplexT* primal_data() const { return primal_data_; }
-    const ComplexT* dual_data() const { return dual_data_; }
 };
 
 template <typename T>
@@ -858,14 +701,14 @@ public:
         return result;
     }
 
-    VectorDense<T> matrixVectorProduct(const VectorDense<T>& vector) const {
+    VectorDenseCuda<T> matrixVectorProduct(const VectorDenseCuda<T>& vector) const {
         // Validate dimensions
         if (cols_ != vector.size() || batch_size_ != vector.batch_size()) {
             throw std::invalid_argument("Matrix and vector dimensions do not match for multiplication.");
         }
 
         // Create the result vector
-        VectorDense<T> result(batch_size_, rows_);
+        VectorDenseCuda<T> result(batch_size_, rows_);
 
         // Scaling factors for cuBLAS
         ComplexT alpha = ComplexT(1.0, 0.0);
@@ -1292,7 +1135,7 @@ public:
         return result;
     }
 
-    VectorDualDense<T> squeeze(int dim) const {
+    VectorDualDenseCuda<T> squeeze(int dim) const {
         // Check the validity of the dimension
         if (dim < 1 || dim > 2) {
             throw std::invalid_argument("Dimension to squeeze must be 1 (rows) or 2 (columns).");
@@ -1311,18 +1154,18 @@ public:
         ComplexT* squeezed_dual_data = dual_data_;
 
         // Create and return a VectorDual object
-        return VectorDualDense<T>(vector_size, dual_dim_, squeezed_primal_data, squeezed_dual_data);
+        return VectorDualDenseCuda<T>(vector_size, dual_dim_, squeezed_primal_data, squeezed_dual_data);
     }
 
     template <typename U>
-    VectorDualDense<U> matrixVectorProduct(const VectorDualDense<U>& vector) const {
+    VectorDualDenseCuda<U> matrixVectorProduct(const VectorDualDenseCuda<U>& vector) const {
         // Validate dimensions
         if (cols_ != vector.size_ || batch_size_ != vector.batch_size_ || dual_dim_ != vector.dual_dim_) {
             throw std::invalid_argument("Matrix and vector dimensions do not match for multiplication.");
         }
 
         // Result vector
-        VectorDualDense<T> result(batch_size_, rows_, dual_dim_);
+        VectorDualDenseCuda<T> result(batch_size_, rows_, dual_dim_);
 
         int matrix_primal_size = rows_ * cols_;
         int vector_primal_size = vector.size_;
