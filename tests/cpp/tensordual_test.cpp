@@ -3,7 +3,6 @@
 #include <random>
 #include "../../src/cpp/tensordual.hpp"
 #include "../../src/cpp/janus_util.hpp"
-#include "../../src/cpp/cudatensordense.hpp"
 
 using namespace janus;
 // Test case for zeros method
@@ -18234,6 +18233,8 @@ TEST(TensorDualTest, GerBasic) {
     // Validate the dual part
     EXPECT_TRUE(torch::allclose(result.d, expected_d));
 }
+
+
 
 
 int main(int argc, char **argv) {

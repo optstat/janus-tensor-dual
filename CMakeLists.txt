@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(JanusTensorDual VERSION 1.0 LANGUAGES CXX)
+project(JanusTensorDual VERSION 1.0 LANGUAGES CXX CUDA)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -25,6 +25,8 @@ endif()
 
 # Add pthread
 find_package(Threads REQUIRED)
+
+find_package(CUDAToolkit REQUIRED)
 
 # Option to enable CUDA for LibTorch
 option(USE_CUDA "Enable CUDA support for LibTorch" ON)
@@ -94,19 +96,40 @@ include_directories(${PYBIND11_DIR} ${BATS_DIR})
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
 set(OPENMP ON CACHE BOOL "Enable OpenMP")
 
+# Define the location of the test binary
+set(TEST_BINARY "${CMAKE_BINARY_DIR}/bin/dualtest")
+set(TEST_BINARY_CUDA "${CMAKE_BINARY_DIR}/bin/dualtest_cuda")
 
-# Add subdirectory for tests
+# Define the test target first
+add_custom_target(
+    test
+    COMMAND ${TEST_BINARY}
+    COMMAND ${TEST_BINARY_CUDA}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running tests with ./bin/dualtest and ./bin/dualtest_cuda"
+    VERBATIM
+)
+
+
+# Add the test  directory
 if(EXISTS ${CMAKE_SOURCE_DIR}/tests/cpp)
     add_subdirectory(tests/cpp)
 
-    # Check if the `tests` target exists before adding dependencies
-    if(TARGET tests)
-        add_dependencies(tests taco_build libtorch_project)
+    # Add dependencies for the `test` target
+    if(TARGET dualtest)
+        add_dependencies(test dualtest)
+    else()
+        message(WARNING "Target 'dualtest' does not exist. Ensure it is defined.")
+    endif()
+
+    if(TARGET dualtest_cuda)
+        add_dependencies(test dualtest_cuda)
+    else()
+        message(WARNING "Target 'dualtest_cuda' does not exist. Ensure it is defined.")
     endif()
 else()
     message(WARNING "Tests directory 'tests/cpp' does not exist. Skipping.")
 endif()
-
 
 
 # Install headers only when `make install` is run
@@ -116,17 +139,8 @@ install(DIRECTORY ${HEADER_SOURCE_DIR}/
         FILES_MATCHING PATTERN "*.h"
 )
 
-# Define the location of the test binary
-set(TEST_BINARY "${CMAKE_BINARY_DIR}/bin/dualtest")
 
-# Add a custom target to run the tests
-add_custom_target(
-    test
-    COMMAND ${TEST_BINARY}
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    COMMENT "Running tests with ./bin/dualtest"
-    VERBATIM
-)
+
 
 # Ensure the `test` target depends on building the `dualtest` binary
 if(TARGET dualtest)
@@ -134,3 +148,5 @@ if(TARGET dualtest)
 else()
     message(WARNING "Target 'dualtest' does not exist. Ensure you define it properly.")
 endif()
+
+# When invoking `make test`, the `test` target will be run

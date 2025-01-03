@@ -90,13 +90,15 @@ public:
         VectorDense result(batch_size_, size_);
 
         int total_elements = batch_size_ * size_;
+        thrust::device_ptr<T> d_ptr1(data_);
+        thrust::device_ptr<T> d_ptr2(other.data_);
+        thrust::device_ptr<T> d_ptr_result(result.data_);
 
-        // Perform elementwise addition
         thrust::transform(
-            thrust::device_pointer_cast(data_),
-            thrust::device_pointer_cast(data_ + total_elements),
-            thrust::device_pointer_cast(other.data_),
-            thrust::device_pointer_cast(result.data_),
+            d_ptr1,
+            d_ptr1 + total_elements,
+            d_ptr2,
+            d_ptr_result,
             thrust::plus<T>());
 
         return result;
