@@ -100,6 +100,7 @@ public:
         cudaStreamSynchronize(stream_);
     }
 
+
     // Elementwise addition
     VectorDenseCuda elementwiseAdd(const VectorDenseCuda& other) const {
         if (batch_size_ != other.batch_size_ || size_ != other.size_) {
@@ -121,6 +122,9 @@ public:
 
         return result;
     }
+
+
+
 
     // Elementwise multiplication
     VectorDenseCuda elementwiseMultiply(const VectorDenseCuda& other) const {
@@ -199,7 +203,7 @@ struct BroadcastDualMultiply {
 
 
 template <typename T>
-void multiplyDualTensor(const thrust::complex<T>* real,
+void multiplyRealDualTensor(const thrust::complex<T>* real,
                         const thrust::complex<T>* dual,
                         thrust::complex<T>* result,
                         int batch_size, int real_size, int dual_size) {
@@ -219,6 +223,83 @@ void multiplyDualTensor(const thrust::complex<T>* real,
         });
 }
 
+/**
+ * Multiply two dual tensors elementwise.
+ * This emulates the einstein sum "mij,mik->mijk" for dual tensors.
+ */
+template <typename T>
+void multiplyDualDualTensor(const thrust::complex<T>* dual1,
+                            const thrust::complex<T>* dual2,
+                            thrust::complex<T>* result,
+                            int batch_size, int real_size, int dual_size) {
+    int total_elements = batch_size * real_size * dual_size * dual_size;
+
+    thrust::transform(
+        thrust::make_counting_iterator(0),
+        thrust::make_counting_iterator(total_elements),
+        thrust::device_pointer_cast(result),
+        [=] __device__(int idx) {
+            // Calculate indices for the result tensor
+            int batch_idx = idx / (real_size * dual_size * dual_size);
+            int real_idx = (idx / (dual_size * dual_size)) % real_size;
+            int dual_idx1 = (idx / dual_size) % dual_size;
+            int dual_idx2 = idx % dual_size;
+
+            // Offsets in dual1 and dual2
+            int dual1_offset = batch_idx * real_size * dual_size + real_idx * dual_size + dual_idx1;
+            int dual2_offset = batch_idx * real_size * dual_size + real_idx * dual_size + dual_idx2;
+
+            // Perform elementwise multiplication
+            return dual1[dual1_offset] * dual2[dual2_offset];
+        });
+}
+
+
+template <typename T>
+__global__ void elementwiseAddKernel(
+    thrust::complex<T>* real1, thrust::complex<T>* real2,
+    thrust::complex<T>* dual1, thrust::complex<T>* dual2,
+    thrust::complex<T>* real_result, thrust::complex<T>* dual_result,
+    int real_size, int dual_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Real part addition
+    if (idx < real_size && real1 && real2 && real_result) {
+        real_result[idx] = real1[idx] + real2[idx];
+    }
+
+    // Dual part addition (if provided)
+    if (idx < dual_size && dual1 && dual2 && dual_result) {
+        dual_result[idx] = dual1[idx] + dual2[idx];
+    }
+}
+
+
+    template <typename T>
+    __global__ void elementwiseMultiplyKernel(
+        thrust::complex<T>* real1, thrust::complex<T>* real2,
+        thrust::complex<T>* dual1, thrust::complex<T>* dual2,
+        thrust::complex<T>* real_result, thrust::complex<T>* dual_result,
+        int real_size, int dual_size) {
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+        // Real part multiplication
+        if (idx < real_size && real1 && real2 && real_result) {
+            real_result[idx] = real1[idx] * real2[idx];
+        }
+
+        // Dual part multiplication (if provided)
+        if (idx < dual_size && dual1 && dual2 && dual_result) {
+            int dual_dim = dual_size/real_size;
+            int real_idx = idx/dual_dim;
+            dual_result[idx] = real1[real_idx] * dual2[idx] +
+                            real2[real_idx] * dual1[idx];
+        }
+    }
+
+
+
+
 
 template <typename T>
 class VectorDualDenseCuda {
@@ -229,319 +310,211 @@ private:
 
     thrust::complex<T>* real_;   // Real part [M, N]
     thrust::complex<T>* dual_;   // Dual part [M, N, D]
-    bool owns_memory_;           // Indicates if memory is managed internally
-
-    cudaStream_t stream_;        // CUDA stream for asynchronous operations
 
 public:
-    // Constructor with external memory
-    VectorDualDenseCuda(int batch_size, int real_size, int dual_size,
-         thrust::complex<T>* real, thrust::complex<T>* dual)
+    // Constructor for GPU allocation (device-only)
+    __host__ __device__ VectorDualDenseCuda(int batch_size, int real_size, int dual_size, thrust::complex<T>* real, thrust::complex<T>* dual)
+        : batch_size_(batch_size), real_size_(real_size), dual_size_(dual_size), real_(real), dual_(dual) {}
+
+    // Elementwise addition on GPU
+    __host__ __device__ void elementwiseAdd(const VectorDualDenseCuda& other, VectorDualDenseCuda& result) const {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int total_real_elements = batch_size_ * real_size_;
+        int total_dual_elements = batch_size_ * real_size_ * dual_size_;
+
+        // Real part addition
+        if (idx < total_real_elements) {
+            result.real_[idx] = real_[idx] + other.real_[idx];
+        }
+
+        // Dual part addition
+        if (idx < total_dual_elements) {
+            result.dual_[idx] = dual_[idx] + other.dual_[idx];
+        }
+    }
+
+    // Elementwise multiplication on GPU
+    __host__ __device__ void elementwiseMultiply(const VectorDualDenseCuda& other, VectorDualDenseCuda& result) const {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int total_real_elements = batch_size_ * real_size_;
+        int total_dual_elements = batch_size_ * real_size_ * dual_size_;
+        int dual_dim = dual_size_ / real_size_;
+
+        // Real part multiplication
+        if (idx < total_real_elements) {
+            result.real_[idx] = real_[idx] * other.real_[idx];
+        }
+
+        // Dual part multiplication
+        if (idx < total_dual_elements) {
+            int real_idx = idx / dual_dim;
+            result.dual_[idx] = real_[real_idx] * other.dual_[idx] +
+                                other.real_[real_idx] * dual_[idx];
+        }
+    }
+
+    // Accessors (for GPU use)
+    __host__ __device__ thrust::complex<T>* real() { return real_; }
+    __host__ __device__ const thrust::complex<T>* real() const { return real_; }
+    __host__ __device__ thrust::complex<T>* dual() { return dual_; }
+    __host__ __device__ const thrust::complex<T>* dual() const { return dual_; }
+    __host__ __device__ int batchSize() const { return batch_size_; }
+    __host__ __device__ int size() const { return real_size_; }
+    __host__ __device__ int dualSize() const { return dual_size_; }
+};
+
+
+
+template <typename T>
+__global__ void multiplyRealHyperDualKernel(
+    const thrust::complex<T>* real1, const thrust::complex<T>* dual1, const thrust::complex<T>* hyperDual1,
+    const thrust::complex<T>* real2, const thrust::complex<T>* dual2, const thrust::complex<T>* hyperDual2,
+    thrust::complex<T>* result, int batch_size, int real_size, int dual_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int total_elements = batch_size * real_size * dual_size * dual_size;
+
+    if (idx < total_elements) {
+        // Decompose the index into batch, row, and column indices
+        int dual_dim = dual_size;
+        int batch_idx = idx / (real_size * dual_dim * dual_dim);
+        int real_idx = (idx / (dual_dim * dual_dim)) % real_size;
+        int dual_row = (idx / dual_dim) % dual_dim;
+        int dual_col = idx % dual_dim;
+
+        // Global real index
+        int real_global_idx = batch_idx * real_size + real_idx;
+
+        // Compute result index
+        int result_idx = batch_idx * real_size * dual_dim * dual_dim +
+                         real_idx * dual_dim * dual_dim +
+                         dual_row * dual_dim + dual_col;
+
+        // Indices for hyperdual tensors
+        int hyperDual1_idx = result_idx;  // Assuming hyperDual1 and result share the same indexing
+        int hyperDual2_idx = result_idx;
+
+        // Multiply the real and hyperdual tensors
+        result[result_idx] = real1[real_global_idx] * hyperDual2[hyperDual2_idx] +
+                             real2[real_global_idx] * hyperDual1[hyperDual1_idx];
+
+        // Indices for dual tensors
+        int dual1_idx = batch_idx * real_size * dual_dim + real_idx * dual_dim + dual_row;
+        int dual2_idx = batch_idx * real_size * dual_dim + real_idx * dual_dim + dual_col;
+
+        // Compute the outer product of the dual parts
+        result[result_idx] += dual1[dual1_idx] * dual2[dual2_idx];
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+template <typename T>
+class VectorHyperDualDenseCuda {
+private:
+    int batch_size_;                 // Batch dimension (M)
+    int real_size_;                  // Vector length (N)
+    int dual_size_;                  // Dual dimension (D)
+
+    thrust::complex<T>* real_;       // Real part [M, N]
+    thrust::complex<T>* dual_;       // Dual part [M, N, D]
+    thrust::complex<T>* hyperdual_;  // Hyperdual part [M, N, D, D]
+
+public:
+    // Constructor for GPU allocation (device-only)
+    __host__ __device__ VectorHyperDualDenseCuda(
+        int batch_size, int real_size, int dual_size,
+        thrust::complex<T>* real, thrust::complex<T>* dual, thrust::complex<T>* hyperdual)
         : batch_size_(batch_size), real_size_(real_size), dual_size_(dual_size),
-          real_(real), dual_(dual), owns_memory_(false) {
-        if (!real_ || !dual_) {
-            throw std::invalid_argument("Real or dual data pointer is null.");
-        }
-        initializeStream();
-    }
+          real_(real), dual_(dual), hyperdual_(hyperdual) {}
 
-    // Constructor with internal memory allocation
-    VectorDualDenseCuda(int batch_size, int real_size, int dual_size)
-        : batch_size_(batch_size), real_size_(real_size), dual_size_(dual_size), owns_memory_(true) {
-        if (batch_size <= 0 || real_size <= 0 || dual_size <= 0) {
-            throw std::invalid_argument("Batch size, vector size, and dual size must be positive.");
-        }
+    // Elementwise addition on GPU
+    __host__ __device__ void elementwiseAdd(const VectorHyperDualDenseCuda& other, VectorHyperDualDenseCuda& result) const {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int total_real_elements = batch_size_ * real_size_;
+        int total_dual_elements = batch_size_ * real_size_ * dual_size_;
+        int total_hyperdual_elements = batch_size_ * real_size_ * dual_size_ * dual_size_;
 
-        size_t real_data_size = batch_size * real_size * sizeof(thrust::complex<T>);
-        size_t dual_data_size = batch_size * real_size * dual_size * sizeof(thrust::complex<T>);
-
-        if (cudaMalloc(&real_, real_data_size) != cudaSuccess ||
-            cudaMalloc(&dual_, dual_data_size) != cudaSuccess) {
-            throw std::runtime_error("Failed to allocate GPU memory for dual number components.");
+        // Real part addition
+        if (idx < total_real_elements) {
+            result.real_[idx] = real_[idx] + other.real_[idx];
         }
 
-        initializeStream();
-    }
-
-    // Destructor
-    ~VectorDualDenseCuda() {
-        if (owns_memory_) {
-            if (real_) cudaFree(real_);
-            if (dual_) cudaFree(dual_);
+        // Dual part addition
+        if (idx < total_dual_elements) {
+            result.dual_[idx] = dual_[idx] + other.dual_[idx];
         }
-        if (stream_) {
-            cudaStreamDestroy(stream_);
+
+        // Hyperdual part addition
+        if (idx < total_hyperdual_elements) {
+            result.hyperdual_[idx] = hyperdual_[idx] + other.hyperdual_[idx];
         }
     }
 
-    void initialize(const thrust::complex<T>* host_real, const thrust::complex<T>* host_dual) {
-        size_t real_size = batch_size_ * real_size_ * sizeof(thrust::complex<T>);
-        size_t dual_size = batch_size_ * real_size_ * dual_size_ * sizeof(thrust::complex<T>);
+    // Elementwise multiplication on GPU
+    __host__ __device__ void elementwiseMultiply(const VectorHyperDualDenseCuda& other, VectorHyperDualDenseCuda& result) const {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int total_real_elements = batch_size_ * real_size_;
+        int total_dual_elements = batch_size_ * real_size_ * dual_size_;
+        int total_hyperdual_elements = batch_size_ * real_size_ * dual_size_ * dual_size_;
+        int dual_dim = dual_size_;
 
-        cudaError_t real_status = cudaMemcpyAsync(real_, host_real, real_size, cudaMemcpyHostToDevice, stream_);
-        cudaError_t dual_status = cudaMemcpyAsync(dual_, host_dual, dual_size, cudaMemcpyHostToDevice, stream_);
-
-        if (real_status != cudaSuccess || dual_status != cudaSuccess) {
-            throw std::runtime_error("Failed to copy data to device.");
+        // Real part multiplication
+        if (idx < total_real_elements) {
+            result.real_[idx] = real_[idx] * other.real_[idx];
         }
 
-        cudaStreamSynchronize(stream_);
-    }
-
-    // Elementwise addition
-    VectorDualDenseCuda elementwiseAdd(const VectorDualDenseCuda& other) const {
-        if (batch_size_ != other.batch_size_ || real_size_ != other.real_size_ || dual_size_ != other.dual_size_) {
-            throw std::invalid_argument("Dual dimensions do not match for elementwise addition.");
+        // Dual part multiplication
+        if (idx < total_dual_elements) {
+            int real_idx = idx / dual_dim;
+            result.dual_[idx] = real_[real_idx] * other.dual_[idx] +
+                                other.real_[real_idx] * dual_[idx];
         }
 
-        VectorDualDenseCuda result(batch_size_, real_size_, dual_size_);
-        
-        int real_total_elements = batch_size_ * real_size_;
-        int dual_total_elements = batch_size_ * real_size_ * dual_size_;
+        // Hyperdual part multiplication
+        if (idx < total_hyperdual_elements) {
+            int batch_idx = idx / (real_size_ * dual_dim * dual_dim);
+            int real_idx = (idx / (dual_dim * dual_dim)) % real_size_;
+            int dual_row = (idx / dual_dim) % dual_dim;
+            int dual_col = idx % dual_dim;
 
-        thrust::device_ptr<thrust::complex<T>> real1(real_);
-        thrust::device_ptr<thrust::complex<T>> real2(other.real_);
-        thrust::device_ptr<thrust::complex<T>> real_result(result.real_);
+            int dual1_idx = batch_idx * real_size_ * dual_dim + real_idx * dual_dim + dual_row;
+            int dual2_idx = batch_idx * real_size_ * dual_dim + real_idx * dual_dim + dual_col;
 
-        thrust::device_ptr<thrust::complex<T>> dual1(dual_);
-        thrust::device_ptr<thrust::complex<T>> dual2(other.dual_);
-        thrust::device_ptr<thrust::complex<T>> dual_result(result.dual_);
-
-        thrust::transform(real1, real1 + real_total_elements, real2, real_result, thrust::plus<thrust::complex<T>>());
-        thrust::transform(dual1, dual1 + dual_total_elements, dual2, dual_result, thrust::plus<thrust::complex<T>>());
-
-        return result;
-    }
-
-
-
-    VectorDualDenseCuda elementwiseMultiply(const VectorDualDenseCuda& other) const {
-        if (batch_size_ != other.batch_size_ || real_size_ != other.real_size_ || dual_size_ != other.dual_size_) {
-            throw std::invalid_argument("Dual dimensions do not match for elementwise multiplication.");
-        }
-        //The real part is multiplied elementwise
-        VectorDualDenseCuda result(batch_size_, real_size_, dual_size_);
-        int total_elements_real = batch_size_ * real_size_;
-
-        thrust::transform(
-            thrust::device_pointer_cast(real_),
-            thrust::device_pointer_cast(real_ + total_elements_real),
-            thrust::device_pointer_cast(other.real_),
-            thrust::device_pointer_cast(result.real_),
-            thrust::multiplies<thrust::complex<T>>());
-
-        //Now get the dual part
-        int total_elements_dual = batch_size_ * real_size_ * dual_size_;
-        //Create a holder for the data
-        thrust::device_vector<thrust::complex<T>> result_dual1(total_elements_dual);
-        thrust::device_vector<thrust::complex<T>> result_dual2(total_elements_dual);
-        multiplyDualTensor<T>(real_,
-                              other.dual_,
-                              thrust::raw_pointer_cast(result_dual1.data()), 
-                              batch_size_, real_size_, dual_size_);
-        multiplyDualTensor<T>(other.real_,
-                              dual_,
-                              thrust::raw_pointer_cast(result_dual2.data()), 
-                              batch_size_, real_size_, dual_size_); 
-
-        //Now add the two results
-        thrust::transform(
-            thrust::device_pointer_cast(result_dual1.data()),
-            thrust::device_pointer_cast(result_dual1.data() + total_elements_dual),
-            thrust::device_pointer_cast(result_dual2.data()),
-            thrust::device_pointer_cast(result.dual_),
-            thrust::plus<thrust::complex<T>>());
-
-
-        return result;
-    }
-
-    // Accessors
-    thrust::complex<T>* real() { return real_; }
-    const thrust::complex<T>* real() const { return real_; }
-    thrust::complex<T>* dual() { return dual_; }
-    const thrust::complex<T>* dual() const { return dual_; }
-    int batchSize() const { return batch_size_; }
-    int size() const { return real_size_; }
-    int dualSize() const { return dual_size_; }
-
-private:
-    // Initialize CUDA stream
-    void initializeStream() {
-        if (cudaStreamCreate(&stream_) != cudaSuccess) {
-            throw std::runtime_error("Failed to create CUDA stream.");
+            result.hyperdual_[idx] = real_[batch_idx * real_size_ + real_idx] * other.hyperdual_[idx] +
+                                     other.real_[batch_idx * real_size_ + real_idx] * hyperdual_[idx] +
+                                     dual_[dual1_idx] * other.dual_[dual2_idx];
         }
     }
-};
 
-template <typename T>
-class VectorHyperDualDense {
-private:
-    using ComplexT = std::complex<T>;
-
-    // Dimensions
-    int batch_size_;   // M
-    int size_;         // N (length of each vector)
-    int dual_dim_;     // D (number of dual components)
-
-    // Primal, Dual, and Hyper-Dual Data
-    ComplexT* primal_data_;      // [M, N]
-    ComplexT* dual_data_;        // [M, N, D]
-    ComplexT* hyper_dual_data_;  // [M, N, D, D]
-    bool owns_memory_;           // Indicates if memory is managed internally
-
-    // cuBLAS handle
-    cublasHandle_t handle_;
-    cudaStream_t stream_;
-
-public:
-    // Constructor with external memory
-    VectorHyperDualDense(int batch_size, int size, int dual_dim, ComplexT* primal_data, ComplexT* dual_data, ComplexT* hyper_dual_data)
-        : batch_size_(batch_size), size_(size), dual_dim_(dual_dim),
-          primal_data_(primal_data), dual_data_(dual_data), hyper_dual_data_(hyper_dual_data),
-          owns_memory_(false) {
-        if (!primal_data_ || !dual_data_ || !hyper_dual_data_) {
-            throw std::invalid_argument("Primal, dual, or hyper-dual data pointer is null.");
-        }
-        initializeHandles();
-    }
-
-    // Constructor with internal memory allocation
-    VectorHyperDualDense(int batch_size, int size, int dual_dim)
-        : batch_size_(batch_size), size_(size), dual_dim_(dual_dim), owns_memory_(true) {
-        if (batch_size <= 0 || size <= 0 || dual_dim <= 0) {
-            throw std::invalid_argument("All dimensions must be positive.");
-        }
-
-        size_t primal_size = batch_size * size * sizeof(ComplexT);
-        size_t dual_size = batch_size * size * dual_dim * sizeof(ComplexT);
-        size_t hyper_dual_size = batch_size * size * dual_dim * dual_dim * sizeof(ComplexT);
-
-        if (cudaMalloc(&primal_data_, primal_size) != cudaSuccess) {
-            throw std::runtime_error("Failed to allocate GPU memory for primal data.");
-        }
-
-        if (cudaMalloc(&dual_data_, dual_size) != cudaSuccess) {
-            cudaFree(primal_data_);
-            throw std::runtime_error("Failed to allocate GPU memory for dual data.");
-        }
-
-        if (cudaMalloc(&hyper_dual_data_, hyper_dual_size) != cudaSuccess) {
-            cudaFree(primal_data_);
-            cudaFree(dual_data_);
-            throw std::runtime_error("Failed to allocate GPU memory for hyper-dual data.");
-        }
-
-        initializeHandles();
-    }
-
-    ~VectorHyperDualDense() {
-        if (owns_memory_) {
-            if (primal_data_) cudaFree(primal_data_);
-            if (dual_data_) cudaFree(dual_data_);
-            if (hyper_dual_data_) cudaFree(hyper_dual_data_);
-        }
-        cublasDestroy(handle_);
-        cudaStreamDestroy(stream_);
-    }
-
-    void initialize(const ComplexT* primal, const ComplexT* dual, const ComplexT* hyper_dual, size_t primal_size, size_t dual_size, size_t hyper_dual_size) {
-        if (primal_size != batch_size_ * size_ ||
-            dual_size != batch_size_ * size_ * dual_dim_ ||
-            hyper_dual_size != batch_size_ * size_ * dual_dim_ * dual_dim_) {
-            throw std::invalid_argument("Input sizes do not match tensor dimensions.");
-        }
-
-        if (primal) {
-            cudaMemcpyAsync(primal_data_, primal, primal_size * sizeof(ComplexT), cudaMemcpyHostToDevice, stream_);
-        }
-        if (dual) {
-            cudaMemcpyAsync(dual_data_, dual, dual_size * sizeof(ComplexT), cudaMemcpyHostToDevice, stream_);
-        }
-        if (hyper_dual) {
-            cudaMemcpyAsync(hyper_dual_data_, hyper_dual, hyper_dual_size * sizeof(ComplexT), cudaMemcpyHostToDevice, stream_);
-        }
-        cudaStreamSynchronize(stream_);
-    }
-
-    // Example elementwise addition
-    VectorHyperDualDense<T> elementwiseAdd(const VectorHyperDualDense<T>& other) const {
-        if (batch_size_ != other.batch_size_ || size_ != other.size_ || dual_dim_ != other.dual_dim_) {
-            throw std::invalid_argument("Tensor dimensions do not match for elementwise addition.");
-        }
-
-        VectorHyperDualDense<T> result(batch_size_, size_, dual_dim_);
-
-        int total_primal_elements = batch_size_ * size_;
-        int total_dual_elements = total_primal_elements * dual_dim_;
-        int total_hyper_dual_elements = total_dual_elements * dual_dim_;
-
-        // Perform elementwise addition for the primal part
-        thrust::transform(
-            thrust::device_pointer_cast(primal_data_),
-            thrust::device_pointer_cast(primal_data_ + total_primal_elements),
-            thrust::device_pointer_cast(other.primal_data_),
-            thrust::device_pointer_cast(result.primal_data_),
-            thrust::plus<ComplexT>());
-
-        // Perform elementwise addition for the dual part
-        thrust::transform(
-            thrust::device_pointer_cast(dual_data_),
-            thrust::device_pointer_cast(dual_data_ + total_dual_elements),
-            thrust::device_pointer_cast(other.dual_data_),
-            thrust::device_pointer_cast(result.dual_data_),
-            thrust::plus<ComplexT>());
-
-        // Perform elementwise addition for the hyper-dual part
-        thrust::transform(
-            thrust::device_pointer_cast(hyper_dual_data_),
-            thrust::device_pointer_cast(hyper_dual_data_ + total_hyper_dual_elements),
-            thrust::device_pointer_cast(other.hyper_dual_data_),
-            thrust::device_pointer_cast(result.hyper_dual_data_),
-            thrust::plus<ComplexT>());
-
-        return result;
-    }
-
-private:
-    void initializeHandles() {
-        if (cublasCreate(&handle_) != CUBLAS_STATUS_SUCCESS) {
-            throw std::runtime_error("Failed to create cuBLAS handle.");
-        }
-        if (cudaStreamCreate(&stream_) != cudaSuccess) {
-            cublasDestroy(handle_);
-            throw std::runtime_error("Failed to create CUDA stream.");
-        }
-        cublasSetStream(handle_, stream_);
-    }
-
-public:
-    // Disable copy constructor and copy assignment
-    VectorHyperDualDense(const VectorHyperDualDense&) = delete;
-    VectorHyperDualDense& operator=(const VectorHyperDualDense&) = delete;
-
-    // Enable move constructor and move assignment
-    VectorHyperDualDense(VectorHyperDualDense&&) noexcept = default;
-    VectorHyperDualDense& operator=(VectorHyperDualDense&&) noexcept = default;
-
-    // Getters for dimensions
-    int batch_size() const { return batch_size_; }
-    int size() const { return size_; }
-    int dual_dim() const { return dual_dim_; }
-
-    // Getters for data pointers
-    ComplexT* primal_data() { return primal_data_; }
-    ComplexT* dual_data() { return dual_data_; }
-    ComplexT* hyper_dual_data() { return hyper_dual_data_; }
-
-    const ComplexT* primal_data() const { return primal_data_; }
-    const ComplexT* dual_data() const { return dual_data_; }
-    const ComplexT* hyper_dual_data() const { return hyper_dual_data_; }
+    // Accessors (for GPU use)
+    __host__ __device__ thrust::complex<T>* real() { return real_; }
+    __host__ __device__ const thrust::complex<T>* real() const { return real_; }
+    __host__ __device__ thrust::complex<T>* dual() { return dual_; }
+    __host__ __device__ const thrust::complex<T>* dual() const { return dual_; }
+    __host__ __device__ thrust::complex<T>* hyperdual() { return hyperdual_; }
+    __host__ __device__ const thrust::complex<T>* hyperdual() const { return hyperdual_; }
+    __host__ __device__ int batchSize() const { return batch_size_; }
+    __host__ __device__ int size() const { return real_size_; }
+    __host__ __device__ int dualSize() const { return dual_size_; }
 };
 
 
+
+
+
+
 template <typename T>
-class MatrixDense {
+class MatrixDenseCuda {
 private:
     using ComplexT = std::complex<T>;
 
@@ -560,7 +533,7 @@ private:
 
 public:
     // Constructor with external memory
-    MatrixDense(int batch_size, int rows, int cols, ComplexT* primal_data)
+    MatrixDenseCuda(int batch_size, int rows, int cols, ComplexT* primal_data)
         : batch_size_(batch_size), rows_(rows), cols_(cols),
           primal_data_(primal_data), owns_memory_(false) {
         if (!primal_data_) {
@@ -571,7 +544,7 @@ public:
     }
 
     // Constructor with internal memory allocation
-    MatrixDense(int batch_size, int rows, int cols)
+    MatrixDenseCuda(int batch_size, int rows, int cols)
         : batch_size_(batch_size), rows_(rows), cols_(cols), owns_memory_(true) {
         if (batch_size <= 0 || rows <= 0 || cols <= 0) {
             throw std::invalid_argument("All dimensions must be positive.");
@@ -586,7 +559,7 @@ public:
         initializeHandles();
     }
 
-    ~MatrixDense() {
+    ~MatrixDenseCuda() {
         if (owns_memory_ && primal_data_) {
             cudaFree(primal_data_);
         }
@@ -606,7 +579,7 @@ public:
     }
 
     template <typename U>
-    MatrixDense<U> indexGet(int start_row, int end_row, int start_col, int end_col) const {
+    MatrixDenseCuda<U> indexGet(int start_row, int end_row, int start_col, int end_col) const {
         // Validate row and column ranges
         if (start_row < 0 || end_row > rows_ || start_row >= end_row ||
             start_col < 0 || end_col > cols_ || start_col >= end_col) {
@@ -621,12 +594,12 @@ public:
         ComplexT* sub_primal_data = primal_data_ + start_row * cols_ + start_col;
 
         // Create a new MatrixDense instance sharing the data with the original
-        return MatrixDense<T>(batch_size_, sub_rows, sub_cols, sub_primal_data);
+        return MatrixDenseCuda<T>(batch_size_, sub_rows, sub_cols, sub_primal_data);
     }
 
 
     template <typename U>
-    void indexPut(int start_row, int end_row, int start_col, int end_col, const MatrixDense<U>& data) {
+    void indexPut(int start_row, int end_row, int start_col, int end_col, const MatrixDenseCuda<U>& data) {
         // Validate row and column ranges
         if (start_row < 0 || end_row > rows_ || start_row >= end_row ||
             start_col < 0 || end_col > cols_ || start_col >= end_col) {
@@ -659,14 +632,14 @@ public:
     }
 
 
-    MatrixDense<T> multiply(const MatrixDense<T>& other) const {
+    MatrixDenseCuda<T> multiply(const MatrixDenseCuda<T>& other) const {
         // Validate dimensions
         if (cols_ != other.rows_ || batch_size_ != other.batch_size_) {
             throw std::invalid_argument("Matrix dimensions do not match for multiplication.");
         }
 
         // Create the result matrix
-        MatrixDense<T> result(batch_size_, rows_, other.cols_);
+        MatrixDenseCuda<T> result(batch_size_, rows_, other.cols_);
 
         // Scaling factors for cuBLAS
         ComplexT alpha = ComplexT(1.0, 0.0);
@@ -738,8 +711,8 @@ public:
         return result;
     }
 
-    MatrixDense<T> transpose() const {
-        MatrixDense<T> result(batch_size_, cols_, rows_);
+    MatrixDenseCuda<T> transpose() const {
+        MatrixDenseCuda<T> result(batch_size_, cols_, rows_);
         ComplexT alpha = ComplexT(1.0, 0.0);
         ComplexT beta = ComplexT(0.0, 0.0);
 
@@ -757,12 +730,12 @@ public:
         return result;
     }
 
-    MatrixDense<T> elementwiseAdd(const MatrixDense<T>& other) const {
+    MatrixDenseCuda<T> elementwiseAdd(const MatrixDenseCuda<T>& other) const {
         if (batch_size_ != other.batch_size_ || rows_ != other.rows_ || cols_ != other.cols_) {
             throw std::invalid_argument("Tensor dimensions do not match for addition.");
         }
 
-        MatrixDense<T> result(batch_size_, rows_, cols_);
+        MatrixDenseCuda<T> result(batch_size_, rows_, cols_);
             int total_elements = batch_size_ * rows_ * cols_;
 
             thrust::transform(thrust::device_pointer_cast(primal_data_),
@@ -774,9 +747,9 @@ public:
             return result;
     }
 
-    MatrixDense<T> square() const {
+    MatrixDenseCuda<T> square() const {
         // Create a new MatrixDense object to store the result
-        MatrixDense<T> result(batch_size_, rows_, cols_);
+        MatrixDenseCuda<T> result(batch_size_, rows_, cols_);
 
         // Calculate the total number of elements in the tensor
         int total_elements = batch_size_ * rows_ * cols_;
@@ -791,9 +764,9 @@ public:
         return result;
     }
 
-    MatrixDense<T> upperTriangular() const {
+    MatrixDenseCuda<T> upperTriangular() const {
         // Create a result matrix with the same dimensions
-        MatrixDense<T> result(batch_size_, rows_, cols_);
+        MatrixDenseCuda<T> result(batch_size_, rows_, cols_);
 
         size_t total_elements = rows_ * cols_;
 
@@ -816,9 +789,9 @@ public:
         return result;
     }
 
-    MatrixDense<T> lowerTriangular() const {
+    MatrixDenseCuda<T> lowerTriangular() const {
         // Create a result matrix with the same dimensions
-        MatrixDense<T> result(batch_size_, rows_, cols_);
+        MatrixDenseCuda<T> result(batch_size_, rows_, cols_);
 
         size_t total_elements = rows_ * cols_;
 
@@ -858,12 +831,12 @@ private:
 
 public:
     // Disable copy constructor and copy assignment
-    MatrixDense(const MatrixDense&) = delete;
-    MatrixDense& operator=(const MatrixDense&) = delete;
+    MatrixDenseCuda(const MatrixDenseCuda&) = delete;
+    MatrixDenseCuda& operator=(const MatrixDenseCuda&) = delete;
 
     // Enable move constructor and move assignment
-    MatrixDense(MatrixDense&&) noexcept = default;
-    MatrixDense& operator=(MatrixDense&&) noexcept = default;
+    MatrixDenseCuda(MatrixDenseCuda&&) noexcept = default;
+    MatrixDenseCuda& operator=(MatrixDenseCuda&&) noexcept = default;
 
     // Getters for dimensions
     int batch_size() const { return batch_size_; }
@@ -1422,7 +1395,7 @@ private:
 
 
 template <typename T>
-class MatrixHyperDualDense {
+class MatrixHyperDualDenseCuda {
 private:
     using ComplexT = std::complex<T>;
 
@@ -1444,7 +1417,7 @@ private:
 
 public:
     // Constructor with external memory
-    MatrixHyperDualDense(int batch_size, int rows, int cols, int dual_dim,
+    MatrixHyperDualDenseCuda(int batch_size, int rows, int cols, int dual_dim,
                            ComplexT* primal_data, ComplexT* dual_data, ComplexT* hyper_dual_data)
         : batch_size_(batch_size), rows_(rows), cols_(cols), dual_dim_(dual_dim),
           primal_data_(primal_data), dual_data_(dual_data), hyper_dual_data_(hyper_dual_data),
@@ -1457,7 +1430,7 @@ public:
     }
 
     // Constructor with internal memory allocation
-    MatrixHyperDualDense(int batch_size, int rows, int cols, int dual_dim)
+    MatrixHyperDualDenseCuda(int batch_size, int rows, int cols, int dual_dim)
         : batch_size_(batch_size), rows_(rows), cols_(cols), dual_dim_(dual_dim), owns_memory_(true) {
         if (batch_size <= 0 || rows <= 0 || cols <= 0 || dual_dim <= 0) {
             throw std::invalid_argument("All dimensions must be positive.");
@@ -1485,7 +1458,7 @@ public:
         initializeHandles();
     }
 
-    ~MatrixHyperDualDense() {
+    ~MatrixHyperDualDenseCuda() {
         if (owns_memory_) {
             if (primal_data_) cudaFree(primal_data_);
             if (dual_data_) cudaFree(dual_data_);
@@ -1516,7 +1489,7 @@ public:
     }
 
     template <typename U>
-    MatrixHyperDualDense<U> indexGet(int start_row, int end_row, int start_col, int end_col) const {
+    MatrixHyperDualDenseCuda<U> indexGet(int start_row, int end_row, int start_col, int end_col) const {
         // Validate row and column ranges
         if (start_row < 0 || end_row > rows_ || start_row >= end_row ||
             start_col < 0 || end_col > cols_ || start_col >= end_col) {
@@ -1535,13 +1508,13 @@ public:
                                         start_col * dual_dim_ * dual_dim_;
 
         // Create a new MatrixHyperDualDense instance sharing the data with the original
-        return MatrixHyperDualDense<T>(batch_size_, sub_rows, sub_cols, dual_dim_,
+        return MatrixHyperDualDenseCuda<T>(batch_size_, sub_rows, sub_cols, dual_dim_,
                                     sub_primal_data, sub_dual_data, sub_hyper_dual_data);
     }
 
 
     template <typename U>
-    void indexPut(int start_row, int end_row, int start_col, int end_col, const MatrixHyperDualDense<U>& data) {
+    void indexPut(int start_row, int end_row, int start_col, int end_col, const MatrixHyperDualDenseCuda<U>& data) {
         // Validate row and column ranges
         if (start_row < 0 || end_row > rows_ || start_row >= end_row ||
             start_col < 0 || end_col > cols_ || start_col >= end_col) {
@@ -1601,8 +1574,8 @@ public:
         cudaStreamSynchronize(stream_);
     }
 
-    MatrixHyperDualDense<T> transpose() const {
-        MatrixHyperDualDense<T> result(batch_size_, cols_, rows_, dual_dim_);
+    MatrixHyperDualDenseCuda<T> transpose() const {
+        MatrixHyperDualDenseCuda<T> result(batch_size_, cols_, rows_, dual_dim_);
         ComplexT alpha = ComplexT(1.0, 0.0);
         ComplexT beta = ComplexT(0.0, 0.0);
 
@@ -1655,9 +1628,9 @@ public:
         return result;
     }
 
-    MatrixHyperDualDense<T> upperTriangular() const {
+    MatrixHyperDualDenseCuda<T> upperTriangular() const {
         // Create a result matrix with the same dimensions
-        MatrixHyperDualDense<T> result(batch_size_, rows_, cols_, dual_dim_);
+        MatrixHyperDualDenseCuda<T> result(batch_size_, rows_, cols_, dual_dim_);
 
         size_t total_elements = rows_ * cols_;
 
@@ -1692,9 +1665,9 @@ public:
         return result;
     }
 
-    MatrixHyperDualDense<T> lowerTriangular() const {
+    MatrixHyperDualDenseCuda<T> lowerTriangular() const {
         // Create a result matrix with the same dimensions
-        MatrixHyperDualDense<T> result(batch_size_, rows_, cols_, dual_dim_);
+        MatrixHyperDualDenseCuda<T> result(batch_size_, rows_, cols_, dual_dim_);
 
         size_t total_elements = rows_ * cols_;
 
@@ -1729,14 +1702,14 @@ public:
         return result;
     }
     template <typename U>
-    MatrixHyperDualDense<U> matrixMultiply(const MatrixHyperDualDense<U>& other) const {
+    MatrixHyperDualDenseCuda<U> matrixMultiply(const MatrixHyperDualDenseCuda<U>& other) const {
         // Validate dimensions
         if (cols_ != other.rows_ || batch_size_ != other.batch_size_ || dual_dim_ != other.dual_dim_) {
             throw std::invalid_argument("Matrix dimensions do not match for multiplication.");
         }
 
         // Create the result matrix
-        MatrixHyperDualDense<T> result(batch_size_, rows_, other.cols_, dual_dim_);
+        MatrixHyperDualDenseCuda<T> result(batch_size_, rows_, other.cols_, dual_dim_);
 
         ComplexT alpha = ComplexT(1.0, 0.0);
         ComplexT beta = ComplexT(0.0, 0.0);
@@ -1817,94 +1790,6 @@ public:
         return result;
     }
 
-    template <typename U>
-    VectorHyperDualDense<U> matrixVectorProduct(const VectorHyperDualDense<U>& vector) const {
-        // Validate dimensions
-        if (cols_ != vector.size() || batch_size_ != vector.batch_size() || dual_dim_ != vector.dual_dim()) {
-            throw std::invalid_argument("Matrix and vector dimensions do not match for multiplication.");
-        }
-
-        // Create the result vector
-        VectorHyperDualDense<T> result(batch_size_, rows_, dual_dim_);
-
-        ComplexT alpha = ComplexT(1.0, 0.0);
-        ComplexT beta = ComplexT(0.0, 0.0);
-
-        for (int b = 0; b < batch_size_; ++b) {
-            // Real part: Primal * Primal(vector)
-            cublasZgemv(handle_,
-                        CUBLAS_OP_N,
-                        rows_, cols_,
-                        &alpha,
-                        primal_data_ + b * rows_ * cols_, rows_,
-                        vector.primal_data() + b * vector.size(), 1,
-                        &beta,
-                        result.primal_data() + b * rows_, 1);
-
-            // Dual part
-            for (int d = 0; d < dual_dim_; ++d) {
-                // Primal * Dual(vector) + Dual * Primal(vector)
-                cublasZgemv(handle_,
-                            CUBLAS_OP_N,
-                            rows_, cols_,
-                            &alpha,
-                            primal_data_ + b * rows_ * cols_, rows_,
-                            vector.dual_data() + b * vector.size() * dual_dim_ + d * vector.size(), 1,
-                            &beta,
-                            result.dual_data() + b * rows_ * dual_dim_ + d * rows_, 1);
-
-                cublasZgemv(handle_,
-                            CUBLAS_OP_N,
-                            rows_, cols_,
-                            &alpha,
-                            dual_data_ + b * rows_ * cols_ * dual_dim_ + d * rows_ * cols_, rows_,
-                            vector.primal_data() + b * vector.size(), 1,
-                            &alpha, // Accumulate
-                            result.dual_data() + b * rows_ * dual_dim_ + d * rows_, 1);
-            }
-
-            // Hyper-dual part
-            for (int d1 = 0; d1 < dual_dim_; ++d1) {
-                for (int d2 = 0; d2 < dual_dim_; ++d2) {
-                    // (Primal * Hyper-Dual(vector)) + (Dual * Dual(vector)) + (Hyper-Dual * Primal(vector))
-                    cublasZgemv(handle_,
-                                CUBLAS_OP_N,
-                                rows_, cols_,
-                                &alpha,
-                                primal_data_ + b * rows_ * cols_, rows_,
-                                vector.hyper_dual_data() + b * vector.size() * dual_dim_ * dual_dim_ +
-                                    d1 * vector.size() * dual_dim_ + d2 * vector.size(), 1,
-                                &beta,
-                                result.hyper_dual_data() + b * rows_ * dual_dim_ * dual_dim_ +
-                                    d1 * rows_ * dual_dim_ + d2 * rows_, 1);
-
-                    cublasZgemv(handle_,
-                                CUBLAS_OP_N,
-                                rows_, cols_,
-                                &alpha,
-                                dual_data_ + b * rows_ * cols_ * dual_dim_ + d1 * rows_ * cols_, rows_,
-                                vector.dual_data() + b * vector.size() * dual_dim_ + d2 * vector.size(), 1,
-                                &alpha, // Accumulate
-                                result.hyper_dual_data() + b * rows_ * dual_dim_ * dual_dim_ +
-                                    d1 * rows_ * dual_dim_ + d2 * rows_, 1);
-
-                    cublasZgemv(handle_,
-                                CUBLAS_OP_N,
-                                rows_, cols_,
-                                &alpha,
-                                hyper_dual_data_ + b * rows_ * cols_ * dual_dim_ * dual_dim_ +
-                                    d1 * rows_ * cols_ * dual_dim_ + d2 * rows_ * cols_, rows_,
-                                vector.primal_data() + b * vector.size(), 1,
-                                &alpha, // Accumulate
-                                result.hyper_dual_data() + b * rows_ * dual_dim_ * dual_dim_ +
-                                    d1 * rows_ * dual_dim_ + d2 * rows_, 1);
-                }
-            }
-        }
-
-        cudaStreamSynchronize(stream_);
-        return result;
-    }
 
 
 private:
@@ -1921,12 +1806,12 @@ private:
 
 public:
     // Disable copy constructor and copy assignment
-    MatrixHyperDualDense(const MatrixHyperDualDense&) = delete;
-    MatrixHyperDualDense& operator=(const MatrixHyperDualDense&) = delete;
+    MatrixHyperDualDenseCuda(const MatrixHyperDualDenseCuda&) = delete;
+    MatrixHyperDualDenseCuda& operator=(const MatrixHyperDualDenseCuda&) = delete;
 
     // Enable move constructor and move assignment
-    MatrixHyperDualDense(MatrixHyperDualDense&&) noexcept = default;
-    MatrixHyperDualDense& operator=(MatrixHyperDualDense&&) noexcept = default;
+    MatrixHyperDualDenseCuda(MatrixHyperDualDenseCuda&&) noexcept = default;
+    MatrixHyperDualDenseCuda& operator=(MatrixHyperDualDenseCuda&&) noexcept = default;
 
     // Getters for dimensions
     int batch_size() const { return batch_size_; }

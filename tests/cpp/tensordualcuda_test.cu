@@ -64,7 +64,7 @@ TEST(VectorDenseComplexTest, ElementwiseAdd) {
     vec1.initialize(host_data.data(), host_data.size());
     vec2.initialize(host_data.data(), host_data.size());
 
-    auto result = vec1.elementwiseAdd(vec2);
+    VectorDenseCuda<float> result = vec1.elementwiseAdd(vec2);
 
     thrust::host_vector<thrust::complex<float>> result_host(batch_size * vector_size);
     cudaMemcpy(result_host.data(), result.data(),
@@ -102,56 +102,91 @@ TEST(VectorDenseComplexTest, ElementwiseMultiply) {
     }
 }
 
-// Additional tests like `sum`, `sign`, etc., would follow a similar pattern.
 
-TEST(VectorDualDenseCudaTest, ConstructorWithInternalMemory) {
-    int batch_size = 2;
-    int size = 5;
-    int dual_dim = 3;
 
-    janus::VectorDualDenseCuda<float> vec(batch_size, size, dual_dim);
-
-    EXPECT_EQ(vec.batchSize(), batch_size);
-    EXPECT_EQ(vec.size(), size);
-    EXPECT_EQ(vec.dualSize(), dual_dim);
+__global__ void validateDataKernel(
+    const thrust::complex<float>* real, const thrust::complex<float>* dual,
+    thrust::complex<float>* real_out, thrust::complex<float>* dual_out,
+    int real_size, int dual_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < real_size) {
+        real_out[idx] = real[idx];
+    }
+    if (idx < dual_size) {
+        dual_out[idx] = dual[idx];
+    }
 }
-
 
 TEST(VectorDualDenseCudaTest, Initialize) {
     int batch_size = 2;
     int size = 5;
     int dual_dim = 3;
 
-    janus::VectorDualDenseCuda<float> vec(batch_size, size, dual_dim);
+    // Allocate GPU memory for real and dual data
+    size_t real_size = batch_size * size * sizeof(thrust::complex<float>);
+    size_t dual_size = batch_size * size * dual_dim * sizeof(thrust::complex<float>);
 
-    // Initialize data
+    thrust::complex<float>* d_real;
+    thrust::complex<float>* d_dual;
+    cudaMalloc(&d_real, real_size);
+    cudaMalloc(&d_dual, dual_size);
+
+    // Initialize data on host
     std::vector<thrust::complex<float>> primal_data(batch_size * size, thrust::complex<float>(1.0f, 2.0f));
     std::vector<thrust::complex<float>> dual_data(batch_size * size * dual_dim, thrust::complex<float>(0.5f, 0.5f));
 
-    vec.initialize(primal_data.data(), dual_data.data());
+    // Copy data to GPU
+    cudaMemcpy(d_real, primal_data.data(), real_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dual, dual_data.data(), dual_size, cudaMemcpyHostToDevice);
 
-    // Copy primal data back to host
+    // Create GPU object
+    janus::VectorDualDenseCuda<float> vec(batch_size, size, dual_dim, d_real, d_dual);
+
+    // Allocate temporary buffers to copy GPU data back to host
+    thrust::complex<float>* d_real_out;
+    thrust::complex<float>* d_dual_out;
+    cudaMalloc(&d_real_out, real_size);
+    cudaMalloc(&d_dual_out, dual_size);
+
+    // Launch a kernel to verify that the data is accessible on the GPU
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (batch_size * size + threadsPerBlock - 1) / threadsPerBlock;
+
+    validateDataKernel<<<blocksPerGrid, threadsPerBlock>>>(
+        vec.real(), vec.dual(), d_real_out, d_dual_out, batch_size * size, batch_size * size * dual_dim);
+    cudaDeviceSynchronize();
+
+    // Copy real data back to host for validation
     std::vector<thrust::complex<float>> host_primal_data(batch_size * size);
-    cudaMemcpy(host_primal_data.data(), vec.real(),
-               batch_size * size * sizeof(thrust::complex<float>), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_primal_data.data(), d_real_out, real_size, cudaMemcpyDeviceToHost);
 
-    // Validate primal data
+    // Validate real data
     for (size_t i = 0; i < primal_data.size(); ++i) {
         EXPECT_FLOAT_EQ(host_primal_data[i].real(), primal_data[i].real());
         EXPECT_FLOAT_EQ(host_primal_data[i].imag(), primal_data[i].imag());
     }
 
-    // Copy dual data back to host
+    // Copy dual data back to host for validation
     std::vector<thrust::complex<float>> host_dual_data(batch_size * size * dual_dim);
-    cudaMemcpy(host_dual_data.data(), vec.dual(),
-               batch_size * size * dual_dim * sizeof(thrust::complex<float>), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_dual_data.data(), d_dual_out, dual_size, cudaMemcpyDeviceToHost);
 
     // Validate dual data
     for (size_t i = 0; i < dual_data.size(); ++i) {
         EXPECT_FLOAT_EQ(host_dual_data[i].real(), dual_data[i].real());
         EXPECT_FLOAT_EQ(host_dual_data[i].imag(), dual_data[i].imag());
     }
+
+    // Free GPU memory
+    cudaFree(d_real);
+    cudaFree(d_dual);
+    cudaFree(d_real_out);
+    cudaFree(d_dual_out);
 }
+
+
+
+
+
 
 
 // Function to generate a vector of random complex numbers
@@ -175,7 +210,7 @@ std::vector<thrust::complex<float>> generateRandomComplexVector(size_t size, flo
     return result;
 }
 
-// Test for elementwise addition
+
 TEST(VectorDualDenseCudaTest, ElementwiseAddRandomComplex) {
     const int batch_size = 2;
     const int size = 3;
@@ -187,24 +222,49 @@ TEST(VectorDualDenseCudaTest, ElementwiseAddRandomComplex) {
     std::vector<thrust::complex<float>> dual_data1 = generateRandomComplexVector(batch_size * size * dual_dim, -1.0f, 1.0f, -1.0f, 1.0f);
     std::vector<thrust::complex<float>> dual_data2 = generateRandomComplexVector(batch_size * size * dual_dim, -1.0f, 1.0f, -1.0f, 1.0f);
 
-    // Initialize CUDA vectors
-    VectorDualDenseCuda<float> vec1(batch_size, size, dual_dim);
-    VectorDualDenseCuda<float> vec2(batch_size, size, dual_dim);
-    
+    // Allocate GPU memory
+    size_t real_size = batch_size * size * sizeof(thrust::complex<float>);
+    size_t dual_size = batch_size * size * dual_dim * sizeof(thrust::complex<float>);
+    thrust::complex<float>* d_real1;
+    thrust::complex<float>* d_real2;
+    thrust::complex<float>* d_dual1;
+    thrust::complex<float>* d_dual2;
+    thrust::complex<float>* d_real_result;
+    thrust::complex<float>* d_dual_result;
 
-    //Copy data to device
-    vec1.initialize(primal_data1.data(), dual_data1.data());
+    cudaMalloc(&d_real1, real_size);
+    cudaMalloc(&d_real2, real_size);
+    cudaMalloc(&d_dual1, dual_size);
+    cudaMalloc(&d_dual2, dual_size);
+    cudaMalloc(&d_real_result, real_size);
+    cudaMalloc(&d_dual_result, dual_size);
 
-    vec2.initialize(primal_data2.data(), dual_data2.data());
+    // Copy data to GPU
+    cudaMemcpy(d_real1, primal_data1.data(), real_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_real2, primal_data2.data(), real_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dual1, dual_data1.data(), dual_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dual2, dual_data2.data(), dual_size, cudaMemcpyHostToDevice);
 
-    // Perform elementwise addition
-    VectorDualDenseCuda<float> result = vec1.elementwiseAdd(vec2);
+    // Create GPU objects
+    janus::VectorDualDenseCuda<float> vec1(batch_size, size, dual_dim, d_real1, d_dual1);
+    janus::VectorDualDenseCuda<float> vec2(batch_size, size, dual_dim, d_real2, d_dual2);
+    janus::VectorDualDenseCuda<float> result(batch_size, size, dual_dim, d_real_result, d_dual_result);
 
-    // Copy result back to the host for verification
+    // Configure and launch the kernel for elementwise addition
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (batch_size * size + threadsPerBlock - 1) / threadsPerBlock;
+
+    elementwiseAddKernel<<<blocksPerGrid, threadsPerBlock>>>(vec1.real(), vec2.real(), 
+                                                             vec1.dual(), vec2.dual(),
+                                                             result.real(), result.dual(),
+                                                             batch_size * size, batch_size * size * dual_dim);
+    cudaDeviceSynchronize();
+
+    // Copy result back to host for verification
     std::vector<thrust::complex<float>> host_primal_result(batch_size * size);
     std::vector<thrust::complex<float>> host_dual_result(batch_size * size * dual_dim);
-    cudaMemcpy(host_primal_result.data(), result.real(), batch_size*size * sizeof(thrust::complex<float>), cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_dual_result.data(), result.dual(), batch_size*size*dual_dim * sizeof(thrust::complex<float>), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_primal_result.data(), d_real_result, real_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_dual_result.data(), d_dual_result, dual_size, cudaMemcpyDeviceToHost);
 
     // Verify the result
     for (size_t i = 0; i < primal_data1.size(); ++i) {
@@ -213,67 +273,388 @@ TEST(VectorDualDenseCudaTest, ElementwiseAddRandomComplex) {
     for (size_t i = 0; i < dual_data1.size(); ++i) {
         EXPECT_EQ(host_dual_result[i], dual_data1[i] + dual_data2[i]);
     }
+
+    // Free GPU memory
+    cudaFree(d_real1);
+    cudaFree(d_real2);
+    cudaFree(d_dual1);
+    cudaFree(d_dual2);
+    cudaFree(d_real_result);
+    cudaFree(d_dual_result);
 }
 
-TEST(VectorDualDenseCudaTest, ElementwiseMultiplyRandomComplex) {
+
+
+
+template <typename T>
+std::vector<thrust::complex<T>> generateRandomComplexVector(int size, T real_min, T real_max, T imag_min, T imag_max) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<T> real_dist(real_min, real_max);
+    std::uniform_real_distribution<T> imag_dist(imag_min, imag_max);
+
+    std::vector<thrust::complex<T>> vec(size);
+    for (int i = 0; i < size; ++i) {
+        vec[i] = thrust::complex<T>(real_dist(gen), imag_dist(gen));
+    }
+    return vec;
+}
+
+__global__ void validateHyperDualDataKernel(
+    const thrust::complex<float>* real, const thrust::complex<float>* dual, const thrust::complex<float>* hyperdual,
+    thrust::complex<float>* real_out, thrust::complex<float>* dual_out, thrust::complex<float>* hyperdual_out,
+    int total_real_elements, int total_dual_elements, int total_hyperdual_elements) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (idx < total_real_elements) {
+        real_out[idx] = real[idx];
+    }
+
+    if (idx < total_dual_elements) {
+        dual_out[idx] = dual[idx];
+    }
+
+    if (idx < total_hyperdual_elements) {
+        hyperdual_out[idx] = hyperdual[idx];
+    }
+}
+
+TEST(VectorHyperDualDenseCudaTest, Initialize) {
+    int batch_size = 2;
+    int real_size = 5;
+    int dual_size = 3;
+
+    // Allocate GPU memory for real, dual, and hyperdual data
+    size_t real_mem_size = batch_size * real_size * sizeof(thrust::complex<float>);
+    size_t dual_mem_size = batch_size * real_size * dual_size * sizeof(thrust::complex<float>);
+    size_t hyperdual_mem_size = batch_size * real_size * dual_size * dual_size * sizeof(thrust::complex<float>);
+
+    thrust::complex<float>* d_real;
+    thrust::complex<float>* d_dual;
+    thrust::complex<float>* d_hyperdual;
+    cudaMalloc(&d_real, real_mem_size);
+    cudaMalloc(&d_dual, dual_mem_size);
+    cudaMalloc(&d_hyperdual, hyperdual_mem_size);
+
+    // Initialize data on host
+    std::vector<thrust::complex<float>> real_data(batch_size * real_size, thrust::complex<float>(1.0f, 2.0f));
+    std::vector<thrust::complex<float>> dual_data(batch_size * real_size * dual_size, thrust::complex<float>(0.5f, 0.5f));
+    std::vector<thrust::complex<float>> hyperdual_data(batch_size * real_size * dual_size * dual_size,
+                                                       thrust::complex<float>(0.25f, 0.25f));
+
+    // Copy data to GPU
+    cudaMemcpy(d_real, real_data.data(), real_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dual, dual_data.data(), dual_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_hyperdual, hyperdual_data.data(), hyperdual_mem_size, cudaMemcpyHostToDevice);
+
+    // Create GPU object
+    janus::VectorHyperDualDenseCuda<float> vec(batch_size, real_size, dual_size, d_real, d_dual, d_hyperdual);
+
+    // Allocate temporary buffers to copy GPU data back to host
+    thrust::complex<float>* d_real_out;
+    thrust::complex<float>* d_dual_out;
+    thrust::complex<float>* d_hyperdual_out;
+    cudaMalloc(&d_real_out, real_mem_size);
+    cudaMalloc(&d_dual_out, dual_mem_size);
+    cudaMalloc(&d_hyperdual_out, hyperdual_mem_size);
+
+    // Launch a kernel to verify that the data is accessible on the GPU
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (batch_size * real_size * dual_size * dual_size + threadsPerBlock - 1) / threadsPerBlock;
+
+    validateHyperDualDataKernel<<<blocksPerGrid, threadsPerBlock>>>(
+        vec.real(), vec.dual(), vec.hyperdual(),
+        d_real_out, d_dual_out, d_hyperdual_out,
+        batch_size * real_size, batch_size * real_size * dual_size, batch_size * real_size * dual_size * dual_size);
+    cudaDeviceSynchronize();
+
+    // Copy real data back to host for validation
+    std::vector<thrust::complex<float>> host_real_data(batch_size * real_size);
+    cudaMemcpy(host_real_data.data(), d_real_out, real_mem_size, cudaMemcpyDeviceToHost);
+
+    // Validate real data
+    for (size_t i = 0; i < real_data.size(); ++i) {
+        EXPECT_FLOAT_EQ(host_real_data[i].real(), real_data[i].real());
+        EXPECT_FLOAT_EQ(host_real_data[i].imag(), real_data[i].imag());
+    }
+
+    // Copy dual data back to host for validation
+    std::vector<thrust::complex<float>> host_dual_data(batch_size * real_size * dual_size);
+    cudaMemcpy(host_dual_data.data(), d_dual_out, dual_mem_size, cudaMemcpyDeviceToHost);
+
+    // Validate dual data
+    for (size_t i = 0; i < dual_data.size(); ++i) {
+        EXPECT_FLOAT_EQ(host_dual_data[i].real(), dual_data[i].real());
+        EXPECT_FLOAT_EQ(host_dual_data[i].imag(), dual_data[i].imag());
+    }
+
+    // Copy hyperdual data back to host for validation
+    std::vector<thrust::complex<float>> host_hyperdual_data(batch_size * real_size * dual_size * dual_size);
+    cudaMemcpy(host_hyperdual_data.data(), d_hyperdual_out, hyperdual_mem_size, cudaMemcpyDeviceToHost);
+
+    // Validate hyperdual data
+    for (size_t i = 0; i < hyperdual_data.size(); ++i) {
+        EXPECT_FLOAT_EQ(host_hyperdual_data[i].real(), hyperdual_data[i].real());
+        EXPECT_FLOAT_EQ(host_hyperdual_data[i].imag(), hyperdual_data[i].imag());
+    }
+
+    // Free GPU memory
+    cudaFree(d_real);
+    cudaFree(d_dual);
+    cudaFree(d_hyperdual);
+    cudaFree(d_real_out);
+    cudaFree(d_dual_out);
+    cudaFree(d_hyperdual_out);
+}
+
+
+__global__ void elementwiseAddKernel(
+    const thrust::complex<float>* real1, const thrust::complex<float>* real2,
+    const thrust::complex<float>* dual1, const thrust::complex<float>* dual2,
+    const thrust::complex<float>* hyperdual1, const thrust::complex<float>* hyperdual2,
+    thrust::complex<float>* real_result, thrust::complex<float>* dual_result, thrust::complex<float>* hyperdual_result,
+    int total_real_elements, int total_dual_elements, int total_hyperdual_elements) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    // Add real part
+    if (idx < total_real_elements) {
+        real_result[idx] = real1[idx] + real2[idx];
+    }
+
+    // Add dual part
+    if (idx < total_dual_elements) {
+        dual_result[idx] = dual1[idx] + dual2[idx];
+    }
+
+    // Add hyperdual part
+    if (idx < total_hyperdual_elements) {
+        hyperdual_result[idx] = hyperdual1[idx] + hyperdual2[idx];
+    }
+}
+
+
+
+TEST(VectorHyperDualDenseCudaTest, ElementwiseAddRandomComplex) {
     const int batch_size = 2;
-    const int size = 3;
-    const int dual_dim = 2;
+    const int real_size = 3;
+    const int dual_size = 2;
 
-    // Generate random complex numbers for primal and dual data
-    std::vector<thrust::complex<float>> primal_data1 = generateRandomComplexVector(batch_size * size, -1.0f, 1.0f, -1.0f, 1.0f);
-    std::vector<thrust::complex<float>> primal_data2 = generateRandomComplexVector(batch_size * size, -1.0f, 1.0f, -1.0f, 1.0f);
-    std::vector<thrust::complex<float>> dual_data1 = generateRandomComplexVector(batch_size * size * dual_dim, -1.0f, 1.0f, -1.0f, 1.0f);
-    std::vector<thrust::complex<float>> dual_data2 = generateRandomComplexVector(batch_size * size * dual_dim, -1.0f, 1.0f, -1.0f, 1.0f);
+    // Generate random complex numbers for real, dual, and hyperdual data
+    std::vector<thrust::complex<float>> real_data1 = generateRandomComplexVector(batch_size * real_size, -1.0f, 1.0f, -1.0f, 1.0f);
+    std::vector<thrust::complex<float>> real_data2 = generateRandomComplexVector(batch_size * real_size, -1.0f, 1.0f, -1.0f, 1.0f);
+    std::vector<thrust::complex<float>> dual_data1 = generateRandomComplexVector(batch_size * real_size * dual_size, -1.0f, 1.0f, -1.0f, 1.0f);
+    std::vector<thrust::complex<float>> dual_data2 = generateRandomComplexVector(batch_size * real_size * dual_size, -1.0f, 1.0f, -1.0f, 1.0f);
+    std::vector<thrust::complex<float>> hyperdual_data1 = generateRandomComplexVector(batch_size * real_size * dual_size * dual_size, -1.0f, 1.0f, -1.0f, 1.0f);
+    std::vector<thrust::complex<float>> hyperdual_data2 = generateRandomComplexVector(batch_size * real_size * dual_size * dual_size, -1.0f, 1.0f, -1.0f, 1.0f);
 
-    // Initialize CUDA vectors
-    VectorDualDenseCuda<float> vec1(batch_size, size, dual_dim);
-    VectorDualDenseCuda<float> vec2(batch_size, size, dual_dim);
-    
-    // Copy data to device
-    vec1.initialize(primal_data1.data(), dual_data1.data());
-    vec2.initialize(primal_data2.data(), dual_data2.data());
+    // Allocate GPU memory
+    size_t real_mem_size = batch_size * real_size * sizeof(thrust::complex<float>);
+    size_t dual_mem_size = batch_size * real_size * dual_size * sizeof(thrust::complex<float>);
+    size_t hyperdual_mem_size = batch_size * real_size * dual_size * dual_size * sizeof(thrust::complex<float>);
+    thrust::complex<float>* d_real1;
+    thrust::complex<float>* d_real2;
+    thrust::complex<float>* d_dual1;
+    thrust::complex<float>* d_dual2;
+    thrust::complex<float>* d_hyperdual1;
+    thrust::complex<float>* d_hyperdual2;
+    thrust::complex<float>* d_real_result;
+    thrust::complex<float>* d_dual_result;
+    thrust::complex<float>* d_hyperdual_result;
 
-    // Perform elementwise multiplication
-    VectorDualDenseCuda<float> result = vec1.elementwiseMultiply(vec2);
+    cudaMalloc(&d_real1, real_mem_size);
+    cudaMalloc(&d_real2, real_mem_size);
+    cudaMalloc(&d_dual1, dual_mem_size);
+    cudaMalloc(&d_dual2, dual_mem_size);
+    cudaMalloc(&d_hyperdual1, hyperdual_mem_size);
+    cudaMalloc(&d_hyperdual2, hyperdual_mem_size);
+    cudaMalloc(&d_real_result, real_mem_size);
+    cudaMalloc(&d_dual_result, dual_mem_size);
+    cudaMalloc(&d_hyperdual_result, hyperdual_mem_size);
 
-    // Copy result back to the host for verification
-    std::vector<thrust::complex<float>> host_primal_result(batch_size * size);
-    std::vector<thrust::complex<float>> host_dual_result(batch_size * size * dual_dim);
-    cudaMemcpy(host_primal_result.data(), result.real(), batch_size * size * sizeof(thrust::complex<float>), cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_dual_result.data(), result.dual(), batch_size * size * dual_dim * sizeof(thrust::complex<float>), cudaMemcpyDeviceToHost);
-    // Tolerance for floating-point comparison
-    const float tolerance = 1e-6;
+    // Copy data to GPU
+    cudaMemcpy(d_real1, real_data1.data(), real_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_real2, real_data2.data(), real_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dual1, dual_data1.data(), dual_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dual2, dual_data2.data(), dual_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_hyperdual1, hyperdual_data1.data(), hyperdual_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_hyperdual2, hyperdual_data2.data(), hyperdual_mem_size, cudaMemcpyHostToDevice);
 
-    //The dual part is real1*dual2 + real2*dual1
+    // Create GPU objects
+    janus::VectorHyperDualDenseCuda<float> vec1(batch_size, real_size, dual_size, d_real1, d_dual1, d_hyperdual1);
+    janus::VectorHyperDualDenseCuda<float> vec2(batch_size, real_size, dual_size, d_real2, d_dual2, d_hyperdual2);
+    janus::VectorHyperDualDenseCuda<float> result(batch_size, real_size, dual_size, d_real_result, d_dual_result, d_hyperdual_result);
 
+    // Configure and launch the kernel for elementwise addition
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (batch_size * real_size * dual_size * dual_size + threadsPerBlock - 1) / threadsPerBlock;
+
+    elementwiseAddKernel<<<blocksPerGrid, threadsPerBlock>>>(
+        vec1.real(), vec2.real(), vec1.dual(), vec2.dual(), vec1.hyperdual(), vec2.hyperdual(),
+        result.real(), result.dual(), result.hyperdual(),
+        batch_size * real_size, batch_size * real_size * dual_size, batch_size * real_size * dual_size * dual_size);
+    cudaDeviceSynchronize();
+
+    // Copy result back to host for verification
+    std::vector<thrust::complex<float>> host_real_result(batch_size * real_size);
+    std::vector<thrust::complex<float>> host_dual_result(batch_size * real_size * dual_size);
+    std::vector<thrust::complex<float>> host_hyperdual_result(batch_size * real_size * dual_size * dual_size);
+    cudaMemcpy(host_real_result.data(), d_real_result, real_mem_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_dual_result.data(), d_dual_result, dual_mem_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_hyperdual_result.data(), d_hyperdual_result, hyperdual_mem_size, cudaMemcpyDeviceToHost);
 
     // Verify the result
-    for (size_t i = 0; i < primal_data1.size(); ++i) {
-        EXPECT_NEAR(host_primal_result[i].real(), (primal_data1[i] * primal_data2[i]).real(), tolerance);
-        EXPECT_NEAR(host_primal_result[i].imag(), (primal_data1[i] * primal_data2[i]).imag(), tolerance);
+    for (size_t i = 0; i < real_data1.size(); ++i) {
+        EXPECT_EQ(host_real_result[i], real_data1[i] + real_data2[i]);
+    }
+    for (size_t i = 0; i < dual_data1.size(); ++i) {
+        EXPECT_EQ(host_dual_result[i], dual_data1[i] + dual_data2[i]);
+    }
+    for (size_t i = 0; i < hyperdual_data1.size(); ++i) {
+        EXPECT_EQ(host_hyperdual_result[i], hyperdual_data1[i] + hyperdual_data2[i]);
     }
 
-    std::vector<thrust::complex<float>> dual_result_local(batch_size * size * dual_dim);
-
-    for ( int m=0; m < batch_size; m++) {
-        for ( int i=0; i < size; i++) {
-            int realidx = m*size + i;
-            for ( int j=0; j < dual_dim; j++) {
-                int dualidx = m*size*dual_dim + i*dual_dim + j;
-                dual_result_local[dualidx] = primal_data1[realidx]*dual_data2[dualidx]+
-                                            primal_data2[realidx]*dual_data1[dualidx];  
-            }
-        }
-    }
-    for (size_t i = 0; i < batch_size*size*dual_dim; ++i) {
-        EXPECT_NEAR(host_dual_result[i].real(), dual_result_local[i].real(), tolerance);
-        EXPECT_NEAR(host_dual_result[i].imag(), dual_result_local[i].imag(), tolerance);
-    }
-
+    // Free GPU memory
+    cudaFree(d_real1);
+    cudaFree(d_real2);
+    cudaFree(d_dual1);
+    cudaFree(d_dual2);
+    cudaFree(d_hyperdual1);
+    cudaFree(d_hyperdual2);
+    cudaFree(d_real_result);
+    cudaFree(d_dual_result);
+    cudaFree(d_hyperdual_result);
 }
 
+__global__ void elementwiseMultiplyKernel(
+    const janus::VectorHyperDualDenseCuda<float> vec1,
+    const janus::VectorHyperDualDenseCuda<float> vec2,
+    janus::VectorHyperDualDenseCuda<float> result) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
+    // Use the member function on the device
+    vec1.elementwiseMultiply(vec2, result);
+}
+
+TEST(VectorHyperDualDenseCudaTest, ElementwiseMultiply) {
+    int batch_size = 2;
+    int real_size = 3;
+    int dual_size = 2;
+
+    // Initialize host data for real, dual, and hyperdual parts
+    std::vector<thrust::complex<float>> real_data = {
+        {1.0, 1.0}, {2.0, 2.0}, {3.0, 3.0},
+        {4.0, 4.0}, {5.0, 5.0}, {6.0, 6.0}};
+    std::vector<thrust::complex<float>> dual_data = {
+        {0.1, 0.1}, {0.2, 0.2}, {0.3, 0.3},
+        {0.4, 0.4}, {0.5, 0.5}, {0.6, 0.6},
+        {0.7, 0.7}, {0.8, 0.8}, {0.9, 0.9},
+        {1.0, 1.0}, {1.1, 1.1}, {1.2, 1.2}};
+    std::vector<thrust::complex<float>> hyperdual_data = {
+        {0.01, 0.01}, {0.02, 0.02}, {0.03, 0.03},
+        {0.04, 0.04}, {0.05, 0.05}, {0.06, 0.06},
+        {0.07, 0.07}, {0.08, 0.08}, {0.09, 0.09},
+        {0.10, 0.10}, {0.11, 0.11}, {0.12, 0.12},
+        {0.13, 0.13}, {0.14, 0.14}, {0.15, 0.15},
+        {0.16, 0.16}, {0.17, 0.17}, {0.18, 0.18}};
+
+    // Allocate GPU memory
+    thrust::complex<float>* d_real1;
+    thrust::complex<float>* d_real2;
+    thrust::complex<float>* d_dual1;
+    thrust::complex<float>* d_dual2;
+    thrust::complex<float>* d_hyperdual1;
+    thrust::complex<float>* d_hyperdual2;
+    thrust::complex<float>* d_result_real;
+    thrust::complex<float>* d_result_dual;
+    thrust::complex<float>* d_result_hyperdual;
+
+    size_t real_mem_size = batch_size * real_size * sizeof(thrust::complex<float>);
+    size_t dual_mem_size = batch_size * real_size * dual_size * sizeof(thrust::complex<float>);
+    size_t hyperdual_mem_size = batch_size * real_size * dual_size * dual_size * sizeof(thrust::complex<float>);
+
+    cudaMalloc(&d_real1, real_mem_size);
+    cudaMalloc(&d_real2, real_mem_size);
+    cudaMalloc(&d_dual1, dual_mem_size);
+    cudaMalloc(&d_dual2, dual_mem_size);
+    cudaMalloc(&d_hyperdual1, hyperdual_mem_size);
+    cudaMalloc(&d_hyperdual2, hyperdual_mem_size);
+    cudaMalloc(&d_result_real, real_mem_size);
+    cudaMalloc(&d_result_dual, dual_mem_size);
+    cudaMalloc(&d_result_hyperdual, hyperdual_mem_size);
+
+    // Copy data to GPU
+    cudaMemcpy(d_real1, real_data.data(), real_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_real2, real_data.data(), real_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dual1, dual_data.data(), dual_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dual2, dual_data.data(), dual_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_hyperdual1, hyperdual_data.data(), hyperdual_mem_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_hyperdual2, hyperdual_data.data(), hyperdual_mem_size, cudaMemcpyHostToDevice);
+
+    // Create GPU objects
+    janus::VectorHyperDualDenseCuda<float> vec1(batch_size, real_size, dual_size, d_real1, d_dual1, d_hyperdual1);
+    janus::VectorHyperDualDenseCuda<float> vec2(batch_size, real_size, dual_size, d_real2, d_dual2, d_hyperdual2);
+    janus::VectorHyperDualDenseCuda<float> result(batch_size, real_size, dual_size, d_result_real, d_result_dual, d_result_hyperdual);
+
+    // Configure and launch the kernel for elementwise multiplication
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (batch_size * real_size * dual_size * dual_size + threadsPerBlock - 1) / threadsPerBlock;
+    elementwiseMultiplyKernel<<<blocksPerGrid, threadsPerBlock>>>(vec1, vec2, result);
+    cudaDeviceSynchronize();
+    // Copy result back to host for verification
+    std::vector<thrust::complex<float>> result_real(batch_size * real_size);
+    std::vector<thrust::complex<float>> result_dual(batch_size * real_size * dual_size);
+    std::vector<thrust::complex<float>> result_hyperdual(batch_size * real_size * dual_size * dual_size);
+
+    cudaMemcpy(result_real.data(), d_result_real, real_mem_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(result_dual.data(), d_result_dual, dual_mem_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(result_hyperdual.data(), d_result_hyperdual, hyperdual_mem_size, cudaMemcpyDeviceToHost);
+    float tolerance = 1e-6;  // Adjust as needed based on your application's precision requirements
+
+    // Verify the result for the real part
+    for (size_t i = 0; i < real_data.size(); ++i) {
+        auto expected = real_data[i] * real_data[i];
+        //Expect equality to a tolerance of 1e-6
+        EXPECT_NEAR(result_real[i].real(), expected.real(), tolerance);
+        EXPECT_NEAR(result_real[i].imag(), expected.imag(), tolerance);
+    }
+
+    // Verify the result for the dual part
+    for (size_t i = 0; i < dual_data.size(); ++i) {
+        size_t real_idx = i / dual_size;
+        auto expected = real_data[real_idx] * dual_data[i] + real_data[real_idx] * dual_data[i];
+        EXPECT_NEAR(result_dual[i].real(), expected.real(), tolerance);
+        EXPECT_NEAR(result_dual[i].imag(), expected.imag(), tolerance);
+    }
+
+    // Verify the result for the hyperdual part
+    for (size_t i = 0; i < hyperdual_data.size(); ++i) {
+        size_t batch_idx = i / (real_size * dual_size * dual_size);
+        size_t real_idx = (i / (dual_size * dual_size)) % real_size;
+        size_t dual_row = (i / dual_size) % dual_size;
+        size_t dual_col = i % dual_size;
+
+        size_t dual1_idx = batch_idx * real_size * dual_size + real_idx * dual_size + dual_row;
+        size_t dual2_idx = batch_idx * real_size * dual_size + real_idx * dual_size + dual_col;
+
+        auto expected = real_data[batch_idx * real_size + real_idx] * hyperdual_data[i] +
+                        real_data[batch_idx * real_size + real_idx] * hyperdual_data[i] +
+                        dual_data[dual1_idx] * dual_data[dual2_idx];
+
+        EXPECT_NEAR(result_hyperdual[i].real(), expected.real(), tolerance);
+        EXPECT_NEAR(result_hyperdual[i].imag(), expected.imag(), tolerance);
+    }
+
+    // Free GPU memory
+    cudaFree(d_real1);
+    cudaFree(d_real2);
+    cudaFree(d_dual1);
+    cudaFree(d_dual2);
+    cudaFree(d_hyperdual1);
+    cudaFree(d_hyperdual2);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+    cudaFree(d_result_hyperdual);
+}
 
 
 // Main function for running all tests
