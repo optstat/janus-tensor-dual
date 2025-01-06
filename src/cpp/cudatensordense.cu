@@ -482,16 +482,17 @@ public:
 
         // Hyperdual part multiplication
         if (idx < total_hyperdual_elements) {
-            int batch_idx = idx / (real_size_ * dual_dim * dual_dim);
-            int real_idx = (idx / (dual_dim * dual_dim)) % real_size_;
-            int dual_row = (idx / dual_dim) % dual_dim;
-            int dual_col = idx % dual_dim;
+            //Here we are implementing "mij,mik->mijk" for hyperdual tensors
+            int m = idx / (real_size_ * dual_dim * dual_dim);
+            int i = (idx / (dual_dim * dual_dim)) % real_size_;
+            int j = (idx / dual_dim) % dual_dim;
+            int k = idx % dual_dim;
 
-            int dual1_idx = batch_idx * real_size_ * dual_dim + real_idx * dual_dim + dual_row;
-            int dual2_idx = batch_idx * real_size_ * dual_dim + real_idx * dual_dim + dual_col;
+            int dual1_idx = m * real_size_ * dual_dim + i * dual_dim + j;
+            int dual2_idx = m * real_size_ * dual_dim + i * dual_dim + k;
 
-            result.hyperdual_[idx] = real_[batch_idx * real_size_ + real_idx] * other.hyperdual_[idx] +
-                                     other.real_[batch_idx * real_size_ + real_idx] * hyperdual_[idx] +
+            result.hyperdual_[idx] = real_[m * real_size_ + i] * other.hyperdual_[idx] +
+                                     other.real_[m * real_size_ + i] * hyperdual_[idx] +
                                      dual_[dual1_idx] * other.dual_[dual2_idx];
         }
     }
@@ -846,25 +847,24 @@ public:
     // Getters for data pointers
     ComplexT* primal_data() { return primal_data_; }
     const ComplexT* primal_data() const { return primal_data_; }
-};
-
+}; // class MatrixDenseCuda
 
 
 
 template <typename T>
-class MatrixDualDense {
+class MatrixDualDenseCuda {
 private:
     using ComplexT = std::complex<T>;
 
     // Dimensions
-    int batch_size_;
-    int rows_;
-    int cols_;
-    int dual_dim_;
+    int batch_size_;  // Batch dimension (M)
+    int rows_;        // Number of rows in each matrix (N)
+    int cols_;        // Number of columns in each matrix (L)
+    int dual_dim_;    // Dual dimension (D)
 
     // Primal and Dual Data
     ComplexT* primal_data_; // Device-side primal part
-    ComplexT* dual_data_;   // Device-side dual part
+    ComplexT* dual_data_;   // Device-side dual part [M, N, M, D]
     bool owns_memory_;      // Indicates if memory is managed internally
 
     // cuBLAS handle
@@ -873,7 +873,7 @@ private:
 
 public:
     // Constructor with external memory
-    MatrixDualDense(int batch_size, int rows, int cols, int dual_dim, ComplexT* primal_data, ComplexT* dual_data)
+    MatrixDualDenseCuda(int batch_size, int rows, int cols, int dual_dim, ComplexT* primal_data, ComplexT* dual_data)
         : batch_size_(batch_size), rows_(rows), cols_(cols), dual_dim_(dual_dim),
           primal_data_(primal_data), dual_data_(dual_data), owns_memory_(false) {
         if (!primal_data_ || !dual_data_) {
@@ -884,28 +884,24 @@ public:
     }
 
     // Constructor with internal memory allocation
-    MatrixDualDense(int batch_size, int rows, int cols, int dual_dim)
+    MatrixDualDenseCuda(int batch_size, int rows, int cols, int dual_dim)
         : batch_size_(batch_size), rows_(rows), cols_(cols), dual_dim_(dual_dim), owns_memory_(true) {
         if (batch_size <= 0 || rows <= 0 || cols <= 0 || dual_dim <= 0) {
             throw std::invalid_argument("All dimensions must be positive.");
         }
 
         size_t primal_size = batch_size * rows * cols * sizeof(ComplexT);
-        size_t dual_size = batch_size * rows * cols * dual_dim * sizeof(ComplexT);
+        size_t dual_size = batch_size * rows * batch_size * dual_dim * sizeof(ComplexT);
 
-        if (cudaMalloc(&primal_data_, primal_size) != cudaSuccess) {
-            throw std::runtime_error("Failed to allocate GPU memory for primal data.");
-        }
-
-        if (cudaMalloc(&dual_data_, dual_size) != cudaSuccess) {
-            cudaFree(primal_data_);
-            throw std::runtime_error("Failed to allocate GPU memory for dual data.");
+        if (cudaMalloc(&primal_data_, primal_size) != cudaSuccess ||
+            cudaMalloc(&dual_data_, dual_size) != cudaSuccess) {
+            throw std::runtime_error("Failed to allocate GPU memory for primal or dual data.");
         }
 
         initializeHandles();
     }
 
-    ~MatrixDualDense() {
+    ~MatrixDualDenseCuda() {
         if (owns_memory_) {
             if (primal_data_) cudaFree(primal_data_);
             if (dual_data_) cudaFree(dual_data_);
@@ -914,11 +910,9 @@ public:
         cudaStreamDestroy(stream_);
     }
 
-    void initialize(const ComplexT* primal, const ComplexT* dual, size_t primal_size, size_t dual_size) {
-        if (primal_size != batch_size_ * rows_ * cols_ || dual_size != batch_size_ * rows_ * cols_ * dual_dim_) {
-            throw std::invalid_argument("Input sizes do not match tensor dimensions.");
-        }
-
+    void initialize(const ComplexT* primal, const ComplexT* dual) {
+        int primal_size = batch_size_ * rows_ * cols_;
+        int dual_size = batch_size_ * rows_ * batch_size_ * dual_dim_;
         if (primal) {
             cudaMemcpyAsync(primal_data_, primal, primal_size * sizeof(ComplexT), cudaMemcpyHostToDevice, stream_);
         }
@@ -928,457 +922,189 @@ public:
         cudaStreamSynchronize(stream_);
     }
 
-    template <typename U>
-    MatrixDualDense<U> indexGet(int start_row, int end_row, int start_col, int end_col) const {
-        // Validate row and column ranges
-        if (start_row < 0 || end_row > rows_ || start_row >= end_row ||
-            start_col < 0 || end_col > cols_ || start_col >= end_col) {
-            throw std::invalid_argument("Invalid row or column range for indexGet.");
-        }
-
-        // Dimensions of the submatrix
-        int sub_rows = end_row - start_row;
-        int sub_cols = end_col - start_col;
-
-        // Calculate offsets for the primal and dual data
-        ComplexT* sub_primal_data = primal_data_ + start_row * cols_ + start_col;
-        ComplexT* sub_dual_data = dual_data_ + start_row * cols_ * dual_dim_ + start_col * dual_dim_;
-
-        // Create a new MatrixDualDense instance sharing the data with the original
-        return MatrixDualDense<T>(batch_size_, sub_rows, sub_cols, dual_dim_, sub_primal_data, sub_dual_data);
-    }
-
-    template <typename U>
-    void indexPut(int start_row, int end_row, int start_col, int end_col, const MatrixDualDense<U>& data) {
-        // Validate row and column ranges
-        if (start_row < 0 || end_row > rows_ || start_row >= end_row ||
-            start_col < 0 || end_col > cols_ || start_col >= end_col) {
-            throw std::invalid_argument("Invalid row or column range for indexPut.");
-        }
-
-        // Validate dimensions of the input data
-        if (data.rows_ != (end_row - start_row) || data.cols_ != (end_col - start_col) || 
-            data.dual_dim_ != dual_dim_ || data.batch_size_ != batch_size_) {
-            throw std::invalid_argument("Input data dimensions do not match the target range.");
-        }
-
-        // Calculate offsets for the primal and dual data
-        ComplexT* target_primal_data = primal_data_ + start_row * cols_ + start_col;
-        ComplexT* target_dual_data = dual_data_ + start_row * cols_ * dual_dim_ + start_col * dual_dim_;
-
-        // Calculate data sizes
-        size_t primal_size = data.rows_ * data.cols_ * sizeof(ComplexT);
-        size_t dual_size = data.rows_ * data.cols_ * dual_dim_ * sizeof(ComplexT);
-
-        // Update primal data
-        for (int b = 0; b < batch_size_; ++b) {
-            cudaMemcpy2DAsync(target_primal_data + b * rows_ * cols_,
-                            cols_ * sizeof(ComplexT),
-                            data.primal_data_ + b * data.rows_ * data.cols_,
-                            data.cols_ * sizeof(ComplexT),
-                            data.cols_ * sizeof(ComplexT),
-                            data.rows_,
-                            cudaMemcpyDeviceToDevice,
-                            stream_);
-        }
-
-        // Update dual data
-        for (int b = 0; b < batch_size_; ++b) {
-            cudaMemcpy2DAsync(target_dual_data + b * rows_ * cols_ * dual_dim_,
-                            cols_ * dual_dim_ * sizeof(ComplexT),
-                            data.dual_data_ + b * data.rows_ * data.cols_ * dual_dim_,
-                            data.cols_ * dual_dim_ * sizeof(ComplexT),
-                            data.cols_ * dual_dim_ * sizeof(ComplexT),
-                            data.rows_,
-                            cudaMemcpyDeviceToDevice,
-                            stream_);
-        }
-
-        // Synchronize to ensure data transfer is complete
-        cudaStreamSynchronize(stream_);
-    }    
-
-    void square() {
-        // Element-wise square for the primal part
-        size_t total_primal_elements = batch_size_ * rows_ * cols_;
-        size_t total_dual_elements = batch_size_ * rows_ * cols_ * dual_dim_;
-
-        // Kernel to compute element-wise square
-        auto squareKernel = [] __device__(ComplexT x) -> ComplexT {
-            return x * x;
-        };
-
-        // Launch a CUDA kernel to square the primal part
-        thrust::device_ptr<ComplexT> primal_ptr(primal_data_);
-        thrust::transform(thrust::device, primal_ptr, primal_ptr + total_primal_elements, primal_ptr, squareKernel);
-
-        // Update the dual part according to the product rule:
-        // If u = f(x) and v = f'(x), then square(u) has derivative: 2 * u * v.
-        auto dualKernel = [] __device__(ComplexT u, ComplexT v) -> ComplexT {
-            return ComplexT(2.0, 0.0) * u * v;
-        };
-
-        // Process the dual part
-        for (int d = 0; d < dual_dim_; ++d) {
-            ComplexT* dual_ptr = dual_data_ + d * batch_size_ * rows_ * cols_;
-            thrust::device_ptr<ComplexT> dual_thrust_ptr(dual_ptr);
-            thrust::transform(thrust::device, primal_ptr, primal_ptr + total_primal_elements,
-                            dual_thrust_ptr, dual_thrust_ptr, dualKernel);
-        }
-
-        cudaStreamSynchronize(stream_);
-    }
-
-
-
-
-    template <typename U>
-    MatrixDualDense<U> sum(int dimension) const {
-        if (dimension != 1 && dimension != 2) {
-            throw std::invalid_argument("Dimension must be 1 (rows) or 2 (columns).");
-        }
-
-        // Determine the new dimensions after summing along the specified axis
-        int new_rows = (dimension == 1) ? 1 : rows_;
-        int new_cols = (dimension == 2) ? 1 : cols_;
-
-        // Create the resulting MatrixDualDense object
-        MatrixDualDense<T> result(batch_size_, new_rows, new_cols, dual_dim_);
-
-        // Allocate memory for temporary host buffers
-        size_t primal_size = rows_ * cols_;
-        size_t dual_size = rows_ * cols_ * dual_dim_;
-
-        // Perform the summation along the specified dimension
-        for (int b = 0; b < batch_size_; ++b) {
-            if (dimension == 1) {
-                // Summing along rows
-                for (int c = 0; c < cols_; ++c) {
-                    ComplexT sum_primal = ComplexT(0.0, 0.0);
-                    std::vector<ComplexT> sum_dual(dual_dim_, ComplexT(0.0, 0.0));
-
-                    for (int r = 0; r < rows_; ++r) {
-                        int idx = b * rows_ * cols_ + r * cols_ + c;
-                        sum_primal += primal_data_[idx];
-
-                        for (int d = 0; d < dual_dim_; ++d) {
-                            int dual_idx = b * rows_ * cols_ * dual_dim_ + r * cols_ * dual_dim_ + c * dual_dim_ + d;
-                            sum_dual[d] += dual_data_[dual_idx];
-                        }
-                    }
-
-                    // Store the result in the output matrix
-                    int result_idx = b * new_rows * new_cols + c;
-                    result.primal_data_[result_idx] = sum_primal;
-
-                    for (int d = 0; d < dual_dim_; ++d) {
-                        int result_dual_idx = b * new_rows * new_cols * dual_dim_ + c * dual_dim_ + d;
-                        result.dual_data_[result_dual_idx] = sum_dual[d];
-                    }
-                }
-            } else if (dimension == 2) {
-                // Summing along columns
-                for (int r = 0; r < rows_; ++r) {
-                    ComplexT sum_primal = ComplexT(0.0, 0.0);
-                    std::vector<ComplexT> sum_dual(dual_dim_, ComplexT(0.0, 0.0));
-
-                    for (int c = 0; c < cols_; ++c) {
-                        int idx = b * rows_ * cols_ + r * cols_ + c;
-                        sum_primal += primal_data_[idx];
-
-                        for (int d = 0; d < dual_dim_; ++d) {
-                            int dual_idx = b * rows_ * cols_ * dual_dim_ + r * cols_ * dual_dim_ + c * dual_dim_ + d;
-                            sum_dual[d] += dual_data_[dual_idx];
-                        }
-                    }
-
-                    // Store the result in the output matrix
-                    int result_idx = b * new_rows * new_cols + r;
-                    result.primal_data_[result_idx] = sum_primal;
-
-                    for (int d = 0; d < dual_dim_; ++d) {
-                        int result_dual_idx = b * new_rows * new_cols * dual_dim_ + r * dual_dim_ + d;
-                        result.dual_data_[result_dual_idx] = sum_dual[d];
-                    }
-                }
-            }
-        }
-
-        cudaStreamSynchronize(stream_);
-        return result;
-    }
-
-    VectorDualDenseCuda<T> squeeze(int dim) const {
-        // Check the validity of the dimension
-        if (dim < 1 || dim > 2) {
-            throw std::invalid_argument("Dimension to squeeze must be 1 (rows) or 2 (columns).");
-        }
-
-        // Ensure the specified dimension has size 1
-        if ((dim == 1 && rows_ != 1) || (dim == 2 && cols_ != 1)) {
-            throw std::invalid_argument("Cannot squeeze a dimension with size greater than 1.");
-        }
-
-        // Determine the size of the resulting vector
-        int vector_size = (dim == 1) ? cols_ : rows_;
-
-        // Calculate the pointer to primal and dual data
-        ComplexT* squeezed_primal_data = primal_data_;
-        ComplexT* squeezed_dual_data = dual_data_;
-
-        // Create and return a VectorDual object
-        return VectorDualDenseCuda<T>(vector_size, dual_dim_, squeezed_primal_data, squeezed_dual_data);
-    }
-
-    template <typename U>
-    VectorDualDenseCuda<U> matrixVectorProduct(const VectorDualDenseCuda<U>& vector) const {
-        // Validate dimensions
-        if (cols_ != vector.size_ || batch_size_ != vector.batch_size_ || dual_dim_ != vector.dual_dim_) {
-            throw std::invalid_argument("Matrix and vector dimensions do not match for multiplication.");
-        }
-
-        // Result vector
-        VectorDualDenseCuda<T> result(batch_size_, rows_, dual_dim_);
-
-        int matrix_primal_size = rows_ * cols_;
-        int vector_primal_size = vector.size_;
-        int result_primal_size = rows_;
-
-        int matrix_dual_size = matrix_primal_size * dual_dim_;
-        int vector_dual_size = vector_primal_size * dual_dim_;
-        int result_dual_size = result_primal_size * dual_dim_;
-
-        ComplexT alpha = ComplexT(1.0, 0.0);
-        ComplexT beta = ComplexT(0.0, 0.0);
-
-        // Perform matrix-vector multiplication for primal part
-        for (int b = 0; b < batch_size_; ++b) {
-            cublasZgemv(handle_,
-                        CUBLAS_OP_N,
-                        rows_, cols_,
-                        &alpha,
-                        primal_data_ + b * matrix_primal_size, rows_,
-                        vector.primal_data_ + b * vector_primal_size, 1,
-                        &beta,
-                        result.primal_data_ + b * result_primal_size, 1);
-        }
-
-        // Perform matrix-vector multiplication for dual part
-        for (int b = 0; b < batch_size_; ++b) {
-            for (int d = 0; d < dual_dim_; ++d) {
-                // Matrix * Dual(Vector)
-                cublasZgemv(handle_,
-                            CUBLAS_OP_N,
-                            rows_, cols_,
-                            &alpha,
-                            primal_data_ + b * matrix_primal_size, rows_,
-                            vector.dual_data_ + b * vector_primal_size * dual_dim_ + d * vector_primal_size, 1,
-                            &beta,
-                            result.dual_data_ + b * result_primal_size * dual_dim_ + d * result_primal_size, 1);
-
-                // Dual(Matrix) * Vector
-                cublasZgemv(handle_,
-                            CUBLAS_OP_N,
-                            rows_, cols_,
-                            &alpha,
-                            dual_data_ + b * matrix_dual_size + d * matrix_primal_size, rows_,
-                            vector.primal_data_ + b * vector_primal_size, 1,
-                            &alpha, // Accumulate
-                            result.dual_data_ + b * result_primal_size * dual_dim_ + d * result_primal_size, 1);
-            }
-        }
-
-        return result;
-    }
-
-
-    MatrixDualDense<T> transpose() const {
-        MatrixDualDense<T> result(batch_size_, cols_, rows_, dual_dim_);
-        ComplexT alpha = ComplexT(1.0, 0.0);
-        ComplexT beta = ComplexT(0.0, 0.0);
-
-        for (int b = 0; b < batch_size_; ++b) {
-            cublasZgeam(handle_,
-                        CUBLAS_OP_T, CUBLAS_OP_T,
-                        cols_, rows_,
-                        &alpha,
-                        primal_data_ + b * rows_ * cols_, rows_,
-                        &beta,
-                        nullptr, cols_,
-                        result.primal_data_ + b * cols_ * rows_, cols_);
-        }
-
-        for (int b = 0; b < batch_size_; ++b) {
-            for (int d = 0; d < dual_dim_; ++d) {
-                cublasZgeam(handle_,
-                            CUBLAS_OP_T, CUBLAS_OP_T,
-                            cols_, rows_,
-                            &alpha,
-                            dual_data_ + b * rows_ * cols_ * dual_dim_ + d * rows_ * cols_, rows_,
-                            &beta,
-                            nullptr, cols_,
-                            result.dual_data_ + b * cols_ * rows_ * dual_dim_ + d * cols_ * rows_, cols_);
-            }
-        }
-
-        return result;
-    }
-
-    // Method to generate an upper triangular matrix
-    MatrixDualDense<T> upperTriangular() const {
-        // Create a new matrix for the result
-        MatrixDualDense<T> result(batch_size_, rows_, cols_, dual_dim_);
-
-        size_t total_elements = rows_ * cols_;
-
-        for (int b = 0; b < batch_size_; ++b) {
-            // Initialize primal part to upper triangular
-            ComplexT* batch_primal_src = primal_data_ + b * total_elements;
-            ComplexT* batch_primal_dst = result.primal_data_ + b * total_elements;
-
-            thrust::for_each(
-                thrust::counting_iterator<int>(0),
-                thrust::counting_iterator<int>(rows_ * cols_),
-                [=] __device__(int idx) {
-                    int row = idx / cols_;
-                    int col = idx % cols_;
-                    batch_primal_dst[idx] = (row <= col) ? batch_primal_src[idx] : ComplexT(0.0, 0.0);
-                });
-
-            // Initialize dual part to zero
-            ComplexT* batch_dual_dst = result.dual_data_ + b * total_elements * dual_dim_;
-            thrust::fill(thrust::device_pointer_cast(batch_dual_dst),
-                         thrust::device_pointer_cast(batch_dual_dst + total_elements * dual_dim_),
-                         ComplexT(0.0, 0.0));
-        }
-
-        return result;
-    }
-
-
-    // Method to generate a lower triangular matrix
-    MatrixDualDense<T> lowerTriangular() const {
-            // Create a new matrix for the result
-            MatrixDualDense<T> result(batch_size_, rows_, cols_, dual_dim_);
-
-            size_t total_elements = rows_ * cols_;
-
-            for (int b = 0; b < batch_size_; ++b) {
-                // Initialize primal part to lower triangular
-                ComplexT* batch_primal_src = primal_data_ + b * total_elements;
-                ComplexT* batch_primal_dst = result.primal_data_ + b * total_elements;
-
-                thrust::for_each(
-                    thrust::counting_iterator<int>(0),
-                    thrust::counting_iterator<int>(rows_ * cols_),
-                    [=] __device__(int idx) {
-                        int row = idx / cols_;
-                        int col = idx % cols_;
-                        batch_primal_dst[idx] = (row >= col) ? batch_primal_src[idx] : ComplexT(0.0, 0.0);
-                    });
-
-                // Initialize dual part to zero
-                ComplexT* batch_dual_dst = result.dual_data_ + b * total_elements * dual_dim_;
-                thrust::fill(thrust::device_pointer_cast(batch_dual_dst),
-                            thrust::device_pointer_cast(batch_dual_dst + total_elements * dual_dim_),
-                            ComplexT(0.0, 0.0));
-            }
-
-            return result;
-        }
-
-    template <typename U>
-    MatrixDualDense<U> matrixMultiply(const MatrixDualDense<U>& other) const {
-        // Validate dimensions
-        if (cols_ != other.rows_ || batch_size_ != other.batch_size_ || dual_dim_ != other.dual_dim_) {
-            throw std::invalid_argument("Matrix dimensions do not match for multiplication.");
-        }
-
-        // Create the result matrix
-        MatrixDualDense<T> result(batch_size_, rows_, other.cols_, dual_dim_);
-
-        ComplexT alpha = ComplexT(1.0, 0.0);
-        ComplexT beta = ComplexT(0.0, 0.0);
-
-        // Perform batched matrix multiplication for primal and dual parts
-        for (int b = 0; b < batch_size_; ++b) {
-            // Primal part
-            cublasZgemm(handle_,
-                        CUBLAS_OP_N, CUBLAS_OP_N,
-                        rows_, other.cols_, cols_,
-                        &alpha,
-                        primal_data_ + b * rows_ * cols_, rows_,
-                        other.primal_data_ + b * other.rows_ * other.cols_, other.rows_,
-                        &beta,
-                        result.primal_data_ + b * rows_ * other.cols_, rows_);
-
-            // Dual part
-            for (int d = 0; d < dual_dim_; ++d) {
-                // Primal * Dual(other)
-                cublasZgemm(handle_,
-                            CUBLAS_OP_N, CUBLAS_OP_N,
-                            rows_, other.cols_, cols_,
-                            &alpha,
-                            primal_data_ + b * rows_ * cols_, rows_,
-                            other.dual_data_ + b * other.rows_ * other.cols_ * dual_dim_ + d * other.rows_ * other.cols_, other.rows_,
-                            &beta,
-                            result.dual_data_ + b * rows_ * other.cols_ * dual_dim_ + d * rows_ * other.cols_, rows_);
-
-                // Dual(Matrix) * Primal(other)
-                cublasZgemm(handle_,
-                            CUBLAS_OP_N, CUBLAS_OP_N,
-                            rows_, other.cols_, cols_,
-                            &alpha,
-                            dual_data_ + b * rows_ * cols_ * dual_dim_ + d * rows_ * cols_, rows_,
-                            other.primal_data_ + b * other.rows_ * other.cols_, other.rows_,
-                            &alpha, // Accumulate
-                            result.dual_data_ + b * rows_ * other.cols_ * dual_dim_ + d * rows_ * other.cols_, rows_);
-            }
-        }
-
-        cudaStreamSynchronize(stream_);
-        return result;
-    }
-
-
-    template <typename U>
-    MatrixDualDense<U> elementwiseMultiply(const MatrixDualDense<U>& other) const {
-        // Validate dimensions
-        if (batch_size_ != other.batch_size_ || rows_ != other.rows_ || cols_ != other.cols_ || dual_dim_ != other.dual_dim_) {
-            throw std::invalid_argument("Tensor dimensions do not match for elementwise multiplication.");
-        }
-
-        // Create result tensor
-        MatrixDualDense<T> result(batch_size_, rows_, cols_, dual_dim_);
-
-        int total_primal_elements = batch_size_ * rows_ * cols_;
-        int total_dual_elements = total_primal_elements * dual_dim_;
-
-        // Elementwise multiplication for primal part
-        thrust::transform(
-            thrust::device_pointer_cast(primal_data_),
-            thrust::device_pointer_cast(primal_data_ + total_primal_elements),
-            thrust::device_pointer_cast(other.primal_data_),
-            thrust::device_pointer_cast(result.primal_data_),
-            thrust::multiplies<ComplexT>());
-
-        // Elementwise multiplication for dual part using product rule
-        thrust::for_each(
-            thrust::counting_iterator<int>(0),
-            thrust::counting_iterator<int>(total_dual_elements),
-            [=] __device__(int idx) {
-                int primal_idx = idx / dual_dim_;
-                int dual_idx = idx % dual_dim_;
-
-                result.dual_data_[idx] =
-                    dual_data_[idx] * other.primal_data_[primal_idx] +
-                    primal_data_[primal_idx] * other.dual_data_[idx];
-            });
-
-        return result;
-    };
-
+    // Add your methods (e.g., elementwiseAdd, elementwiseMultiply) here with dual_dim_ handled appropriately.
     
+    // Example method: Elementwise addition
+    MatrixDualDenseCuda<T> elementwiseAdd(const MatrixDualDenseCuda<T>& other) const {
+        if (batch_size_ != other.batch_size_ || rows_ != other.rows_ || cols_ != other.cols_ || dual_dim_ != other.dual_dim_) {
+            throw std::invalid_argument("Tensor dimensions do not match for addition.");
+        }
+
+        MatrixDualDenseCuda<T> result(batch_size_, rows_, cols_, dual_dim_);
+        int total_primal_elements = batch_size_ * rows_ * cols_;
+        int total_dual_elements = batch_size_ * rows_ * batch_size_ * dual_dim_;
+
+        thrust::transform(thrust::device_pointer_cast(primal_data_),
+                          thrust::device_pointer_cast(primal_data_ + total_primal_elements),
+                          thrust::device_pointer_cast(other.primal_data_),
+                          thrust::device_pointer_cast(result.primal_data_),
+                          thrust::plus<ComplexT>());
+
+        thrust::transform(thrust::device_pointer_cast(dual_data_),
+                          thrust::device_pointer_cast(dual_data_ + total_dual_elements),
+                          thrust::device_pointer_cast(other.dual_data_),
+                          thrust::device_pointer_cast(result.dual_data_),
+                          thrust::plus<ComplexT>());
+
+        return result;
+    }
+
+
+    // Elementwise multiplication on GPU
+    __host__ __device__ void elementwiseMultiply(const MatrixDualDenseCuda& other, 
+                                                MatrixDualDenseCuda& result) const {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+        // Total number of elements in primal and dual tensors
+        int total_primal_elements = batch_size_ * rows_ * cols_;  // For primal tensor
+        int total_dual_elements = batch_size_ * rows_ * cols_ * dual_dim_;  // For dual tensor
+
+        // Real (primal) part multiplication
+        if (idx < total_primal_elements) {
+            result.primal_data_[idx] = primal_data_[idx] * other.primal_data_[idx];
+        }
+
+        // Dual part multiplication
+        if (idx < total_dual_elements) {
+            // Decode indices for dual tensor from flat index `idx` using modulo-based decoding
+            int m = idx / (rows_ * cols_ * dual_dim_);  // Primary batch index
+            int local_idx = idx % (rows_ * cols_ * dual_dim_);
+
+            int i = local_idx / (cols_ * dual_dim_);      // Row index
+            int j = (local_idx / dual_dim_) % cols_;      // Column index
+            int k = local_idx % dual_dim_;                // Dual dimension index
+
+            // Calculate offsets for primal and dual components
+            int primal_offset = m * rows_ * cols_ + i * cols_ + j;  // Primal tensor offset
+            int dual_offset = m * rows_ * cols_ * dual_dim_ + i * cols_ * dual_dim_ + j * dual_dim_ + k;
+
+            // Extract primal and dual components
+            T real1 = primal_data_[primal_offset];
+            T real2 = other.primal_data_[primal_offset];
+            T dual1 = dual_data_[dual_offset];
+            T dual2 = other.dual_data_[dual_offset];
+
+            // Compute dual part of the result
+            result.dual_data_[idx] = real1 * dual2 + real2 * dual1;
+        }
+    }
+
+
+    __device__ void matrixMultiplyDual(const T* A_real, const T* A_dual,
+                                    const T* B_real, const T* B_dual,
+                                    T* C_real, T* C_dual,
+                                    int M, int N, int L, int P, int D) {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+        // Total number of real elements in the output
+        int total_real_elements = M * N * P;
+        // Total number of dual elements in the output
+        int total_dual_elements = M * N * P * D;
+
+        if (idx < total_real_elements) {
+            // Decode indices for the real output tensor
+            int m = idx / (N * P);                  // Batch index
+            int i = (idx % (N * P)) / P;            // Row index
+            int k = (idx % (N * P)) % P;            // Column index
+
+            // Compute the real part of the result tensor
+            T C_real_local = 0;
+            for (int j = 0; j < L; ++j) {
+                T A_real_val = A_real[m * (N * L) + i * L + j];
+                T B_real_val = B_real[m * (L * P) + j * P + k];
+                C_real_local += A_real_val * B_real_val;
+            }
+            C_real[idx] = C_real_local;
+        }
+
+        if (idx < total_dual_elements) {
+            // Decode indices for the dual output tensor
+            int m = idx / (N * P * D);              // Batch index
+            int local_idx = idx % (N * P * D);
+            int i = local_idx / (P * D);            // Row index
+            int k = (local_idx % (P * D)) / D;      // Column index
+            int l = (local_idx % (P * D)) % D;      // Dual dimension index
+
+            // Compute the dual part of the result tensor
+            T C_dual_local = 0;
+            for (int j = 0; j < L; ++j) {
+                T A_real_val = A_real[m * (N * L) + i * L + j];
+                T B_real_val = B_real[m * (L * P) + j * P + k];
+                T A_dual_val = A_dual[m * (N * L * D) + i * (L * D) + j * D + l];
+                T B_dual_val = B_dual[m * (L * P * D) + j * (P * D) + k * D + l];
+
+                C_dual_local += A_real_val * B_dual_val + A_dual_val * B_real_val;
+            }
+            C_dual[idx] = C_dual_local;
+        }
+    }
+
+
+    __device__ void matrixVectorMultiplyDual(const T* A_real, const T* A_dual,
+                                            const T* B_real, const T* B_dual,
+                                            T* C_real, T* C_dual,
+                                            int M, int N, int L, int D) {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+        // Total number of real elements in the output
+        int total_real_elements = M * N;
+        // Total number of dual elements in the output
+        int total_dual_elements = M * N * D;
+
+        // Real part computation
+        if (idx < total_real_elements) {
+            // Decode indices for real output
+            int m = idx / N;          // Batch index
+            int i = idx % N;          // Row index
+
+            // Compute the real part
+            T C_real_local = 0;
+            for (int j = 0; j < L; ++j) {
+                T A_real_val = A_real[m * (N * L) + i * L + j];
+                T B_real_val = B_real[m * L + j];
+                C_real_local += A_real_val * B_real_val;
+            }
+            C_real[idx] = C_real_local;
+        }
+
+        // Dual part computation
+        if (idx < total_dual_elements) {
+            // Decode indices for dual output
+            int m = idx / (N * D);              // Batch index
+            int local_idx = idx % (N * D);
+            int i = local_idx / D;              // Row index
+            int k = local_idx % D;              // Dual dimension index
+
+            // Compute the dual part
+            T C_dual_local = 0;
+            for (int j = 0; j < L; ++j) {
+                T A_real_val = A_real[m * (N * L) + i * L + j];
+                T B_dual_val = B_dual[m * (L * D) + j * D + k];
+                T A_dual_val = A_dual[m * (N * L * D) + i * (L * D) + j * D + k];
+                T B_real_val = B_real[m * L + j];
+
+                C_dual_local += A_real_val * B_dual_val + A_dual_val * B_real_val;
+            }
+            C_dual[idx] = C_dual_local;
+        }
+    }
+
+
+
+
+
+
+    // Accessors for dimensions
+    int batch_size() const { return batch_size_; }
+    int rows() const { return rows_; }
+    int cols() const { return cols_; }
+    int dual_dim() const { return dual_dim_; }
+
+    // Accessors for data pointers
+    ComplexT* primal_data() { return primal_data_; }
+    const ComplexT* primal_data() const { return primal_data_; }
+    ComplexT* dual_data() { return dual_data_; }
+    const ComplexT* dual_data() const { return dual_data_; }
 
 private:
     void initializeHandles() {
@@ -1391,7 +1117,17 @@ private:
         }
         cublasSetStream(handle_, stream_);
     }
+
+public:
+    // Disable copy constructor and copy assignment
+    MatrixDualDenseCuda(const MatrixDualDenseCuda&) = delete;
+    MatrixDualDenseCuda& operator=(const MatrixDualDenseCuda&) = delete;
+
+    // Enable move constructor and move assignment
+    MatrixDualDenseCuda(MatrixDualDenseCuda&&) noexcept = default;
+    MatrixDualDenseCuda& operator=(MatrixDualDenseCuda&&) noexcept = default;
 };
+
 
 
 template <typename T>

@@ -529,7 +529,6 @@ __global__ void elementwiseMultiplyKernel(
     const janus::VectorHyperDualDenseCuda<float> vec1,
     const janus::VectorHyperDualDenseCuda<float> vec2,
     janus::VectorHyperDualDenseCuda<float> result) {
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
     // Use the member function on the device
     vec1.elementwiseMultiply(vec2, result);
