@@ -2,6 +2,7 @@
 #include <torch/torch.h>
 #include <random>
 #include "../../src/cpp/cudatensordense.cu"
+#include "../../src/cpp/cudatensorsparse.cu"
 #include <thrust/host_vector.h>
 using namespace janus;
 
@@ -654,6 +655,8 @@ TEST(VectorHyperDualDenseCudaTest, ElementwiseMultiply) {
     cudaFree(d_result_dual);
     cudaFree(d_result_hyperdual);
 }
+
+
 
 
 // Main function for running all tests
