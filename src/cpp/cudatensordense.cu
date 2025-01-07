@@ -464,42 +464,57 @@ public:
         : batch_size_(batch_size), real_size_(real_size), dual_size_(dual_size),
           real_(real), dual_(dual), hyperdual_(hyperdual) {}
 
-    // Optimized Elementwise Multiplication on GPU
-    __host__ __device__ void elementwiseMultiply(const VectorHyperDualDenseCuda& other, VectorHyperDualDenseCuda& result) const {
-        int idx = threadIdx.x + blockIdx.x * blockDim.x;
-
-        // Precompute strides for faster decoding
-        int stride_real = real_size_;
-        int stride_dual = real_size_ * dual_size_;
-        int stride_hyperdual = real_size_ * dual_size_ * dual_size_;
-
-        // Real part multiplication
-        if (idx < batch_size_ * stride_real) {
-            result.real_[idx] = real_[idx] * other.real_[idx];
+    __device__ void elementwiseMultiply(const VectorHyperDualDenseCuda& other, 
+                                        VectorHyperDualDenseCuda& result) const {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x; //1D index
+        //This index is the hyperdual number out of which we can 
+        //extract the batch, real, dual and hyperdual indices
+        //Use the standard convention
+        int M = batch_size_;
+        int N = real_size_;
+        int D = dual_size_;
+        //Only consider values less the largest number of elements
+        //which is the number of elements of the hyperdual tensor
+        if ( idx < M*N*D*D)
+        {
+          //Now extract the indexes of the hyperdual tensor
+          //idx = m*N*D*D + i*D*D + k*D + l
+          int m = idx / (N*D*D);
+          int i = (idx / (D*D)) % N;
+          int k = (idx / D) % D;
+          int l = idx % D;
+          //Cache the real and dual parts from global memory and name to correspond to 
+          //einstein sum notation
+          auto r1mi = real_[m*N+i];
+          auto r2mi = other.real_[m*N+i];
+          auto d1mik = dual_[m*N*D + i*D + k];
+          auto d1mil = dual_[m*N*D + i*D + l];
+          auto d2mil = dual_[m*N*D + i*D + l];
+          auto d2mik = dual_[m*N*D + i*D + k];
+          auto h1mikl = hyperdual_[m*N*D*D + i*D*D + k*D + l];
+          auto h2mikl = other.hyperdual_[m*N*D*D + i*D*D + k*D + l];
+          //only update the real part if k==0 and l==0 to avoid repeating the real part
+          if (k == 0 && l == 0) {
+            int ridx = m*N+i;
+            //("mi, mi->mi", r1, r2)
+            result.real_[ridx] = r1mi * r2mi;
+          }
+          // Update the dual part only if l == 0 to avoid repeating the dual part
+        if (l == 0) {
+           int dual_idx = m*N*D + i*D + k;
+           //This should be einsum("mi,mik->mik", real1, dual2)+einsum("mi,mik->mik", real2, dual1)
+           //There are two dual values corresponding to the hyperdual tensor.  Just update the k part
+           result.dual_[dual_idx] = r1mi * d2mik +
+                                    r2mi * d1mik;
         }
+        // Update the hyperdual part
+        //In einsum notation this is ("mik,mil->mikl", d1, d2)+("mi,mikl->mikl", r1, h2)+("mi,mikl->mikl", r2, h1)
+        result.hyperdual_[idx] = d1mik*d2mil +
+                                 d1mil*d2mik +
+                                 r1mi*h2mikl +
+                                 r2mi*h1mikl;
+ 
 
-        // Dual part multiplication
-        else if (idx < batch_size_ * stride_dual) {
-            int dual_idx = idx - batch_size_ * stride_real;
-            int real_idx = dual_idx / dual_size_;
-            result.dual_[dual_idx] = real_[real_idx] * other.dual_[dual_idx] +
-                                     other.real_[real_idx] * dual_[dual_idx];
-        }
-
-        // Hyperdual part multiplication
-        else if (idx < batch_size_ * stride_hyperdual) {
-            int hyperdual_idx = idx - batch_size_ * stride_dual;
-            int m = hyperdual_idx / (real_size_ * dual_size_ * dual_size_);
-            int i = (hyperdual_idx / (dual_size_ * dual_size_)) % real_size_;
-            int j = (hyperdual_idx / dual_size_) % dual_size_;
-            int k = hyperdual_idx % dual_size_;
-
-            int dual1_idx = m * real_size_ * dual_size_ + i * dual_size_ + j;
-            int dual2_idx = m * real_size_ * dual_size_ + i * dual_size_ + k;
-
-            result.hyperdual_[hyperdual_idx] = real_[m * real_size_ + i] * other.hyperdual_[hyperdual_idx] +
-                                               other.real_[m * real_size_ + i] * hyperdual_[hyperdual_idx] +
-                                               dual_[dual1_idx] * other.dual_[dual2_idx];
         }
     }
 

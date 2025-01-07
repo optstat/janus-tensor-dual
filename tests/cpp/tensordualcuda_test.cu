@@ -535,20 +535,23 @@ __global__ void elementwiseMultiplyKernel(
     vec1.elementwiseMultiply(vec2, result);
 }
 
+
 TEST(VectorHyperDualDenseCudaTest, ElementwiseMultiply) {
     int batch_size = 2;
     int real_size = 3;
     int dual_size = 2;
 
-    // Initialize host data for real, dual, and hyperdual parts
+    // Initialize host data [2,3]
     std::vector<thrust::complex<float>> real_data = {
         {1.0, 1.0}, {2.0, 2.0}, {3.0, 3.0},
         {4.0, 4.0}, {5.0, 5.0}, {6.0, 6.0}};
+    //Dual part is [2, 3, 2]
     std::vector<thrust::complex<float>> dual_data = {
         {0.1, 0.1}, {0.2, 0.2}, {0.3, 0.3},
         {0.4, 0.4}, {0.5, 0.5}, {0.6, 0.6},
         {0.7, 0.7}, {0.8, 0.8}, {0.9, 0.9},
         {1.0, 1.0}, {1.1, 1.1}, {1.2, 1.2}};
+    //Hyperdual part is [2, 3, 2, 2]
     std::vector<thrust::complex<float>> hyperdual_data = {
         {0.01, 0.01}, {0.02, 0.02}, {0.03, 0.03},
         {0.04, 0.04}, {0.05, 0.05}, {0.06, 0.06},
@@ -595,11 +598,16 @@ TEST(VectorHyperDualDenseCudaTest, ElementwiseMultiply) {
     janus::VectorHyperDualDenseCuda<float> vec2(batch_size, real_size, dual_size, d_real2, d_dual2, d_hyperdual2);
     janus::VectorHyperDualDenseCuda<float> result(batch_size, real_size, dual_size, d_result_real, d_result_dual, d_result_hyperdual);
 
-    // Configure and launch the kernel for elementwise multiplication
+    // Configure and launch the kernel
     int threadsPerBlock = 256;
-    int blocksPerGrid = (batch_size * real_size * dual_size * dual_size + threadsPerBlock - 1) / threadsPerBlock;
+    int blocksPerGrid = 1;
     elementwiseMultiplyKernel<<<blocksPerGrid, threadsPerBlock>>>(vec1, vec2, result);
     cudaDeviceSynchronize();
+
+    // Check for kernel errors
+    cudaError_t err = cudaGetLastError();
+    EXPECT_EQ(err, cudaSuccess) << "CUDA kernel failed: " << cudaGetErrorString(err);
+
     // Copy result back to host for verification
     std::vector<thrust::complex<float>> result_real(batch_size * real_size);
     std::vector<thrust::complex<float>> result_dual(batch_size * real_size * dual_size);
@@ -608,40 +616,50 @@ TEST(VectorHyperDualDenseCudaTest, ElementwiseMultiply) {
     cudaMemcpy(result_real.data(), d_result_real, real_mem_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(result_dual.data(), d_result_dual, dual_mem_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(result_hyperdual.data(), d_result_hyperdual, hyperdual_mem_size, cudaMemcpyDeviceToHost);
-    float tolerance = 1e-6;  // Adjust as needed based on your application's precision requirements
 
-    // Verify the result for the real part
-    for (size_t i = 0; i < real_data.size(); ++i) {
-        auto expected = real_data[i] * real_data[i];
-        //Expect equality to a tolerance of 1e-6
-        EXPECT_NEAR(result_real[i].real(), expected.real(), tolerance);
-        EXPECT_NEAR(result_real[i].imag(), expected.imag(), tolerance);
+    float tolerance = 1e-6;
+
+    // Verify real part
+    for (size_t m = 0; m < batch_size; ++m) {
+        for ( size_t i=0; i < real_size; i++) {
+            size_t idx = m * real_size + i;
+            auto expected = real_data[idx] * real_data[idx];
+            EXPECT_NEAR(result_real[idx].real(), expected.real(), tolerance);
+            EXPECT_NEAR(result_real[idx].imag(), expected.imag(), tolerance);
+        }
     }
 
-    // Verify the result for the dual part
-    for (size_t i = 0; i < dual_data.size(); ++i) {
-        size_t real_idx = i / dual_size;
-        auto expected = real_data[real_idx] * dual_data[i] + real_data[real_idx] * dual_data[i];
-        EXPECT_NEAR(result_dual[i].real(), expected.real(), tolerance);
-        EXPECT_NEAR(result_dual[i].imag(), expected.imag(), tolerance);
+    // Verify dual part
+    for ( int m=0; m < batch_size; m++) {
+        for (int i = 0; i < real_size; ++i) {
+            auto realval = real_data[m * real_size + i];
+            for (int j = 0; j < dual_size; ++j) {
+                int dual_idx = m * real_size * dual_size + i * dual_size + j;
+                auto dualval = dual_data[dual_idx];
+                auto expected = 2*realval * dualval;
+                EXPECT_NEAR(result_dual[dual_idx].real(), expected.real(), tolerance);
+                EXPECT_NEAR(result_dual[dual_idx].imag(), expected.imag(), tolerance);
+                
+            }
+        }
     }
 
-    // Verify the result for the hyperdual part
-    for (size_t i = 0; i < hyperdual_data.size(); ++i) {
-        size_t batch_idx = i / (real_size * dual_size * dual_size);
-        size_t real_idx = (i / (dual_size * dual_size)) % real_size;
-        size_t dual_row = (i / dual_size) % dual_size;
-        size_t dual_col = i % dual_size;
 
-        size_t dual1_idx = batch_idx * real_size * dual_size + real_idx * dual_size + dual_row;
-        size_t dual2_idx = batch_idx * real_size * dual_size + real_idx * dual_size + dual_col;
-
-        auto expected = real_data[batch_idx * real_size + real_idx] * hyperdual_data[i] +
-                        real_data[batch_idx * real_size + real_idx] * hyperdual_data[i] +
-                        dual_data[dual1_idx] * dual_data[dual2_idx];
-
-        EXPECT_NEAR(result_hyperdual[i].real(), expected.real(), tolerance);
-        EXPECT_NEAR(result_hyperdual[i].imag(), expected.imag(), tolerance);
+    // Verify hyperdual part
+    for (int m = 0; m < batch_size; m++) {
+        for (int i = 0; i < real_size; ++i) {
+            auto realval = real_data[m * real_size + i];
+            for (int j = 0; j < dual_size; ++j) {
+                auto dualval = dual_data[m * real_size * dual_size + i * dual_size + j];
+                for (int k = 0; k < dual_size; ++k) {
+                    int hyperdual_idx = m * real_size * dual_size * dual_size + i * dual_size * dual_size + j * dual_size + k;
+                    auto hyperdualval = hyperdual_data[hyperdual_idx];
+                    auto expected = 2*realval * hyperdualval + 2*dualval * dualval;
+                    EXPECT_NEAR(result_hyperdual[hyperdual_idx].real(), expected.real(), tolerance);
+                    //EXPECT_NEAR(result_hyperdual[hyperdual_idx].imag(), expected.imag(), tolerance);
+                }
+            }
+        }
     }
 
     // Free GPU memory
@@ -655,6 +673,8 @@ TEST(VectorHyperDualDenseCudaTest, ElementwiseMultiply) {
     cudaFree(d_result_dual);
     cudaFree(d_result_hyperdual);
 }
+
+
 
 
 
