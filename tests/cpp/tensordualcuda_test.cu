@@ -607,7 +607,6 @@ TEST(VectorHyperDualDenseCudaTest, ElementwiseMultiply) {
 
     elementwiseMultiplyKernel<<<blocksPerGrid, threadsPerBlock>>>(vec1, vec2, result);
 
-    cudaDeviceSynchronize();
     // Check for kernel errors
     cudaError_t err = cudaGetLastError();
     EXPECT_EQ(err, cudaSuccess) << "CUDA kernel failed: " << cudaGetErrorString(err);
@@ -620,7 +619,7 @@ TEST(VectorHyperDualDenseCudaTest, ElementwiseMultiply) {
     cudaMemcpy(result_real.data(), d_result_real, real_mem_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(result_dual.data(), d_result_dual, dual_mem_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(result_hyperdual.data(), d_result_hyperdual, hyperdual_mem_size, cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
+    
 
     float tolerance = 1e-6;
 

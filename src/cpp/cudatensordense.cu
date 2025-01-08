@@ -328,16 +328,26 @@ public:
         int total_dual_elements = batch_size_ * real_size_ * dual_size_;
         int dual_dim = dual_size_ / real_size_;
 
+        //Go off the total_dual_elements since that is the biggest tensor
+
         // Real part multiplication
-        if (idx < total_real_elements) {
-            result.real_[idx] = real_[idx] * other.real_[idx];
-        }
+        //if (idx < total_real_elements) {
+        //    result.real_[idx] = real_[idx] * other.real_[idx];
+        //}
 
         // Dual part multiplication
         if (idx < total_dual_elements) {
-            int real_idx = idx / dual_dim;  // Map dual index to corresponding real index
-            result.dual_[idx] = real_[real_idx] * other.dual_[idx] +
-                                other.real_[real_idx] * dual_[idx];
+            int m = idx / (real_size_ * dual_size_);
+            int i = (idx / dual_size_) % real_size_;
+            int k = idx % dual_size_;
+            //cache the real and dual parts from global memory
+            auto r1mi = real_[m * real_size_ + i];
+            auto r2mi = other.real_[m * real_size_ + i];
+            auto d1mik = dual_[m * real_size_ * dual_size_ + i * dual_size_ + k];
+            auto d2mik = other.dual_[m * real_size_ * dual_size_ + i * dual_size_ + k];
+            result.real_[m * real_size_ + i] = r1mi * r2mi;
+            result.dual_[idx] = r1mi * d2mik +
+                                r2mi * d1mik;
         }
     }
 
@@ -1021,10 +1031,6 @@ public:
         int total_primal_elements = batch_size_ * rows_ * cols_;  // For primal tensor
         int total_dual_elements = batch_size_ * rows_ * cols_ * dual_dim_;  // For dual tensor
 
-        // Real (primal) part multiplication
-        if (idx < total_primal_elements) {
-            result.primal_data_[idx] = primal_data_[idx] * other.primal_data_[idx];
-        }
 
         // Dual part multiplication
         if (idx < total_dual_elements) {
@@ -1040,150 +1046,20 @@ public:
             int primal_offset = m * rows_ * cols_ + i * cols_ + j;  // Primal tensor offset
             int dual_offset = m * rows_ * cols_ * dual_dim_ + i * cols_ * dual_dim_ + j * dual_dim_ + k;
 
-            // Extract primal and dual components
+            // Extract primal and dual components and cache them
             T real1 = primal_data_[primal_offset];
             T real2 = other.primal_data_[primal_offset];
             T dual1 = dual_data_[dual_offset];
             T dual2 = other.dual_data_[dual_offset];
-
+            result.primal_data_[primal_offset] = real1 * real2;
             // Compute dual part of the result
             result.dual_data_[idx] = real1 * dual2 + real2 * dual1;
         }
     }
    
-   /**
-    * Multiplies two matrices with dual part on GPU.
-    * The matrices are stored in row-major order.
-    * The dual part is stored in a separate tensor with dimensions [M, N, P, D].
-    */
-    __device__ void matrixMultiplyDualOptimized(const T* A_real, const T* A_dual,
-                                                const T* B_real, const T* B_dual,
-                                                T* C_real, T* C_dual,
-                                                int M, int N, int L, int P, int D) {
-        extern __shared__ T shared_mem[];  // Shared memory for caching B_real and B_dual
-        T* shared_B_real = shared_mem;     // Cache for B_real
-        T* shared_B_dual = shared_mem + L * P;  // Cache for B_dual
-
-        int idx = threadIdx.x + blockIdx.x * blockDim.x;
-
-        // Total number of real and dual elements in the output
-        int total_real_elements = M * N * P;
-        int total_dual_elements = M * N * P * D;
-
-        // Block and thread indices
-        int block_m = blockIdx.x;               // Batch index (M)
-        int thread_i = threadIdx.y;             // Row index (N)
-        int thread_k = threadIdx.x;             // Column index (P)
-
-        // Cache B_real and B_dual into shared memory (one block per batch)
-        for (int j = threadIdx.x; j < L * P; j += blockDim.x) {
-            int local_j = j / P;  // Row of B
-            int local_k = j % P;  // Column of B
-
-            // Cache B_real and B_dual for the current batch
-            shared_B_real[local_j * P + local_k] = B_real[block_m * (L * P) + local_j * P + local_k];
-            for (int d = 0; d < D; ++d) {
-                shared_B_dual[local_j * (P * D) + local_k * D + d] =
-                    B_dual[block_m * (L * P * D) + local_j * (P * D) + local_k * D + d];
-            }
-        }
-        __syncthreads();
-
-        // Real computation
-        if (idx < total_real_elements) {
-            // Decode indices
-            int m = idx / (N * P);
-            int i = (idx % (N * P)) / P;
-            int k = (idx % (N * P)) % P;
-
-            // Accumulate real result
-            T C_real_local = 0;
-            for (int j = 0; j < L; ++j) {
-                T A_real_val = A_real[m * (N * L) + i * L + j];
-                T B_real_val = shared_B_real[j * P + k];  // Use cached value
-                C_real_local += A_real_val * B_real_val;
-            }
-            C_real[idx] = C_real_local;
-        }
-
-        // Dual computation
-        if (idx < total_dual_elements) {
-            // Decode indices
-            int m = idx / (N * P * D);
-            int local_idx = idx % (N * P * D);
-            int i = local_idx / (P * D);
-            int k = (local_idx % (P * D)) / D;
-            int l = (local_idx % (P * D)) % D;
-
-            // Accumulate dual result
-            T C_dual_local = 0;
-            for (int j = 0; j < L; ++j) {
-                T A_real_val = A_real[m * (N * L) + i * L + j];
-                T A_dual_val = A_dual[m * (N * L * D) + i * (L * D) + j * D + l];
-                T B_real_val = shared_B_real[j * P + k];  // Use cached value
-                T B_dual_val = shared_B_dual[j * (P * D) + k * D + l];  // Use cached value
-
-                C_dual_local += A_real_val * B_dual_val + A_dual_val * B_real_val;
-            }
-            C_dual[idx] = C_dual_local;
-        }
-    }
 
 
 
-    /**
-     * Matrix Vector multiplication with dual part on GPU.
-     * The matrix is stored in row-major order.
-     * The dual part is stored in a separate tensor with dimensions [M, N, D].
-     */
-    __device__ void matrixVectorMultiplyDualOptimized(const T* A_real, const T* A_dual,
-                                                      const T* B_real, const T* B_dual,
-                                                      T* C_real, T* C_dual,
-                                                      int M, int N, int L, int D) {
-        extern __shared__ T shared_mem[];  // Shared memory for caching
-        T* shared_B_real = shared_mem;     // Cache B_real
-        T* shared_B_dual = shared_mem + L; // Cache B_dual
-
-        int m = blockIdx.x;                // Batch index
-        int i = threadIdx.y;               // Row index of C
-        int k = threadIdx.x;               // Dual dimension index (if applicable)
-
-        // Initialize local accumulators
-        T C_real_local = 0;
-        T C_dual_local = 0;
-
-        // Loop over shared dimension L in chunks
-        for (int chunk_start = 0; chunk_start < L; chunk_start += blockDim.x) {
-            int j = chunk_start + threadIdx.x;
-
-            // Cache B_real and B_dual into shared memory
-            if (j < L) {
-                shared_B_real[j] = B_real[m * L + j];
-                for (int d = 0; d < D; ++d) {
-                    shared_B_dual[j * D + d] = B_dual[m * L * D + j * D + d];
-                }
-            }
-            __syncthreads();
-
-            // Accumulate contributions for this chunk
-            for (int j_local = 0; j_local < blockDim.x && (chunk_start + j_local) < L; ++j_local) {
-                int j = chunk_start + j_local;
-
-                T A_real_val = A_real[m * (N * L) + i * L + j];
-                T A_dual_val = A_dual[m * (N * L * D) + i * (L * D) + j * D + k];
-
-                C_real_local += A_real_val * shared_B_real[j];
-                C_dual_local += A_real_val * shared_B_dual[j * D + k] + A_dual_val * shared_B_real[j];
-            }
-            __syncthreads();
-        }
-
-        // Write results back to global memory
-        if (threadIdx.x == 0) {
-            C_real[m * N + i] = C_real_local;
-        }
-        C_dual[m * (N * D) + i * D + k] = C_dual_local;
-    }
 
     void cpuMatrixMultiplyDual(const T* A_real, const T* A_dual, 
                             const T* B_real, const T* B_dual, 
