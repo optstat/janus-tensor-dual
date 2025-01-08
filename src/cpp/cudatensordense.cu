@@ -84,9 +84,6 @@ public:
 
     // Elementwise addition
     VectorDenseCuda elementwiseAdd(const VectorDenseCuda& other) const {
-        if (batch_size_ != other.batch_size_ || size_ != other.size_) {
-            throw std::invalid_argument("Vector dimensions do not match for elementwise addition.");
-        }
 
         VectorDenseCuda result(batch_size_, size_);
         int total_elements = batch_size_ * size_;
@@ -121,6 +118,34 @@ public:
             thrust::multiplies<thrust::complex<T>>());
 
         return result;
+    }
+
+    VectorDenseCuda<T> indexGet(int start_real, int end_real) const {
+ 
+        // Dimensions of the subvector
+        int sub_size = end_real - start_real;
+
+        // Calculate offsets for the data
+        thrust::complex<T>* sub_data = data_ + start_real;
+
+        // Create a new VectorDenseCuda instance sharing the data with the original
+        return VectorDenseCuda<T>(batch_size_, sub_size, sub_data);
+    }
+
+    void indexPut(int start_real, int end_real, const VectorDenseCuda& subvector) {
+ 
+        // Validate subvector dimensions
+        int sub_size = end_real - start_real;
+ 
+        // Calculate offsets for the data
+        thrust::complex<T>* target_data = data_ + start_real;
+
+        // Update the data
+        cudaMemcpy(
+            target_data,
+            subvector.data(),
+            sub_size * batch_size_ * sizeof(thrust::complex<T>),
+            cudaMemcpyDeviceToDevice);
     }
 
     // Accessors
@@ -475,22 +500,30 @@ public:
         int D = dual_size_;
         //Only consider values less the largest number of elements
         //which is the number of elements of the hyperdual tensor
+        //the size of the hyperdual tensor is M*N*D*D
         if ( idx < M*N*D*D)
         {
           //Now extract the indexes of the hyperdual tensor
-          //idx = m*N*D*D + i*D*D + k*D + l
-          int m = idx / (N*D*D);
-          int i = (idx / (D*D)) % N;
-          int k = (idx / D) % D;
-          int l = idx % D;
+          //assuming row based indexing where the last index changes the fastest
+          //l is between [0,D), k is between [0,D), i is between [0,N), m is between [0,M)]
+          int m = idx / (N * D * D);             // Batch index
+          //printf("m: %d\n", m);
+          int i = (idx / (D * D)) % N;           // Real index
+          //printf("i: %d\n", i);
+          int k = (idx / D) % D;                 // Dual index
+          //printf("k: %d\n", k);
+          int l = idx % D;                       // Column index in the Hessian
+          //printf("l: %d\n", l);
           //Cache the real and dual parts from global memory and name to correspond to 
           //einstein sum notation
-          auto r1mi = real_[m*N+i];
-          auto r2mi = other.real_[m*N+i];
+          auto r1mi  = real_[m*N+i];
+          auto r2mi  = other.real_[m*N+i];
           auto d1mik = dual_[m*N*D + i*D + k];
           auto d1mil = dual_[m*N*D + i*D + l];
-          auto d2mil = dual_[m*N*D + i*D + l];
-          auto d2mik = dual_[m*N*D + i*D + k];
+          auto d2mil = other.dual_[m*N*D + i*D + l];
+          auto d2mik = other.dual_[m*N*D + i*D + k];
+          //printf("%d, %d, %d, %d\n", m, i, k, l);
+          //printf("m*N*D*D + i*D*D + k*D + l: %d\n", m*N*D*D + i*D*D + k*D + l);
           auto h1mikl = hyperdual_[m*N*D*D + i*D*D + k*D + l];
           auto h2mikl = other.hyperdual_[m*N*D*D + i*D*D + k*D + l];
           //only update the real part if k==0 and l==0 to avoid repeating the real part
@@ -499,20 +532,23 @@ public:
             //("mi, mi->mi", r1, r2)
             result.real_[ridx] = r1mi * r2mi;
           }
+          
           // Update the dual part only if l == 0 to avoid repeating the dual part
-        if (l == 0) {
+          if (l == 0) {
            int dual_idx = m*N*D + i*D + k;
            //This should be einsum("mi,mik->mik", real1, dual2)+einsum("mi,mik->mik", real2, dual1)
            //There are two dual values corresponding to the hyperdual tensor.  Just update the k part
            result.dual_[dual_idx] = r1mi * d2mik +
+          
                                     r2mi * d1mik;
-        }
-        // Update the hyperdual part
-        //In einsum notation this is ("mik,mil->mikl", d1, d2)+("mi,mikl->mikl", r1, h2)+("mi,mikl->mikl", r2, h1)
-        result.hyperdual_[idx] = d1mik*d2mil +
-                                 d1mil*d2mik +
-                                 r1mi*h2mikl +
-                                 r2mi*h1mikl;
+          }
+          //In einsum notation this is ("mik,mil->mikl", d1, d2)+("mi,mikl->mikl", r1, h2)+("mi,mikl->mikl", r2, h1)
+          //printf("Real values r1mi: %f, r2mi: %f, d1mik: %f, d1mil: %f, d2mil: %f, d2mik: %f, h1mikl: %f, h2mikl: %f\n", r1mi.real(), r2mi.real(), d1mik.real(), d1mil.real(), d2mil.real(), d2mik.real(), h1mikl.real(), h2mikl.real());
+          //printf("Imaginary values r1mi: %f, r2mi: %f, d1mik: %f, d1mil: %f, d2mil: %f, d2mik: %f, h1mikl: %f, h2mikl: %f\n", r1mi.imag(), r2mi.imag(), d1mik.imag(), d1mil.imag(), d2mil.imag(), d2mik.imag(), h1mikl.imag(), h2mikl.imag());
+          result.hyperdual_[idx] = d1mik*d2mil +
+                                   d1mil*d2mik +
+                                   r1mi*h2mikl +
+                                   r2mi*h1mikl;
  
 
         }
