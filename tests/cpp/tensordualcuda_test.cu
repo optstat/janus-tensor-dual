@@ -7,6 +7,20 @@
 using namespace janus;
 
 
+template <typename T>
+thrust::complex<T> generate_random() {
+    return thrust::complex<T>(rand() % 100, rand() % 100);
+}
+
+//Generate N random complex nunbers
+template <typename T>
+std::vector<thrust::complex<T>> generate_random_vector(int N) {
+    std::vector<thrust::complex<T>> vec(N);
+    for (int i = 0; i < N; i++) {
+        vec[i] = generate_random<T>();
+    }
+    return vec;
+}
 
 class VectorBoolTest : public ::testing::Test {
 public:
@@ -408,6 +422,530 @@ TEST_F(VectorTest, IndexPut) {
     cudaFree(d_input);
 }
 
+
+template <typename T>
+void AllocateAndCopy(const std::vector<thrust::complex<T>>& host_data, thrust::complex<T>** device_data) {
+    size_t size = host_data.size() * sizeof(thrust::complex<T>);
+    cudaMalloc(device_data, size);
+    cudaMemcpy(*device_data, host_data.data(), size, cudaMemcpyHostToDevice);
+}
+
+template <typename T>
+std::vector<thrust::complex<T>> CopyToHost(const thrust::complex<T>* device_data, size_t size) {
+    std::vector<thrust::complex<T>> host_data(size);
+    cudaMemcpy(host_data.data(), device_data, size * sizeof(thrust::complex<T>), cudaMemcpyDeviceToHost);
+    return host_data;
+}
+
+TEST(VectorDualTest, RealDualProduct) {
+    using T = float;
+
+    // Input size
+    int real_size = 3;
+    int dual_size = 2;
+
+    // Host input data
+    std::vector<thrust::complex<T>> a_real = {{1, 2}, {3, 4}, {5, 6}};
+    std::vector<thrust::complex<T>> a_dual = {{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}};
+    std::vector<thrust::complex<T>> b_real = {{7, 8}, {9, 10}, {11, 12}};
+    std::vector<thrust::complex<T>> b_dual = {{0.7, 0.8}, {0.9, 1.0}, {1.1, 1.2}};
+
+    // Allocate device memory
+    thrust::complex<T> *d_a_real, *d_a_dual, *d_b_real, *d_b_dual;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    AllocateAndCopy(b_real, &d_b_real);
+    AllocateAndCopy(b_dual, &d_b_dual);
+
+    // Output memory
+    thrust::complex<T> *d_result_real, *d_result_dual;
+    cudaMalloc(&d_result_real, real_size * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, dual_size * sizeof(thrust::complex<T>));
+
+    // Launch kernel
+    VectorRealDualProductKernel<T><<<1, real_size * dual_size>>>(
+        d_a_real, d_a_dual, d_b_real, d_b_dual, real_size, dual_size, d_result_real, d_result_dual);
+
+    // Copy results to host
+    auto result_real = CopyToHost(d_result_real, real_size);
+    auto result_dual = CopyToHost(d_result_dual, dual_size);
+
+    // Free device memory
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_b_real);
+    cudaFree(d_b_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    // Validate results
+    EXPECT_EQ(result_real[0], a_real[0] * b_real[0]); // Example validation
+    EXPECT_EQ(result_dual[0], a_real[0] * b_dual[0] + b_real[0] * a_dual[0]);
+}
+
+TEST(VectorDualTest, ElementwiseAdd) {
+    using T = float;
+
+    int real_size = 3;
+    int dual_size = 3;
+
+    std::vector<thrust::complex<T>> a_real = {{1, 1}, {2, 2}, {3, 3}};
+    std::vector<thrust::complex<T>> a_dual = {{0.1, 0.1}, {0.2, 0.2}, {0.3, 0.3}};
+    std::vector<thrust::complex<T>> b_real = {{4, 4}, {5, 5}, {6, 6}};
+    std::vector<thrust::complex<T>> b_dual = {{0.4, 0.4}, {0.5, 0.5}, {0.6, 0.6}};
+
+    thrust::complex<T> *d_a_real, *d_a_dual, *d_b_real, *d_b_dual;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    AllocateAndCopy(b_real, &d_b_real);
+    AllocateAndCopy(b_dual, &d_b_dual);
+
+    thrust::complex<T> *d_result_real, *d_result_dual;
+    cudaMalloc(&d_result_real, real_size * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, dual_size * sizeof(thrust::complex<T>));
+
+    VectorDualElementwiseAddKernel<T><<<1, real_size>>>(
+        d_a_real, d_a_dual, d_b_real, d_b_dual, real_size, dual_size, d_result_real, d_result_dual);
+
+    auto result_real = CopyToHost(d_result_real, real_size);
+    auto result_dual = CopyToHost(d_result_dual, dual_size);
+
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_b_real);
+    cudaFree(d_b_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    for (int i = 0; i < real_size; ++i) {
+        EXPECT_EQ(result_real[i], a_real[i] + b_real[i]);
+    }
+    for (int i = 0; i < dual_size; ++i) {
+        EXPECT_EQ(result_dual[i], a_dual[i] + b_dual[i]);
+    }
+}
+
+TEST(VectorDualTest, ElementwiseMultiply) {
+    using T = float;
+
+    int real_size = 3;
+    int dual_size = 2;  //There are dual_size dual numbers for each real number
+
+    std::vector<thrust::complex<T>> a_real = {{1, 1}, {2, 2}, {3, 3}};
+    std::vector<thrust::complex<T>> a_dual = generate_random_vector<T>(real_size*dual_size);
+    std::vector<thrust::complex<T>> b_real = {{4, 4}, {5, 5}, {6, 6}};
+    std::vector<thrust::complex<T>> b_dual = generate_random_vector<T>(real_size*dual_size);
+
+    thrust::complex<T> *d_a_real, *d_a_dual, *d_b_real, *d_b_dual;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    AllocateAndCopy(b_real, &d_b_real);
+    AllocateAndCopy(b_dual, &d_b_dual);
+
+    thrust::complex<T> *d_result_real, *d_result_dual;
+    cudaMalloc(&d_result_real, real_size * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, real_size*dual_size * sizeof(thrust::complex<T>));
+
+    VectorDualElementwiseMultiplyKernel<T><<<1, real_size*dual_size>>>(
+        d_a_real, d_a_dual, d_b_real, d_b_dual, real_size, dual_size, d_result_real, d_result_dual);
+
+    auto result_real = CopyToHost(d_result_real, real_size);
+    auto result_dual = CopyToHost(d_result_dual, real_size*dual_size);
+
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_b_real);
+    cudaFree(d_b_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    for (int i = 0; i < real_size; ++i) {
+        EXPECT_EQ(result_real[i], a_real[i] * b_real[i]);
+    }
+    std::vector<thrust::complex<T>> check_dual(real_size*dual_size);
+    for (int i = 0; i < real_size; ++i) {
+        for (int j = 0; j < dual_size; ++j) {
+            int off = i*dual_size + j;
+            check_dual[off] = a_real[i] * b_dual[off] + 
+                                           a_dual[off] * b_real[i];
+        }
+    }
+    for (int i = 0; i < real_size*dual_size; ++i) {
+        EXPECT_EQ(result_dual[i], check_dual[i]);
+    }
+}
+
+
+TEST(VectorDualTest, IndexGet) {
+    using T = float;
+
+    // Input sizes and ranges
+    int real_size = 6;
+    int dual_size = 4;
+    int start = 2, end = 5;
+    int dual_start = 1, dual_end = 4;
+
+    // Host input data
+    std::vector<thrust::complex<T>> a_real = generate_random_vector<T>(real_size);
+    std::vector<thrust::complex<T>> a_dual = generate_random_vector<T>(real_size*dual_size);
+
+    // Allocate device memory
+    thrust::complex<T> *d_a_real, *d_a_dual;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+
+    // Output memory
+    thrust::complex<T> *d_result_real, *d_result_dual;
+    cudaMalloc(&d_result_real, (end - start) * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, (end - start) * (dual_end - dual_start) * sizeof(thrust::complex<T>));
+
+    // Launch kernel
+    VectorDualIndexGetKernel<T><<<1, (end - start) * (dual_end - dual_start)>>>(
+        d_a_real, d_a_dual, real_size, dual_size, start, end, dual_start, dual_end, d_result_real, d_result_dual);
+
+    // Copy results to host
+    auto result_real = CopyToHost(d_result_real, end - start);
+    auto result_dual = CopyToHost(d_result_dual, (end - start)*(dual_end - dual_start));
+
+    // Free device memory
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    // Validate results
+    std::vector<thrust::complex<T>> expected_real = {a_real[2], a_real[3], a_real[4]};
+    std::vector<thrust::complex<T>> expected_dual((end-start)*(dual_end - dual_start));
+    int count=0;
+    for (int i = start; i < end; ++i) {
+        for ( int j=dual_start; j<dual_end; ++j) {
+            int off = i*dual_size + j;
+            expected_dual[count] = a_dual[off];
+            count++;
+        }
+    }
+
+    EXPECT_EQ(result_real.size(), expected_real.size());
+    EXPECT_EQ(result_dual.size(), expected_dual.size());
+
+    for (size_t i = 0; i < result_real.size(); ++i) {
+        EXPECT_EQ(result_real[i], expected_real[i]) << "Mismatch at index " << i << " in real part.";
+    }
+    for (size_t i = 0; i < result_dual.size(); ++i) {
+        EXPECT_EQ(result_dual[i], expected_dual[i]) << "Mismatch at index " << i << " in dual part.";
+    }
+}
+
+TEST(VectorDualTest, IndexPut) {
+    using T = float;
+
+    // Input sizes and ranges
+    int real_size = 6;
+    int dual_size = 6;
+    int start = 2, end = 5;
+    int dual_start = 1, dual_end = 4;
+
+    // Host input data (values to insert)
+    std::vector<thrust::complex<T>> input_real = generate_random_vector<T>(end - start);
+    std::vector<thrust::complex<T>> input_dual = generate_random_vector<T>((dual_end - dual_start)*(end - start));
+    // Host output data (initial values of result arrays)
+    std::vector<thrust::complex<T>> result_real= generate_random_vector<T>(real_size);
+    std::vector<thrust::complex<T>> result_dual= generate_random_vector<T>(real_size*dual_size);
+
+    // Allocate device memory
+    thrust::complex<T> *d_input_real, *d_input_dual, *d_result_real, *d_result_dual;
+    AllocateAndCopy(input_real, &d_input_real);
+    AllocateAndCopy(input_dual, &d_input_dual);
+    AllocateAndCopy(result_real, &d_result_real);
+    AllocateAndCopy(result_dual, &d_result_dual);
+
+    // Launch kernel
+    VectorDualIndexPutKernel<T><<<1, real_size*dual_size>>>(
+        d_input_real, d_input_dual, start, end, dual_start, dual_end, d_result_real, d_result_dual, real_size, dual_size);
+
+    // Copy results to host
+    auto result_real_host = CopyToHost(d_result_real, real_size);
+    auto result_dual_host = CopyToHost(d_result_dual, real_size*dual_size);
+
+    // Free device memory
+    cudaFree(d_input_real);
+    cudaFree(d_input_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    // Validate results
+    std::vector<thrust::complex<T>> expected_real(result_real);
+    //Substitute the values in the range [start, end) with the input values
+    for (int i = start; i < end; ++i) {
+        expected_real[i] = input_real[i-start];
+    }
+
+    std::vector<thrust::complex<T>> expected_dual(result_dual);
+
+    //Substitute the values in the range [start, end) with the input values
+    int count=0;
+    for (int i = start; i < end; ++i) {
+        for (int j = dual_start; j < dual_end; ++j) {
+            int off = i*dual_size + j;
+            expected_dual[off] = input_dual[count];
+            count++;
+        }
+    }
+
+    EXPECT_EQ(result_real_host.size(), expected_real.size());
+
+    EXPECT_EQ(result_dual_host.size(), expected_dual.size());
+
+    for (size_t i = 0; i < result_real.size(); ++i) {
+        EXPECT_EQ(result_real_host[i], expected_real[i]) << "Mismatch at index " << i << " in real part.";
+    }
+    for (size_t i = 0; i < result_dual_host.size(); ++i) {
+        EXPECT_EQ(result_dual_host[i], expected_dual[i]) << "Mismatch at index " << i << " in dual part.";
+    }
+}
+
+TEST(VectorDualTest, Square) {
+    using T = float;
+
+    // Input size
+    int real_size = 3;
+    int dual_size = 6; //There are two dual numbers for each real number
+
+    // Host input data
+    std::vector<thrust::complex<T>> a_real = generate_random_vector<T>(real_size);
+    std::vector<thrust::complex<T>> a_dual = generate_random_vector<T>(real_size*dual_size);
+
+    // Allocate device memory
+    thrust::complex<T> *d_a_real, *d_a_dual, *d_result_real, *d_result_dual;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    cudaMalloc(&d_result_real, real_size * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, real_size*dual_size * sizeof(thrust::complex<T>));
+
+    // Launch kernel
+    VectorDualSquareKernel<T><<<1, real_size*dual_size>>>(
+        d_a_real, d_a_dual, real_size, dual_size, d_result_real, d_result_dual);
+
+    // Copy results to host
+    auto result_real = CopyToHost(d_result_real, real_size);
+    auto result_dual = CopyToHost(d_result_dual, real_size*dual_size);
+
+    // Free device memory
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    // Validate results
+    std::vector<thrust::complex<T>> expected_real(real_size);
+    for (int i = 0; i < real_size; ++i) {
+        expected_real[i] = a_real[i] * a_real[i];
+    }
+
+    std::vector<thrust::complex<T>> expected_dual(real_size*dual_size);
+    for (int i = 0; i < real_size; ++i) {
+        for (int j = 0; j < dual_size; ++j) {
+            int off = i*dual_size + j;
+            expected_dual[off] = a_real[i] * a_dual[off] + a_dual[off] * a_real[i];
+        }
+    }
+
+    EXPECT_EQ(result_real.size(), expected_real.size());
+    EXPECT_EQ(result_dual.size(), expected_dual.size());
+
+    for (size_t i = 0; i < result_real.size(); ++i) {
+        EXPECT_EQ(result_real[i], expected_real[i]) << "Mismatch at index " << i << " in real part.";
+    }
+    for (size_t i = 0; i < result_dual.size(); ++i) {
+        EXPECT_EQ(result_dual[i], expected_dual[i]) << "Mismatch at index " << i << " in dual part.";
+    }
+}
+
+
+TEST(VectorDualTest, Pow) {
+    using T = float;
+
+    // Input size and power
+    int real_size = 3;
+    int dual_size = 3;
+    T power = 1.5;  // Example power
+
+    // Host input data
+    std::vector<thrust::complex<T>> a_real = {{1, 2}, {3, 4}, {5, 6}};
+    std::vector<thrust::complex<T>> a_dual = generate_random_vector<T>(real_size*dual_size);
+
+    // Allocate device memory
+    thrust::complex<T> *d_a_real, *d_a_dual, *d_result_real, *d_result_dual;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    cudaMalloc(&d_result_real, real_size * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, real_size * dual_size * sizeof(thrust::complex<T>));
+
+    // Launch kernel
+    VectorDualPowKernel<T><<<1, real_size * dual_size>>>(
+        d_a_real, d_a_dual, power, real_size, dual_size, d_result_real, d_result_dual);
+
+    // Copy results to host
+    auto result_real = CopyToHost(d_result_real, real_size);
+    auto result_dual = CopyToHost(d_result_dual, real_size * dual_size);
+
+    // Free device memory
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    // Validate results
+    std::vector<thrust::complex<T>> expected_real = {
+        pow(a_real[0], power), pow(a_real[1], power), pow(a_real[2], power)};
+    std::vector<thrust::complex<T>> expected_dual(real_size * dual_size);
+
+    for (int i = 0; i < real_size; ++i) {
+        for (int j = 0; j < dual_size; ++j) {
+            int idx = i * dual_size + j;
+            expected_dual[idx] = power * pow(a_real[i], power - 1) * a_dual[idx];
+        }
+    }
+
+    EXPECT_EQ(result_real.size(), expected_real.size());
+    EXPECT_EQ(result_dual.size(), expected_dual.size());
+
+    for (size_t i = 0; i < result_real.size(); ++i) {
+        EXPECT_NEAR(result_real[i].real(), expected_real[i].real(), 1.0e-4) << "Mismatch at index " << i << " in real part.";
+        EXPECT_NEAR(result_real[i].imag(), expected_real[i].imag(), 1.0e-4) << "Mismatch at index " << i << " in real part.";
+    }
+    for (size_t i = 0; i < result_dual.size(); ++i) {
+        EXPECT_NEAR(result_dual[i].real(), expected_dual[i].real(), 1.0e-4) << "Mismatch at index " << i << " in dual part.";
+        EXPECT_NEAR(result_dual[i].imag(), expected_dual[i].imag(), 1.0e-4) << "Mismatch at index " << i << " in dual part.";
+    }
+}
+
+TEST(VectorDualTest, Sqrt) {
+    using T = float;
+
+    // Input size
+    int real_size = 3;
+    int dual_size = 3;
+
+    // Host input data
+    std::vector<thrust::complex<T>> a_real = {{4, 0}, {9, 0}, {16, 0}};
+    std::vector<thrust::complex<T>> a_dual = generate_random_vector<T>(real_size*dual_size);
+
+    // Allocate device memory
+    thrust::complex<T> *d_a_real, *d_a_dual, *d_result_real, *d_result_dual;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    cudaMalloc(&d_result_real, real_size * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, real_size * dual_size * sizeof(thrust::complex<T>));
+
+    // Launch kernel
+    VectorDualSqrtKernel<T><<<1, real_size * dual_size>>>(
+        d_a_real, d_a_dual, real_size, dual_size, d_result_real, d_result_dual);
+
+    // Copy results to host
+    auto result_real = CopyToHost(d_result_real, real_size);
+    auto result_dual = CopyToHost(d_result_dual, real_size * dual_size);
+
+    // Free device memory
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    // Validate results
+    std::vector<thrust::complex<T>> expected_real = {
+        sqrt(a_real[0]), sqrt(a_real[1]), sqrt(a_real[2])};
+    std::vector<thrust::complex<T>> expected_dual(real_size * dual_size);
+
+    for (int i = 0; i < real_size; ++i) {
+        for (int j = 0; j < dual_size; ++j) {
+            int idx = i * dual_size + j;
+            expected_dual[idx] = 0.5 * pow(a_real[i], -0.5) * a_dual[idx];
+        }
+    }
+
+    EXPECT_EQ(result_real.size(), expected_real.size());
+    EXPECT_EQ(result_dual.size(), expected_dual.size());
+
+    for (size_t i = 0; i < result_real.size(); ++i) {
+        EXPECT_NEAR(result_real[i].real(), expected_real[i].real(), 1.0e-4) << "Mismatch at index " << i << " in real part.";
+        EXPECT_NEAR(result_real[i].imag(), expected_real[i].imag(), 1.0e-4) << "Mismatch at index " << i << " in real part.";
+
+    }
+    for (size_t i = 0; i < result_dual.size(); ++i) {
+        EXPECT_NEAR(result_dual[i].real(), expected_dual[i].real(), 1.0e-4) << "Mismatch at index " << i << " in dual part.";
+        EXPECT_NEAR(result_dual[i].imag(), expected_dual[i].imag(), 1.0e-4) << "Mismatch at index " << i << " in dual part.";
+
+    }
+}
+
+
+TEST(VectorHyperDualTest, IndexGet) {
+    using T = float;
+    // Input sizes and ranges
+    int real_size = 6;
+    int dual_size = 6;
+
+    int start_real = 1, end_real = 4;
+    int start_dual = 2, end_dual = 5;
+    int start_hyper = 0, end_hyper = 3;
+
+    // Host input data
+    std::vector<thrust::complex<T>> a_real = {{1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}};
+    std::vector<thrust::complex<T>> a_dual = generate_random_vector<T>(real_size*dual_size);
+    std::vector<thrust::complex<T>> a_hyper = generate_random_vector<T>(real_size*dual_size*dual_size);
+
+    // Allocate device memory
+    thrust::complex<T> *d_a_real, *d_a_dual, *d_a_hyper;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    AllocateAndCopy(a_hyper, &d_a_hyper);
+
+    // Output memory
+    thrust::complex<T> *d_result_real, *d_result_dual, *d_result_hyper;
+    cudaMalloc(&d_result_real, (end_real - start_real) * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, (end_dual - start_dual) * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_hyper, (end_hyper - start_hyper) * sizeof(thrust::complex<T>));
+
+    // Launch kernel
+    VectorHyperDualIndexGetKernel<T><<<1, real_size>>>(
+        d_a_real, d_a_dual, d_a_hyper, start_real, end_real, start_dual, end_dual, start_hyper, end_hyper, 
+        d_result_real, d_result_dual, d_result_hyper);
+
+    // Copy results to host
+    auto result_real = CopyToHost(d_result_real, end_real - start_real);
+    auto result_dual = CopyToHost(d_result_dual, end_dual - start_dual);
+    auto result_hyper = CopyToHost(d_result_hyper, end_hyper - start_hyper);
+
+    // Free device memory
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_a_hyper);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+    cudaFree(d_result_hyper);
+
+    // Validate results
+    std::vector<thrust::complex<T>> expected_real = {a_real[1], a_real[2], a_real[3]};
+    std::vector<thrust::complex<T>> expected_dual = {a_dual[2], a_dual[3], a_dual[4]};
+    std::vector<thrust::complex<T>> expected_hyper = {a_hyper[0], a_hyper[1], a_hyper[2]};
+
+    EXPECT_EQ(result_real.size(), expected_real.size());
+    EXPECT_EQ(result_dual.size(), expected_dual.size());
+    EXPECT_EQ(result_hyper.size(), expected_hyper.size());
+
+    for (size_t i = 0; i < result_real.size(); ++i) {
+        EXPECT_EQ(result_real[i], expected_real[i]) << "Mismatch at index " << i << " in real part.";
+    }
+    for (size_t i = 0; i < result_dual.size(); ++i) {
+        EXPECT_EQ(result_dual[i], expected_dual[i]) << "Mismatch at index " << i << " in dual part.";
+    }
+    for (size_t i = 0; i < result_hyper.size(); ++i) {
+        EXPECT_EQ(result_hyper[i], expected_hyper[i]) << "Mismatch at index " << i << " in hyper part.";
+    }
+}
+
+// Add more tests for IndexGet, IndexPut, ElementwiseMultiply, Square, Pow, and Sqrt similarly.
 // Main entry point for Google Test
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);

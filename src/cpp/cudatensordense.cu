@@ -105,8 +105,8 @@ namespace janus {
     };
     
     template <typename T>
-    __device__ void VectorElementwiseAdd(thrust::complex<T>* a, 
-                                         thrust::complex<T>* b, 
+    __device__ void VectorElementwiseAdd(const thrust::complex<T>* a, 
+                                         const thrust::complex<T>* b, 
                                          int size, 
                                          thrust::complex<T>* result)  {
         // Calculate global thread index
@@ -465,28 +465,48 @@ namespace janus {
     template <typename T>
     class VectorDual {
     public:
-        int real_size_;                    // Vector length
+        int real_size_;               // Vector length
         int dual_size_;               // Dual dimension
-        thrust::complex<T>* real_;   // Real part
-        thrust::complex<T>* dual_;   // Dual part
+        thrust::complex<T>* real_;    // Real part
+        thrust::complex<T>* dual_;    // Dual part
     };
      
     template <typename T>
-    __device__ void VectorRealDualProduct(const VectorDual<T>& a, 
-                                 const VectorDual<T>& b, 
-                                 VectorDual<T>& result) {
+    __device__ void VectorRealDualProduct(const thrust::complex<T>* a_real, 
+                                          const thrust::complex<T>* a_dual,
+                                          const thrust::complex<T>* b_real,
+                                          const thrust::complex<T>* b_dual,
+                                          int real_size,
+                                          int dual_size,
+                                          thrust::complex<T>* result_real,
+                                          thrust::complex<T>* result_dual) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure the thread is within bounds
-        if (idx >= a.real_size_*a.dual_size_) return;
+        if (idx >= real_size*dual_size) return;
 
         // Perform outer multiplication
-        int i = idx / a.dual_size_;
-        if (i ==0) {  
-            result.real_[i] = a.real_[i] * b.real_[i];
+        int i = idx / dual_size;
+        thrust::complex<T> a_realc = a_real[i];
+        thrust::complex<T> b_realc = b_real[i];
+        if (i ==0 ) { 
+            result_real[i] = a_realc * b_realc;
         }
-        int j = idx % a.real_size_;
-        result.dual_[j] = a.real_[i] * b.dual_[j] + b.real_[i] * a.dual_[j];
+        int j = idx % real_size;
+        result_dual[j] = a_realc * b_dual[j] + b_realc * a_dual[j];
+    }
+
+    //Create a global kernel for the real dual product method
+    template <typename T>
+    __global__ void VectorRealDualProductKernel(const thrust::complex<T>* a_real, 
+                                                const thrust::complex<T>* a_dual,
+                                                const thrust::complex<T>* b_real,
+                                                const thrust::complex<T>* b_dual,
+                                                int real_size,
+                                                int dual_size,
+                                                thrust::complex<T>* result_real,
+                                                thrust::complex<T>* result_dual) {
+        VectorRealDualProduct(a_real, a_dual, b_real, b_dual, real_size, dual_size, result_real, result_dual);
     }
 
 
@@ -496,86 +516,348 @@ namespace janus {
      * Given a VectorDual and a range, return a new VectorDual with the elements in the range 
      */
     template <typename T>
-    __device__ void VectorDualIndexGet(const VectorDual<T>& input,   
+    __device__ void VectorDualIndexGet(const thrust::complex<T>* a_real,
+                                       const thrust::complex<T>* a_dual,
+                                       int real_size,
+                                       int dual_size,
                                        int start, 
-                                       int end,
-                                       VectorDual<T>& result) {
-        // Get the real part
-        VectorIndexGet(input.real, start, end, input.real_size_, result.real);
+                                       int end, 
+                                       int dual_start,
+                                       int dual_end,
+                                       thrust::complex<T>* result_real,
+                                       thrust::complex<T>* result_dual) { 
+        int  idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int real_size_dest = end-start;
+        int dual_size_dest = dual_end-dual_start;
 
-        // Get the dual part
-        VectorIndexGet(input.dual, start*input.dual_size_, end*input.dual_size_, 
-                       (end-start-1)*input.dual_size_, result.dual_);
+        int  sz = real_size_dest*dual_size_dest; //Size of the destination vector
+        if ( idx >= sz) return;
+        
+        int real_dest_idx = idx /dual_size_dest;
+        int dual_dest_idx = idx %dual_size_dest;
+        //printf("idx: %d, real_dest_idx: %d, dual_dest_idx: %d\n", idx, real_dest_idx, dual_dest_idx);
+        int real_source_cnt = start+real_dest_idx;
+        int dual_source_cnt = dual_size*real_source_cnt + dual_dest_idx+dual_start;
+        int real_dest_cnt = real_dest_idx;
+        int dual_dest_cnt = real_dest_idx*dual_size_dest + dual_dest_idx;
+        //printf("real_source_cnt: %d, dual_source_cnt: %d, real_dest_cnt: %d, dual_dest_cnt: %d\n", real_source_cnt, dual_source_cnt, real_dest_cnt, dual_dest_cnt);
+        result_real[real_dest_cnt] = a_real[real_source_cnt];
+        result_dual[dual_dest_cnt] = a_dual[dual_source_cnt];
+    }
+
+    //Create a global kernel for the index get method
+    template <typename T>
+    __global__ void VectorDualIndexGetKernel(const thrust::complex<T>* a_real,
+                                             const thrust::complex<T>* a_dual,
+                                             int real_size,
+                                             int dual_size,
+                                             int start, 
+                                             int end, 
+                                             int dual_start,
+                                             int dual_end,
+                                             thrust::complex<T>* result_real,
+                                             thrust::complex<T>* result_dual) {
+        VectorDualIndexGet(a_real, a_dual, real_size, dual_size, start, end, dual_start, dual_end, result_real, result_dual);
     }
 
     /**
      * IndexPut for VectorDual
      */
     template <typename T>
-    __device__ void VectorDualIndexPut(const VectorDual<T>& input, 
+    __device__ void VectorDualIndexPut(const thrust::complex<T>* input_real,
+                                       const thrust::complex<T>* input_dual,  
                                        int start, 
-                                       int end, 
-                                       VectorDual<T>& result) {
-        int real_size = input.real_size_;
-        int dual_size = input.dual_size_;
-        // Put the real part
-        VectorIndexPut(input.real_, start, end, real_size, result.real_);
+                                       int end,
+                                       int dual_start,
+                                       int dual_end, 
+                                       thrust::complex<T>* result_real,
+                                       thrust::complex<T>* result_dual,
+                                       int real_size,
+                                       int dual_size) {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int sz = (end-start)*(dual_end-dual_start);
+        //printf("sz: %d\n", sz);
+        if (idx >= sz) return;
+        int real_src_idx = idx / (dual_end-dual_start);
+        int dual_src_idx = idx % (start-end);
+        //printf("idx: %d, real_src_idx: %d, dual_src_idx: %d\n", idx, real_src_idx, dual_src_idx);
+        int real_src_cnt = real_src_idx;
+        int dual_src_cnt = real_src_idx*(dual_end-dual_start)+ dual_src_idx;
+        //printf("real_src_cnt: %d, dual_src_cnt: %d\n", real_src_cnt, dual_src_cnt);
+        int real_dest_cnt = real_src_idx + start;
+        int dual_dest_cnt = real_dest_cnt*dual_size + dual_src_idx + dual_start;
+        //printf("real_dest_cnt: %d, dual_dest_cnt: %d\n", real_dest_cnt, dual_dest_cnt);
+        result_real[real_dest_cnt] = input_real[real_src_cnt];
+        result_dual[dual_dest_cnt] = input_dual[dual_src_cnt];
+    }
 
-        // Put the dual part
-        VectorIndexPut(input.dual_, start*dual_size, end*dual_size, real_size*dual_size, result.dual_);
+    //Create a global kernel for the index put method
+    template <typename T>
+    __global__ void VectorDualIndexPutKernel(const thrust::complex<T>* input_real,
+                                             const thrust::complex<T>* input_dual,
+                                             int start, 
+                                             int end,
+                                             int dual_start,
+                                             int dual_end, 
+                                             thrust::complex<T>* result_real,
+                                             thrust::complex<T>* result_dual,
+                                             int real_size,
+                                             int dual_size) {
+        VectorDualIndexPut(input_real, input_dual,  start, end, dual_start, dual_end, result_real, result_dual, real_size, dual_size);
     }
 
     /**
      * Elementwise addition of two VectorDual tensors
      */
     template <typename T>
-    __device__ void VectorDualElementwiseAdd(const VectorDual<T>& a, 
-                                             const VectorDual<T>& b, 
-                                             VectorDual<T>& result) {
+    __device__ void VectorDualElementwiseAdd(const thrust::complex<T>* a_real, 
+                                             const thrust::complex<T>* a_dual,
+                                             const thrust::complex<T>* b_real,
+                                             const thrust::complex<T>* b_dual,
+                                             int real_size,
+                                             int dual_size,
+                                             thrust::complex<T>* result_real,
+                                             thrust::complex<T>* result_dual) {
         // Perform elementwise addition of the real part
-        VectorElementwiseAdd(a.real_, b.real_, a.real_size_, result.real_);
+        VectorElementwiseAdd(a_real, b_real, real_size, result_real);
 
-        // Perform elementwise addition of the dual part
-        VectorElementwiseAdd(a.dual_, b.dual_, a.size_*a.dual_size, result.dual_);
+        // Perform elementwise addition for the dual part
+        VectorElementwiseAdd(a_dual, b_dual, dual_size, result_dual);
     }
+
+    //Create a global kernel for the elementwise addition method
+    template <typename T>
+    __global__ void VectorDualElementwiseAddKernel(const thrust::complex<T>* a_real, 
+                                                   const thrust::complex<T>* a_dual,
+                                                   const thrust::complex<T>* b_real,
+                                                   const thrust::complex<T>* b_dual,
+                                                   int real_size,
+                                                   int dual_size,
+                                                   thrust::complex<T>* result_real,
+                                                   thrust::complex<T>* result_dual) {
+        VectorDualElementwiseAdd(a_real, a_dual, b_real, b_dual, real_size, dual_size, result_real, result_dual);
+    }
+
 
     /**
      * Elementwise multiplication of two VectorDual tensors
      */
     template <typename T>
-    __device__ void VectorDualElementwiseMultiply(const VectorDual<T>& a, 
-                                                  const VectorDual<T>& b,
-                                                  VectorDual<T>& result) {
+    __device__ void VectorDualElementwiseMultiply(const thrust::complex<T>* a_real, 
+                                                  const thrust::complex<T>* a_dual,
+                                                  const thrust::complex<T>* b_real,
+                                                  const thrust::complex<T>* b_dual,
+                                                  int real_size,
+                                                  int dual_size,
+                                                  thrust::complex<T>* result_real,
+                                                  thrust::complex<T>* result_dual) {
         // Perform elementwise multiplication of the real part
-        VectorElementwiseMultiply(a.real_, b.real_, a.size_, result.real_);
-
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
         // Perform elementwise multiplication for the dual part
-        VectorRealDualProduct(a.real_, b.dual_, a.real_size_, a.dual_size_, result.dual_);
-        VectorRealDualProduct(b.real_, a.dual_, b.real_size_, b.dual_size_, result.dual_);
+        if ( idx >= real_size*dual_size) return;
+        //Extract the real index
+        int i = idx / dual_size;
+        auto a_realc = a_real[i];
+        auto b_realc = b_real[i];
+        int j = idx%dual_size;
+        //printf("i:%d, j: %d, idx: %d\n", i, j, idx);
+        if (j == 0)
+          result_real[i] = a_realc * b_realc;
+        //Extract the dual index
+        result_dual[idx] = a_realc * b_dual[idx] + b_realc * a_dual[idx];
+    }
+
+    //Create a global kernel for the elementwise multiplication method
+    template <typename T>
+    __global__ void VectorDualElementwiseMultiplyKernel(const thrust::complex<T>* a_real, 
+                                                        const thrust::complex<T>* a_dual,
+                                                        const thrust::complex<T>* b_real,
+                                                        const thrust::complex<T>* b_dual,
+                                                        int real_size,
+                                                        int dual_size,
+                                                        thrust::complex<T>* result_real,
+                                                        thrust::complex<T>* result_dual) {
+        VectorDualElementwiseMultiply(a_real, a_dual, b_real, b_dual, real_size, dual_size, result_real, result_dual);
     }
 
     /**
      * Square each element in the VectorDual tensor
      */
     template <typename T>
-    __device__ void VectorDualSquare(VectorDual<T>& input, 
-                                     VectorDual<T>& result) {
-        VectorDualElementwiseMultiply(input, input, result);
+    __device__ void VectorDualSquare(thrust::complex<T>* a_real, 
+                                     thrust::complex<T>* a_dual,
+                                     int real_size,
+                                     int dual_size,
+                                     thrust::complex<T>* result_real,
+                                     thrust::complex<T>* result_dual) {
+        // Perform elementwise square for the real part
+        VectorDualElementwiseMultiply(a_real, a_dual, a_real, a_dual, real_size, dual_size, result_real, result_dual);
+    }
+
+    //Create a global kernel for the square method
+    template <typename T>
+    __global__ void VectorDualSquareKernel(thrust::complex<T>* a_real, 
+                                           thrust::complex<T>* a_dual,
+                                           int real_size,
+                                           int dual_size,
+                                           thrust::complex<T>* result_real,
+                                           thrust::complex<T>* result_dual) {
+        VectorDualSquare(a_real, a_dual, real_size, dual_size, result_real, result_dual);
+    }
+
+    /**
+     * Pow method for VectorDual
+     */
+    template <typename T>
+    __device__ void VectorDualPow(const thrust::complex<T>* a_real, 
+                                  const thrust::complex<T>* a_dual,
+                                  T power,
+                                  int real_size,
+                                  int dual_size,
+                                  thrust::complex<T>* result_real,
+                                  thrust::complex<T>* result_dual) {
+        // Perform elementwise power for the real part
+        VectorPow(a_real, power, real_size, result_real);
+        // Perform elementwise power for the dual part
+        //The result here is power*(a_real^(power-1))*a_dual
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        if (idx >= real_size*dual_size) return;
+        int real_idx = idx / dual_size;
+        result_dual[idx] = power * pow(a_real[real_idx], power - 1) * a_dual[idx];
+    }
+
+    //Create a global kernel for the pow method
+    template <typename T>
+    __global__ void VectorDualPowKernel(const thrust::complex<T>* a_real, 
+                                        const thrust::complex<T>* a_dual,
+                                        T power,
+                                        int real_size,
+                                        int dual_size,
+                                        thrust::complex<T>* result_real,
+                                        thrust::complex<T>* result_dual) {
+        VectorDualPow(a_real, a_dual, power, real_size, dual_size, result_real, result_dual);
     }
 
     /**
      * Sqrt each element in the VectorDual tensor
      */
     template <typename T>
-    __device__ void VectorDualSqrt(VectorDual<T>& input,
-                                   VectorDual<T>& work, //Intermediate storage 
-                                   VectorDual<T>& result) {
-        // Perform elementwise sqrt for the real part
-        VectorSqrt(input.real_, input.real_size_, result.real_);
-        //The dual part is 0.5*input.real^(-0.5)*input.dual
-        VectorPow(input.real_, -0.5, work.real_);
-        VectorScalarMultiply(work.real_, 0.5, work.real_);
-        VectorRealDualProduct(work.real_, input.dual_, result.dual_);
+    __device__ void VectorDualSqrt(const thrust::complex<T>* a_real, 
+                                   const thrust::complex<T>* a_dual,
+                                   int real_size,
+                                   int dual_size,
+                                   thrust::complex<T>* result_real,
+                                   thrust::complex<T>* result_dual) {
+        VectorDualPow(a_real, a_dual, static_cast<T>(0.5), real_size, dual_size, result_real, result_dual);
     }
+
+    //Create a global kernel for the sqrt method
+    template <typename T>
+    __global__ void VectorDualSqrtKernel(const thrust::complex<T>* a_real, 
+                                         const thrust::complex<T>* a_dual,
+                                         int real_size,
+                                         int dual_size,
+                                         thrust::complex<T>* result_real,
+                                         thrust::complex<T>* result_dual) {
+        VectorDualSqrt(a_real, a_dual, real_size, dual_size, result_real, result_dual);
+    }
+
+    /**
+     * Reduce method for VectorDual 
+     */
+     template <typename T>
+     __device__ void VectorDualReduce(const thrust::complex<T>* a_real,
+                                      const thrust::complex<T>* a_dual, 
+                                      int real_size, 
+                                      int dual_size,
+                                      thrust::complex<T>* result_real,
+                                      thrust::complex<T>* result_dual) {
+        VectorReduce(a_real, real_size, result_real);
+        VectorReduce(a_dual, real_size*dual_size, result_dual);                            
+    }
+
+    /**
+     * Create a global kernel for the reduce method
+     */
+     template <typename T>
+     __global__ void VectorDualReduceKernel(const thrust::complex<T>* a_real,
+                                      const thrust::complex<T>* a_dual, 
+                                      int real_size, 
+                                      int dual_size,
+                                      thrust::complex<T>* result_real,
+                                      thrust::complex<T>* result_dual) {
+        VectorDualReduce(a_real, a_dual, real_size, dual_size, result_real, result_dual);
+    }
+
+
+
+
+
+    /**
+     * HyperDual tensor class
+     */
+    template <typename T>
+    class VectorHyperDual {
+    public:
+        int real_size_;               // Vector length
+        int dual_size_;               // Dual dimension
+        thrust::complex<T>* real_;    // Real part
+        thrust::complex<T>* dual_;    // Dual part
+        thrust::complex<T>* hyper_;   // Hyperdual part
+    };
+
+    /**
+     * IndexGet for HyperDual Vector
+     */
+    template <typename T>
+    __device__ void VectorHyperDualIndexGet(const thrust::complex<T>* a_real,
+                                            const thrust::complex<T>* a_dual,
+                                            const thrust::complex<T>* a_hyper,
+                                            int start_real,
+                                            int end_real,
+                                            int start_dual,
+                                            int end_dual,
+                                            int start_hyper,
+                                            int end_hyper, 
+                                            thrust::complex<T>* result_real,
+                                            thrust::complex<T>* result_dual,
+                                            thrust::complex<T>* result_hyper) {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int size = (end_hyper -  start_hyper-1)*(end_real - start_real-1)*(end_dual - start_dual-1);
+        // Ensure the thread is within bounds
+        if (idx >= size) return;
+        //Extract the real index
+        int real_idx = idx / ((end_dual - start_dual-1)*(end_hyper - start_hyper-1));
+        //Extract the dual index
+        int dual_idx = (idx % ((end_dual - start_dual-1)*(end_hyper - start_hyper-1))) / (end_hyper - start_hyper-1);
+        //Extract the hyper index
+        int hyper_idx = idx % (end_hyper - start_hyper-1);
+        result_real[real_idx] = a_real[real_idx + start_real];
+        result_dual[dual_idx] = a_dual[dual_idx + start_dual];
+        result_hyper[hyper_idx] = a_hyper[hyper_idx + start_hyper];
+
+    }
+
+    //Create a global kernel for the index get method
+    template <typename T>
+    __global__ void VectorHyperDualIndexGetKernel(const thrust::complex<T>* a_real,
+                                                  const thrust::complex<T>* a_dual,
+                                                  const thrust::complex<T>* a_hyper,
+                                                  int start_real,
+                                                  int end_real,
+                                                  int start_dual,
+                                                  int end_dual,
+                                                  int start_hyper,
+                                                  int end_hyper, 
+                                                  thrust::complex<T>* result_real,
+                                                  thrust::complex<T>* result_dual,
+                                                  thrust::complex<T>* result_hyper) {
+        VectorHyperDualIndexGet(a_real, a_dual, a_hyper, start_real, end_real, start_dual, end_dual, start_hyper, end_hyper, result_real, result_dual, result_hyper);
+    }
+
+
+
+
+
 } // namespace Janus
 #endif // _CU_DUAL_TENSOR_HPP
