@@ -33,9 +33,13 @@
 namespace janus {
 
     class VectorBool {
+    private:
+
     public:
         int size_;       // Vector length
         bool* data_;     // Pointer to device memory
+
+
         __device__ VectorBool() : size_(0), data_(nullptr) {}
 
         // Constructor: Initializes the wrapper with device memory
@@ -58,26 +62,39 @@ namespace janus {
             }
             return *this;
         }
-    };
 
-    // Get value at index
+
+    };
+    
+    // Set values in range
+    __device__ void boolIndexPut(bool* input, int start, int end, const bool* subvector) {
+          int idx = threadIdx.x + blockIdx.x * blockDim.x;
+          int range = end - start;
+
+          if (idx < range) {
+            input[start + idx] = subvector[idx];
+          }
+    }
+
+
+    //Wrapper functions
     __device__ void boolIndexGet(bool* input, int start, int end, bool* result) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
         if (idx >= start && idx < end) {
                 result[idx - start] = input[idx];
-        }
-        
+        }    
     }
 
-    // Set values in range
-    __device__ void indexPut(bool* input, int start, int end, const bool* subvector) {
-        int idx = threadIdx.x + blockIdx.x * blockDim.x;
-        int range = end - start;
-
-        if (idx < range) {
-            input[start + idx] = subvector[idx];
-        }
+    __global__ void boolIndexGetKernel(bool* input, int start, int end, bool* result) {
+        boolIndexGet(input, start, end, result);
     }
+
+    __global__ void boolIndexPutKernel(bool* input, int start, int end, bool* subvector) {
+        boolIndexPut(input, start, end, subvector);
+    }
+
+
+
 
 
     template <typename T>
@@ -88,15 +105,26 @@ namespace janus {
     };
     
     template <typename T>
-    __device__ void VectorElementwiseAdd(const Vector<T>& a, const Vector<T>& b, int size, Vector<T>& result)  {
+    __device__ void VectorElementwiseAdd(thrust::complex<T>* a, 
+                                         thrust::complex<T>* b, 
+                                         int size, 
+                                         thrust::complex<T>* result)  {
         // Calculate global thread index
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
         // Boundary check to prevent out-of-bounds access
-        if (idx >= a.size_) return;
+        if (idx >= size) return;
 
         // Perform elementwise addition
-        result.data_[idx] = a.data_[idx] + b.data_[idx];
+        result[idx] = a[idx] + b[idx];
 
+    }
+    
+    template <typename T>
+    __global__ void VectorElementwiseAddKernel(thrust::complex<T>* a, 
+                                               thrust::complex<T>* b,
+                                               int size, 
+                                               thrust::complex<T>* result) {
+        VectorElementwiseAdd(a, b, size, result);
     }
 
 
@@ -131,17 +159,19 @@ namespace janus {
      * @note The function ensures compatibility with MATLAB-like behavior for very small numbers.
      */
     template <typename T>
-    __device__ void VectorSigncond(const Vector<T>& a, 
-                                const Vector<T>& b, 
-                                Vector<T>& result, double tol = 1.0e-6) {
+    __device__ void VectorSigncond(thrust::complex<T>* a, 
+                                   thrust::complex<T>* b,
+                                   int size,  
+                                   thrust::complex<T>* result, double tol = 1.0e-6) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure we are within bounds
-        if (idx >= a.size_ || idx >= b.size_ || idx >= result.size_) return;
-
+        if (idx >= size) return;
+        auto aidx = a[idx];
+        auto bidx = b[idx];
         // Retrieve the real parts of `a` and `b`
-        T a_real = a.data_[idx];
-        T b_real = b.data_[idx];
+        T a_real = aidx.real();
+        T b_real = bidx.real();
 
         // Compute the sign of the real parts with tolerance
         int a_sign = (fabs(static_cast<double>(a_real)) >= tol) ? (a_real >= 0 ? 1 : -1) : 1;
@@ -149,126 +179,191 @@ namespace janus {
 
         // Apply the conditional logic for result computation
         if (b_sign >= 0) {
-            result.data_[idx] = (a_sign >= 0) ? a_real : -a_real;
+            result[idx] = (a_sign >= 0) ? aidx : -aidx;
         } else {
-            result.data_[idx] = (a_sign >= 0) ? -a_real : a_real;
+            result[idx] = (a_sign >= 0) ? -aidx : aidx;
         }
     }
+
+    template <typename T>
+    __global__ void VectorSigncondKernel(thrust::complex<T>* a, 
+                                         thrust::complex<T>* b, 
+                                         int size, 
+                                         thrust::complex<T>* result, double tol) {
+        VectorSigncond(a, b, size, result, tol);
+    }
+
 
 
     /**
      * Add an square() method that squares the complex numbers in the vector. 
      */
     template <typename T>
-    __device__ void VectorSquare(const Vector<T>& input, int size, Vector<T>& result) {
+    __device__ void VectorSquare(const thrust::complex<T>* input, 
+                                 int size, 
+                                 thrust::complex<T>* result) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure the thread is within bounds
-        if (idx >= input.size_) return;
+        if (idx >= size) return;
 
         // Compute the square of the complex number
-        result.data_[idx] = input.data_[idx] * input.data_[idx];
+        result[idx] = input[idx] * input[idx];
+    }
+
+    //Create a global kernel for the square method
+    template <typename T>
+    __global__ void VectorSquareKernel(const thrust::complex<T>* input, 
+                                       int size, 
+                                       thrust::complex<T>* result) {
+        VectorSquare(input, size, result);
     }
 
     /**
      * Multiply each element in the vector by a scalar.
      */
     template <typename T>
-    __device__ void VectorScalarMultiply(Vector<T> &input, T scalar, Vector<T> &result) {
+    __device__ void VectorScalarMultiply(const thrust::complex<T>*input, 
+                                         T scalar,
+                                         int size, 
+                                         thrust::complex<T>*result) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure the thread is within bounds
-        if (idx >= input.size_) return;
+        if (idx >= size) return;
 
         // Compute the product of the complex number and the scalar
-        result.data_[idx] = input.data_[idx] * scalar;
+        result[idx] = input[idx] * scalar;
+    }
+
+    /**
+     * Create a global kernel for the scalar multiply method
+     */
+    template <typename T>
+    __global__ void VectorScalarMultiplyKernel(const thrust::complex<T>* input, 
+                                               T scalar, 
+                                               int size, 
+                                               thrust::complex<T>* result) {
+        VectorScalarMultiply(input, scalar, size, result);
     }
 
     /**
      * Take the reciprocal of each element in the vector.
      */
     template <typename T>
-    __device__ void VectorReciprocal(const Vector<T> &input, Vector<T>& result) {
-        int idx = threadIdx.x + blockIdx.x * blockDim.x;
-
-        // Ensure the thread is within bounds
-        if (idx >= input.size_) return;
-
-        // Compute the reciprocal of the complex number
-        result.data_[idx] = 1.0 / input->data_[idx];
-    }
-
-    /**
-     * Elementise multiplication of two vectors.
-     */
-    template <typename T>
-    __device__ void VectorElementwiseMultiply(const thrust::complex<T>& a, 
-                                              const thrust::complex<T>& b, 
-                                              int size, 
-                                              thrust::complex<T>& result) {
-        int idx = threadIdx.x + blockIdx.x * blockDim.x;
-
-        // Ensure the thread is within bounds
-        if (idx >= a.size_) return;
-
-        // Perform elementwise multiplication
-        result[idx] = a[idx] * b[idx];
-    }
-
-    /**Elementwise Addition */
-    template <typename T>
-    __device__ void VectorElementwiseAdd(const thrust::complex<T>& a, 
-                                         const thrust::complex<T>& b, 
-                                         int size, 
-                                         thrust::complex<T>& result) {
+    __device__ void VectorReciprocal(const thrust::complex<T>*input, 
+                                     int size,
+                                     thrust::complex<T>* result) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure the thread is within bounds
         if (idx >= size) return;
 
-        // Perform elementwise addition
-        result[idx] = a[idx] + b[idx];
+        // Compute the reciprocal of the complex number
+        result[idx] = 1.0 / input[idx];
     }
+
+    /**
+     * Create a global kernel for the reciprocal method
+     */
+    template <typename T>
+    __global__ void VectorReciprocalKernel(const thrust::complex<T>* input, 
+                                           int size, 
+                                           thrust::complex<T>* result) {
+        VectorReciprocal(input, size, result);
+    }
+
+
+    /**
+     * Elementise multiplication of two vectors.
+     */
+    template <typename T>
+    __device__ void VectorElementwiseMultiply(const thrust::complex<T>* a, 
+                                              const thrust::complex<T>* b, 
+                                              int size, 
+                                              thrust::complex<T>* result) {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+        // Ensure the thread is within bounds
+        if (idx >= size) return;
+
+        // Perform elementwise multiplication
+        result[idx] = a[idx] * b[idx];
+    }
+
+    /**
+     * Create a global kernel for the elementwise multiplication method
+     */
+    template <typename T>
+    __global__ void VectorElementwiseMultiplyKernel(const thrust::complex<T>* a, 
+                                                    const thrust::complex<T>* b, 
+                                                    int size, 
+                                                    thrust::complex<T>* result) {
+        VectorElementwiseMultiply(a, b, size, result);
+    }
+
 
     /**
      * Elementwise sqrt
      */
     template <typename T>
-    __device__ void VectorSqrt(Vector<T> &a, 
+    __device__ void VectorSqrt(const thrust::complex<T>*a, 
                                int size, 
-                               Vector<T> &result) {
+                               thrust::complex<T>*result) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure the thread is within bounds
         if (idx >= size) return;
 
         // Perform elementwise sqrt
-        result.data_[idx] = thrust::sqrt(a.data_[idx]);
+        result[idx] = thrust::sqrt(a[idx]);
+    }
+
+    /**
+     * Create a global kernel for the sqrt method
+     */
+    template <typename T>
+    __global__ void VectorSqrtKernel(const thrust::complex<T>* a, 
+                                     int size, 
+                                     thrust::complex<T>* result) {
+        VectorSqrt(a, size, result);
     }
 
     /**
      * Implement the pow method
      */
     template <typename T>
-    __device__ void VectorPow(Vector<T> &a, 
-                            T power, 
-                            Vector<T> &result) {
+    __device__ void VectorPow(const thrust::complex<T>* a, 
+                              T power, 
+                              int size,
+                              thrust::complex<T>* result) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure the thread is within bounds
-        if (idx >= a.size_) return;
+        if (idx >= size) return;
 
         // Perform elementwise power using CUDA's pow function
-        result.data_[idx] = pow(a.data_[idx], power);
+        result[idx] = pow(a[idx], power);
+    }
+
+    /**
+     * Create a global kernel for the pow method
+     */
+    template <typename T>
+    __global__ void VectorPowKernel(const thrust::complex<T>* a, 
+                                    T power, 
+                                    int size, 
+                                    thrust::complex<T>* result) {
+        VectorPow(a, power, size, result);
     }
 
     /**
      * Sum all the elements of the vector into a single complex number.
      */
     template <typename T>
-    __device__ void VectorReduce(const Vector<T> &a, 
+    __device__ void VectorReduce(const thrust::complex<T>* a, 
                                  int size, 
-                                 Vector<T> &result) {
+                                 thrust::complex<T>* result) {
         extern __shared__ thrust::complex<T> shared_data[];
 
         int tid = threadIdx.x;
@@ -285,19 +380,29 @@ namespace janus {
         }
 
         if (tid == 0) {
-            result.data_[blockIdx.x] = shared_data[0];
+            result[blockIdx.x] = shared_data[0];
         }
+    }
+
+    /**
+     * Create a global kernel for the reduce method
+     */
+    template <typename T>
+    __global__ void VectorReduceKernel(const thrust::complex<T>* a, 
+                                       int size, 
+                                       thrust::complex<T>* result) {
+        VectorReduce(a, size, result);
     }
 
     /** Retrieve elements from start to end into a new Vector 
      * This is a device function
      */
     template <typename T>
-    __device__ void VectorIndexGet(const Vector<T>& a, 
+    __device__ void VectorIndexGet(const thrust::complex<T>* a, 
                                    int start, 
                                    int end, 
                                    int size, 
-                                   Vector<T>& result) {
+                                   thrust::complex<T>* result) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure the thread is within bounds
@@ -305,8 +410,18 @@ namespace janus {
 
         // Copy the elements from start to end
         if (idx >= start && idx < end) {
-            result.data_[idx - start] = a.data_[idx];
+            result[idx - start] = a[idx];
         }
+    }
+
+    //Create a global kernel for the index get method
+    template <typename T>
+    __global__ void VectorIndexGetKernel(const thrust::complex<T>* a, 
+                                         int start, 
+                                         int end, 
+                                         int size, 
+                                         thrust::complex<T>* result) {
+        VectorIndexGet(a, start, end, size, result);
     }
 
 
@@ -315,11 +430,11 @@ namespace janus {
      * Put the elements from start to end from input Vector into the result vector
      */
     template<typename T>
-    __device__ void VectorIndexPut(const Vector<T>& input, 
+    __device__ void VectorIndexPut(const thrust::complex<T>* input, 
                                    int start, 
                                    int end, 
                                    int size, 
-                                   Vector<T>& result) {
+                                   thrust::complex<T>* result) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
         // Ensure the thread is within bounds
@@ -327,10 +442,26 @@ namespace janus {
 
         // Copy the elements from start to end
         if (idx >= start && idx < end) {
-            result.data_[idx] = input.data_[idx - start];
+            result[idx] = input[idx - start];
         }
     }
+
+
+    //Create a global kernel for the index put method
+    template <typename T>
+    __global__ void VectorIndexPutKernel(const thrust::complex<T>* input, 
+                                         int start, 
+                                         int end, 
+                                         int size, 
+                                         thrust::complex<T>* result) {
+        VectorIndexPut(input, start, end, size, result);
+    }
     
+
+
+    /**
+     * Dual tensor class
+     */
     template <typename T>
     class VectorDual {
     public:
@@ -446,22 +577,5 @@ namespace janus {
         VectorScalarMultiply(work.real_, 0.5, work.real_);
         VectorRealDualProduct(work.real_, input.dual_, result.dual_);
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 } // namespace Janus
 #endif // _CU_DUAL_TENSOR_HPP
