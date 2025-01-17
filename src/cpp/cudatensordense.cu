@@ -32,6 +32,87 @@
 
 namespace janus {
 
+    /**
+     * Given index into a hyperdual tensor for a vector, 
+     * derive the indexes into the real, dual and hyperdual parts
+     */
+    __device__ void get_hyperdual_vector_offsets(const int i, const int k,  const int l, 
+                                          const int rows, const int dual, 
+                                          int *off_i, int *off_k, int *off_l) {
+        *off_i = i;
+        *off_k = i*dual+k;
+        *off_l = i*dual*dual+k*dual+l;
+    }
+
+    //create a global wrapper
+    __global__ void get_hyperdual_vector_offsets_kernel(const int i, const int k,  const int l, 
+                                                 const int rows, const int dual, 
+                                                 int *off_i, int *off_k, int *off_l) {
+        get_hyperdual_vector_offsets(i, k, l, rows, dual, off_i, off_k, off_l);
+    }
+
+    __device__ void get_hyperdual_indexes(const int offi, const int offj, const int offk, const int offl,
+                                          const int rows, const int cols, const int dual, 
+                                          int &i, int &j, int &k, int &l) {
+        i = offi;
+        j = (offj / rows) % cols;
+        k = (offk / (rows*cols)) % dual;
+        l = offl % dual;
+    }
+
+    //create a global wrapper
+    __global__ void get_hyperdual_indexes_kernel(const int offi, const int offj, const int offk, const int offl,
+                                                 const int rows, const int cols, const int dual, 
+                                                 int &i, int &j, int &k, int &l) {
+        get_hyperdual_indexes(offi, offj, offk, offl, rows, cols, dual, i, j, k, l);
+    }
+    
+
+    /**
+     * Given a single index into the hyperdual part (hessian)
+     * Derive the indexes into the real, dual and hyperdual parts
+     * that the index corresponds to
+     */
+    __device__ void get_tensor_indxs_from_hyperdual_vector_offset(const int off, //Offset
+                                                                  const int rows, //Number of rows
+                                                                  const int dual, //Dual dimension
+                                                                  int &i,  //Number of rows
+                                                                  int &k,  //Dual index (rows) (also row into the hyperdual part)
+                                                                  int &l) { //Hyperdual index cols
+        //off = i*dual*dual + k*dual + l
+        i = off / (dual*dual);
+        k = off/dual % dual;
+        l = off % dual;
+    }
+
+    //create a global wrapper
+    __global__ void get_tensor_indxs_from_hyperdual_vector_offset_kernel(const int off, //Offset
+                                                                         const int rows, //Number of rows
+                                                                         const int dual, //Dual dimension
+                                                                         int &i,  //Number of rows
+                                                                         int &k,  //Dual index (rows) (also row into the hyperdual part)
+                                                                         int &l) { //Hyperdual index cols
+        get_tensor_indxs_from_hyperdual_vector_offset(off, rows, dual, i, k, l);
+    }
+
+
+    __device__ void get_hyperdual_vector_offsets_from_tensor_indxs(const int i, const int k, const int l, 
+                                                            const int rows, const int dual, 
+                                                            int *off_i, int* off_k, int* off_l) {
+        *off_i= i;                           //real
+        *off_k= i*dual + k;                  //dual (also hyper dual row)
+        *off_l= i*dual*dual + l;                  //hyperdual index ( also hyperdual col)
+    }
+
+    //create a global wrapper
+    __global__ void get_hyperdual_vector_offsets_from_tensor_indxs_kernel(const int i, const int k, const int l, 
+                                                             const int rows, const int dual, 
+                                                             int* off_i, int *off_l, int *off_k) {
+        return get_hyperdual_vector_offsets_from_tensor_indxs(i, k, l, rows, dual, off_i, off_l, off_k);
+    }
+
+
+
     class VectorBool {
     private:
 
@@ -522,27 +603,25 @@ namespace janus {
                                        int dual_size,
                                        int start, 
                                        int end, 
-                                       int dual_start,
-                                       int dual_end,
                                        thrust::complex<T>* result_real,
                                        thrust::complex<T>* result_dual) { 
         int  idx = threadIdx.x + blockIdx.x * blockDim.x;
-        int real_size_dest = end-start;
-        int dual_size_dest = dual_end-dual_start;
+        int sz = (end-start)*dual_size;
 
-        int  sz = real_size_dest*dual_size_dest; //Size of the destination vector
         if ( idx >= sz) return;
-        
-        int real_dest_idx = idx /dual_size_dest;
-        int dual_dest_idx = idx %dual_size_dest;
+        //off = i*dual_size+j;
+        int real_dest_idx = idx/dual_size;
+        int dual_dest_idx = idx%dual_size;
+        int real_dest_off = real_dest_idx;
+        int dual_dest_off = real_dest_off*dual_size+dual_dest_idx;
         //printf("idx: %d, real_dest_idx: %d, dual_dest_idx: %d\n", idx, real_dest_idx, dual_dest_idx);
-        int real_source_cnt = start+real_dest_idx;
-        int dual_source_cnt = dual_size*real_source_cnt + dual_dest_idx+dual_start;
-        int real_dest_cnt = real_dest_idx;
-        int dual_dest_cnt = real_dest_idx*dual_size_dest + dual_dest_idx;
-        //printf("real_source_cnt: %d, dual_source_cnt: %d, real_dest_cnt: %d, dual_dest_cnt: %d\n", real_source_cnt, dual_source_cnt, real_dest_cnt, dual_dest_cnt);
-        result_real[real_dest_cnt] = a_real[real_source_cnt];
-        result_dual[dual_dest_cnt] = a_dual[dual_source_cnt];
+        int real_source_off = start+real_dest_idx;
+        int dual_source_off = real_source_off*dual_size+dual_dest_idx;
+        if ( dual_dest_idx == 0) {
+          result_real[real_dest_off] = a_real[real_source_off];
+        }
+        result_dual[dual_dest_off] = a_dual[dual_source_off];
+        
     }
 
     //Create a global kernel for the index get method
@@ -553,11 +632,9 @@ namespace janus {
                                              int dual_size,
                                              int start, 
                                              int end, 
-                                             int dual_start,
-                                             int dual_end,
                                              thrust::complex<T>* result_real,
                                              thrust::complex<T>* result_dual) {
-        VectorDualIndexGet(a_real, a_dual, real_size, dual_size, start, end, dual_start, dual_end, result_real, result_dual);
+        VectorDualIndexGet(a_real, a_dual, real_size, dual_size, start, end, result_real, result_dual);
     }
 
     /**
@@ -568,27 +645,28 @@ namespace janus {
                                        const thrust::complex<T>* input_dual,  
                                        int start, 
                                        int end,
-                                       int dual_start,
-                                       int dual_end, 
                                        thrust::complex<T>* result_real,
                                        thrust::complex<T>* result_dual,
                                        int real_size,
                                        int dual_size) {
         int idx = threadIdx.x + blockIdx.x * blockDim.x;
-        int sz = (end-start)*(dual_end-dual_start);
+        int sz = (end-start)*dual_size;
         //printf("sz: %d\n", sz);
         if (idx >= sz) return;
-        int real_src_idx = idx / (dual_end-dual_start);
-        int dual_src_idx = idx % (start-end);
+        //idx = real_src_idx*dual_size+dual_src_idx
+        int real_src_idx = idx / dual_size;
+        int dual_src_idx = idx % dual_size;
         //printf("idx: %d, real_src_idx: %d, dual_src_idx: %d\n", idx, real_src_idx, dual_src_idx);
-        int real_src_cnt = real_src_idx;
-        int dual_src_cnt = real_src_idx*(dual_end-dual_start)+ dual_src_idx;
+        int real_src_off = real_src_idx;
+        int dual_src_off = real_src_idx*dual_size+dual_src_idx;
         //printf("real_src_cnt: %d, dual_src_cnt: %d\n", real_src_cnt, dual_src_cnt);
-        int real_dest_cnt = real_src_idx + start;
-        int dual_dest_cnt = real_dest_cnt*dual_size + dual_src_idx + dual_start;
+        int real_dest_off = real_src_idx + start;
+        int dual_dest_off = real_dest_off*dual_size+dual_src_idx;
         //printf("real_dest_cnt: %d, dual_dest_cnt: %d\n", real_dest_cnt, dual_dest_cnt);
-        result_real[real_dest_cnt] = input_real[real_src_cnt];
-        result_dual[dual_dest_cnt] = input_dual[dual_src_cnt];
+        if ( dual_src_idx == 0) {
+          result_real[real_dest_off] = input_real[real_src_off];
+        }
+        result_dual[dual_dest_off] = input_dual[dual_src_off];
     }
 
     //Create a global kernel for the index put method
@@ -597,13 +675,11 @@ namespace janus {
                                              const thrust::complex<T>* input_dual,
                                              int start, 
                                              int end,
-                                             int dual_start,
-                                             int dual_end, 
                                              thrust::complex<T>* result_real,
                                              thrust::complex<T>* result_dual,
                                              int real_size,
                                              int dual_size) {
-        VectorDualIndexPut(input_real, input_dual,  start, end, dual_start, dual_end, result_real, result_dual, real_size, dual_size);
+        VectorDualIndexPut(input_real, input_dual,  start, end, result_real, result_dual, real_size, dual_size);
     }
 
     /**
@@ -807,35 +883,65 @@ namespace janus {
     };
 
     /**
-     * IndexGet for HyperDual Vector
+     * IndexGet for HyperDual Vector.  Note the positions of the hessian
+     * are completely determined by the real and dual indexes because
+     * it doesn't make sense to have a hessian with different indexes than the dual
      */
     template <typename T>
-    __device__ void VectorHyperDualIndexGet(const thrust::complex<T>* a_real,
+    __device__ void VectorHyperDualIndexGet(//Input
+                                            const thrust::complex<T>* a_real,
                                             const thrust::complex<T>* a_dual,
                                             const thrust::complex<T>* a_hyper,
+                                            int real_size,
+                                            int dual_size,
                                             int start_real,
                                             int end_real,
-                                            int start_dual,
-                                            int end_dual,
-                                            int start_hyper,
-                                            int end_hyper, 
+                                            //Output
                                             thrust::complex<T>* result_real,
                                             thrust::complex<T>* result_dual,
                                             thrust::complex<T>* result_hyper) {
-        int idx = threadIdx.x + blockIdx.x * blockDim.x;
-        int size = (end_hyper -  start_hyper-1)*(end_real - start_real-1)*(end_dual - start_dual-1);
+        int off = threadIdx.x + blockIdx.x * blockDim.x;
         // Ensure the thread is within bounds
-        if (idx >= size) return;
-        //Extract the real index
-        int real_idx = idx / ((end_dual - start_dual-1)*(end_hyper - start_hyper-1));
-        //Extract the dual index
-        int dual_idx = (idx % ((end_dual - start_dual-1)*(end_hyper - start_hyper-1))) / (end_hyper - start_hyper-1);
-        //Extract the hyper index
-        int hyper_idx = idx % (end_hyper - start_hyper-1);
-        result_real[real_idx] = a_real[real_idx + start_real];
-        result_dual[dual_idx] = a_dual[dual_idx + start_dual];
-        result_hyper[hyper_idx] = a_hyper[hyper_idx + start_hyper];
+        //This is a single index into the hyperdual part but two indexes that describe it
+        int sz = (end_real-start_real)*dual_size*dual_size;
+        if (off >= sz) return;
+        //printf("off: %d\n", off);
 
+        //Extract the real index here i is the real index and l is the index into the dual
+        //part and l is the index into the column of the hyperdual part
+        int i,k,l,o;  //Indexes into the resulting tensor(not the original tensor)
+        i=off/(dual_size*dual_size);
+        l=(off - i*dual_size*dual_size)/dual_size; //Dual index and row hyperdual index
+        k = l; //Dual index
+        o=(off - i*dual_size*dual_size-l*dual_size); //Hyperdual index
+        //printf("off : %d, i: %d, k(l): %d, o: %d\n", off, i, l,o);
+        //Calculate the offsets into the destination tensor
+        int off_dest_r = i;
+        int off_dest_d = i*dual_size + k;
+        int off_dest_h = i*dual_size*dual_size + l*dual_size + o;
+
+
+        //We need to map this into indexes for the original tensor
+        int i_src = i + start_real;
+        //The rest are the same
+        int k_src = k;
+        int l_src = l;
+        int o_src = o;
+        //printf("off : %d, i_src: %d, k_src: %d, l_src: %d, o_src: %d\n", off, i_src, k_src, l_src, o_src);
+
+        //Get the offset into the original tensor
+        int off_src_r = i_src;
+        int off_src_d = i_src*dual_size + k_src;
+        int off_src_h = i_src*dual_size*dual_size + l_src*dual_size + o_src;
+        //printf("off : %d, off_r: %d, off_d: %d, off_h: %d\n", off, off_src_r, off_src_d, off_src_h);
+        //Simply copy the values
+        if (k == 0 ) {
+            result_real[off_dest_r] = a_real[off_src_r];
+        }
+        if (o == 0) {
+            result_dual[off_dest_d] = a_dual[off_src_d];
+        }
+        result_hyper[off_dest_h] = a_hyper[off_src_h];
     }
 
     //Create a global kernel for the index get method
@@ -843,18 +949,89 @@ namespace janus {
     __global__ void VectorHyperDualIndexGetKernel(const thrust::complex<T>* a_real,
                                                   const thrust::complex<T>* a_dual,
                                                   const thrust::complex<T>* a_hyper,
+                                                  int real_size,
+                                                  int dual_size,
                                                   int start_real,
                                                   int end_real,
-                                                  int start_dual,
-                                                  int end_dual,
-                                                  int start_hyper,
-                                                  int end_hyper, 
                                                   thrust::complex<T>* result_real,
                                                   thrust::complex<T>* result_dual,
                                                   thrust::complex<T>* result_hyper) {
-        VectorHyperDualIndexGet(a_real, a_dual, a_hyper, start_real, end_real, start_dual, end_dual, start_hyper, end_hyper, result_real, result_dual, result_hyper);
+        VectorHyperDualIndexGet(a_real, a_dual, a_hyper, real_size, dual_size, 
+                                start_real, end_real, 
+                                result_real, result_dual, result_hyper);
     }
 
+    /**
+     * IndexPut in HyperDual Vector
+     * Given a range of indexes, put the values from the input into the result
+     * vector
+     */
+    template <typename T>
+    __device__ void VectorHyperDualIndexPut(const thrust::complex<T>* a_real,
+                                                  const thrust::complex<T>* a_dual,
+                                                  const thrust::complex<T>* a_hyper,
+                                                  int real_size, //Size of the input tensor
+                                                  int dual_size, //Common to input and output tensors
+                                                  int start_real, //For the result tensor
+                                                  int end_real,
+                                                  thrust::complex<T>* result_real,
+                                                  thrust::complex<T>* result_dual,
+                                                  thrust::complex<T>* result_hyper) {
+        int off = threadIdx.x + blockIdx.x * blockDim.x;
+        assert(real_size == end_real-start_real);
+        // Ensure the thread is within bounds
+        //This is a single index into the hyperdual part but two indexes that describe it
+        int sz = real_size*dual_size*dual_size;
+        if (off >= sz) return;
+        //Source Indexes come first since since the off represents the source
+        //Map this to the source tensor
+        //First the source indexes
+        int i_src, k_src, l_src, o_src;
+        i_src = off/(dual_size*dual_size);
+        k_src = (off - i_src*dual_size*dual_size)/dual_size;
+        l_src = k_src;
+        o_src = (off - i_src*dual_size*dual_size-l_src*dual_size);
+        //Now the offsets for the source
+        int off_src_r = i_src;
+        int off_src_d = i_src*dual_size + k_src;
+        int off_src_h = i_src*dual_size*dual_size + l_src*dual_size + o_src;
+
+        int i_dest, k_dest, l_dest, o_dest;
+        i_dest = i_src+start_real;
+        k_dest = k_src;
+        l_dest = l_src;
+        o_dest = o_src;
+        //Now calculate the destination offsets
+        int off_dest_r = i_dest;
+        int off_dest_d = i_dest*dual_size + k_dest;
+        int off_dest_h = i_dest*dual_size*dual_size + l_dest*dual_size + o_dest;
+
+        //Efficiently copy into the destination
+        //if (k_dest == 0) {
+            result_real[off_dest_r] = a_real[off_src_r];
+        //}
+        //if (o_dest == 0) {
+            result_dual[off_dest_d] = a_dual[off_src_d];
+        //}
+        result_hyper[off_dest_h] = a_hyper[off_src_h];
+    }
+
+    //Create a global wrapper
+    template <typename T>
+    __global__ void VectorHyperDualIndexPutKernel(const thrust::complex<T>* a_real,
+                                                  const thrust::complex<T>* a_dual,
+                                                  const thrust::complex<T>* a_hyper,
+                                                  int real_size,
+                                                  int dual_size,
+                                                  int start_real,
+                                                  int end_real,
+                                                  thrust::complex<T>* result_real,
+                                                  thrust::complex<T>* result_dual,
+                                                  thrust::complex<T>* result_hyper) {
+        VectorHyperDualIndexPut(a_real, a_dual, a_hyper, real_size, dual_size, 
+                                      start_real, end_real, 
+                                      result_real, result_dual, result_hyper);
+    }
 
 
 

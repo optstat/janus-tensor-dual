@@ -583,7 +583,6 @@ TEST(VectorDualTest, IndexGet) {
     int real_size = 6;
     int dual_size = 4;
     int start = 2, end = 5;
-    int dual_start = 1, dual_end = 4;
 
     // Host input data
     std::vector<thrust::complex<T>> a_real = generate_random_vector<T>(real_size);
@@ -597,15 +596,15 @@ TEST(VectorDualTest, IndexGet) {
     // Output memory
     thrust::complex<T> *d_result_real, *d_result_dual;
     cudaMalloc(&d_result_real, (end - start) * sizeof(thrust::complex<T>));
-    cudaMalloc(&d_result_dual, (end - start) * (dual_end - dual_start) * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_dual, (end - start) * dual_size * sizeof(thrust::complex<T>));
 
     // Launch kernel
-    VectorDualIndexGetKernel<T><<<1, (end - start) * (dual_end - dual_start)>>>(
-        d_a_real, d_a_dual, real_size, dual_size, start, end, dual_start, dual_end, d_result_real, d_result_dual);
+    VectorDualIndexGetKernel<T><<<1, (end - start) * dual_size>>>(
+        d_a_real, d_a_dual, real_size, dual_size, start, end, d_result_real, d_result_dual);
 
     // Copy results to host
     auto result_real = CopyToHost(d_result_real, end - start);
-    auto result_dual = CopyToHost(d_result_dual, (end - start)*(dual_end - dual_start));
+    auto result_dual = CopyToHost(d_result_dual, (end - start)*dual_size);
 
     // Free device memory
     cudaFree(d_a_real);
@@ -615,10 +614,10 @@ TEST(VectorDualTest, IndexGet) {
 
     // Validate results
     std::vector<thrust::complex<T>> expected_real = {a_real[2], a_real[3], a_real[4]};
-    std::vector<thrust::complex<T>> expected_dual((end-start)*(dual_end - dual_start));
+    std::vector<thrust::complex<T>> expected_dual((end-start)*dual_size);
     int count=0;
     for (int i = start; i < end; ++i) {
-        for ( int j=dual_start; j<dual_end; ++j) {
+        for ( int j=0; j<dual_size; ++j) {
             int off = i*dual_size + j;
             expected_dual[count] = a_dual[off];
             count++;
@@ -643,11 +642,10 @@ TEST(VectorDualTest, IndexPut) {
     int real_size = 6;
     int dual_size = 6;
     int start = 2, end = 5;
-    int dual_start = 1, dual_end = 4;
 
     // Host input data (values to insert)
     std::vector<thrust::complex<T>> input_real = generate_random_vector<T>(end - start);
-    std::vector<thrust::complex<T>> input_dual = generate_random_vector<T>((dual_end - dual_start)*(end - start));
+    std::vector<thrust::complex<T>> input_dual = generate_random_vector<T>(dual_size*(end - start));
     // Host output data (initial values of result arrays)
     std::vector<thrust::complex<T>> result_real= generate_random_vector<T>(real_size);
     std::vector<thrust::complex<T>> result_dual= generate_random_vector<T>(real_size*dual_size);
@@ -660,8 +658,8 @@ TEST(VectorDualTest, IndexPut) {
     AllocateAndCopy(result_dual, &d_result_dual);
 
     // Launch kernel
-    VectorDualIndexPutKernel<T><<<1, real_size*dual_size>>>(
-        d_input_real, d_input_dual, start, end, dual_start, dual_end, d_result_real, d_result_dual, real_size, dual_size);
+    VectorDualIndexPutKernel<T><<<1, (end - start)*dual_size>>>(
+        d_input_real, d_input_dual, start, end, d_result_real, d_result_dual, real_size, dual_size);
 
     // Copy results to host
     auto result_real_host = CopyToHost(d_result_real, real_size);
@@ -685,7 +683,7 @@ TEST(VectorDualTest, IndexPut) {
     //Substitute the values in the range [start, end) with the input values
     int count=0;
     for (int i = start; i < end; ++i) {
-        for (int j = dual_start; j < dual_end; ++j) {
+        for (int j = 0; j < dual_size; ++j) {
             int off = i*dual_size + j;
             expected_dual[off] = input_dual[count];
             count++;
@@ -880,6 +878,51 @@ TEST(VectorDualTest, Sqrt) {
 }
 
 
+
+// Test case for the get_hyperdual_vector_offsets_kernel
+TEST(GetHyperdualVectorOffsetsKernel, ComputesOffsetsCorrectly) {
+    // Input parameters
+    int i = 2;
+    int k = 1;
+    int l = 3;
+    int rows = 5; // Not used in the kernel but retained for completeness
+    int dual = 4;
+
+    // Device pointers for outputs
+    int *d_off_i, *d_off_k, *d_off_l;
+
+    // Host pointers for validation
+    int h_off_i, h_off_k, h_off_l;
+
+    // Allocate device memory
+    ASSERT_EQ(cudaMalloc((void **)&d_off_i, sizeof(int)), cudaSuccess);
+    ASSERT_EQ(cudaMalloc((void **)&d_off_k, sizeof(int)), cudaSuccess);
+    ASSERT_EQ(cudaMalloc((void **)&d_off_l, sizeof(int)), cudaSuccess);
+
+    // Launch the kernel (1 thread)
+    get_hyperdual_vector_offsets_kernel<<<1, 1>>>(i, k, l, rows, dual, d_off_i, d_off_k, d_off_l);
+
+    // Copy results back to host
+    ASSERT_EQ(cudaMemcpy(&h_off_i, d_off_i, sizeof(int), cudaMemcpyDeviceToHost), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(&h_off_k, d_off_k, sizeof(int), cudaMemcpyDeviceToHost), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(&h_off_l, d_off_l, sizeof(int), cudaMemcpyDeviceToHost), cudaSuccess);
+
+    // Free device memory
+    cudaFree(d_off_i);
+    cudaFree(d_off_k);
+    cudaFree(d_off_l);
+
+    // Expected results
+    int expected_off_i = i;
+    int expected_off_k = i * dual + k;
+    int expected_off_l = i * dual * dual + k * dual + l;
+
+    // Validate results
+    EXPECT_EQ(h_off_i, expected_off_i);
+    EXPECT_EQ(h_off_k, expected_off_k);
+    EXPECT_EQ(h_off_l, expected_off_l);
+}
+
 TEST(VectorHyperDualTest, IndexGet) {
     using T = float;
     // Input sizes and ranges
@@ -887,35 +930,36 @@ TEST(VectorHyperDualTest, IndexGet) {
     int dual_size = 6;
 
     int start_real = 1, end_real = 4;
-    int start_dual = 2, end_dual = 5;
-    int start_hyper = 0, end_hyper = 3;
 
     // Host input data
-    std::vector<thrust::complex<T>> a_real = {{1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}};
+    std::vector<thrust::complex<T>> a_real = generate_random_vector<T>(real_size);
     std::vector<thrust::complex<T>> a_dual = generate_random_vector<T>(real_size*dual_size);
     std::vector<thrust::complex<T>> a_hyper = generate_random_vector<T>(real_size*dual_size*dual_size);
 
     // Allocate device memory
     thrust::complex<T> *d_a_real, *d_a_dual, *d_a_hyper;
-    AllocateAndCopy(a_real, &d_a_real);
-    AllocateAndCopy(a_dual, &d_a_dual);
+    AllocateAndCopy(a_real,  &d_a_real);
+    AllocateAndCopy(a_dual,  &d_a_dual);
     AllocateAndCopy(a_hyper, &d_a_hyper);
 
     // Output memory
     thrust::complex<T> *d_result_real, *d_result_dual, *d_result_hyper;
     cudaMalloc(&d_result_real, (end_real - start_real) * sizeof(thrust::complex<T>));
-    cudaMalloc(&d_result_dual, (end_dual - start_dual) * sizeof(thrust::complex<T>));
-    cudaMalloc(&d_result_hyper, (end_hyper - start_hyper) * sizeof(thrust::complex<T>));
-
+    cudaMalloc(&d_result_dual, dual_size*(end_real - start_real) * sizeof(thrust::complex<T>));
+    cudaMalloc(&d_result_hyper, dual_size*dual_size*(end_real - start_real) * sizeof(thrust::complex<T>));
+    int result_real_size = end_real - start_real;
+    int result_dual_size = (end_real - start_real)*dual_size;
+    int result_hyper_size = (end_real - start_real)*dual_size*dual_size;
     // Launch kernel
-    VectorHyperDualIndexGetKernel<T><<<1, real_size>>>(
-        d_a_real, d_a_dual, d_a_hyper, start_real, end_real, start_dual, end_dual, start_hyper, end_hyper, 
+    //We need to launch at least (end_real - start_real)*(end_dual - start_dual)*(end_dual - start_dual) threads
+    VectorHyperDualIndexGetKernel<T><<<1, result_hyper_size>>>(
+        d_a_real, d_a_dual, d_a_hyper, real_size, dual_size, start_real, end_real,  
         d_result_real, d_result_dual, d_result_hyper);
 
     // Copy results to host
     auto result_real = CopyToHost(d_result_real, end_real - start_real);
-    auto result_dual = CopyToHost(d_result_dual, end_dual - start_dual);
-    auto result_hyper = CopyToHost(d_result_hyper, end_hyper - start_hyper);
+    auto result_dual = CopyToHost(d_result_dual, (end_real - start_real)*dual_size);
+    auto result_hyper = CopyToHost(d_result_hyper, (end_real - start_real)*dual_size*dual_size);
 
     // Free device memory
     cudaFree(d_a_real);
@@ -926,13 +970,34 @@ TEST(VectorHyperDualTest, IndexGet) {
     cudaFree(d_result_hyper);
 
     // Validate results
-    std::vector<thrust::complex<T>> expected_real = {a_real[1], a_real[2], a_real[3]};
-    std::vector<thrust::complex<T>> expected_dual = {a_dual[2], a_dual[3], a_dual[4]};
-    std::vector<thrust::complex<T>> expected_hyper = {a_hyper[0], a_hyper[1], a_hyper[2]};
+    std::vector<thrust::complex<T>> expected_real(result_real_size);
+    std::vector<thrust::complex<T>> expected_dual(result_dual_size);
+    std::vector<thrust::complex<T>> expected_hyper(result_hyper_size);
 
     EXPECT_EQ(result_real.size(), expected_real.size());
     EXPECT_EQ(result_dual.size(), expected_dual.size());
     EXPECT_EQ(result_hyper.size(), expected_hyper.size());
+    for ( int i=0; i<result_real_size; ++i) {
+        expected_real[i] = a_real[start_real + i];
+    }
+    int count=0;
+    for (int i = start_real; i < end_real; ++i) {
+        for ( int j=0; j<dual_size; ++j) {
+            int off = i*dual_size + j;
+            expected_dual[count] = a_dual[off];
+            count++;
+        }
+    }
+    count=0;
+    for (int i = start_real; i < end_real; ++i) {
+        for ( int j=0; j< dual_size; ++j) {
+            for ( int k=0; k<dual_size; ++k) {
+                int off = i*dual_size*dual_size + j*dual_size + k;
+                expected_hyper[count] = a_hyper[off];
+                count++;
+            }
+        }
+    }
 
     for (size_t i = 0; i < result_real.size(); ++i) {
         EXPECT_EQ(result_real[i], expected_real[i]) << "Mismatch at index " << i << " in real part.";
@@ -944,6 +1009,93 @@ TEST(VectorHyperDualTest, IndexGet) {
         EXPECT_EQ(result_hyper[i], expected_hyper[i]) << "Mismatch at index " << i << " in hyper part.";
     }
 }
+
+TEST(VectorHyperDualTest, IndexPut) {
+    using T = float;
+    // Input sizes and ranges
+    int real_size = 6;
+    int dual_size = 6;
+
+    int start_real = 1, end_real = 4;
+
+    // Host output data
+    std::vector<thrust::complex<T>> dest_real = generate_random_vector<T>(real_size);
+    std::vector<thrust::complex<T>> dest_dual = generate_random_vector<T>(real_size*dual_size);
+    std::vector<thrust::complex<T>> dest_hyper = generate_random_vector<T>(real_size*dual_size*dual_size);
+
+    // Host input data (values to insert)
+    std::vector<thrust::complex<T>> input_real = generate_random_vector<T>(end_real - start_real);
+    std::vector<thrust::complex<T>> input_dual = generate_random_vector<T>(dual_size*(end_real - start_real));
+    std::vector<thrust::complex<T>> input_hyper = generate_random_vector<T>(dual_size*dual_size*(end_real - start_real));
+
+
+    // Copy the original values to the expected values
+    std::vector<thrust::complex<T>> expected_real(dest_real);
+    std::vector<thrust::complex<T>> expected_dual(dest_dual);
+    std::vector<thrust::complex<T>> expected_hyper(dest_hyper);
+
+    // Allocate device memory
+    thrust::complex<T> *d_dest_real, *d_dest_dual, *d_dest_hyper, *d_input_real, *d_input_dual, *d_input_hyper;
+    AllocateAndCopy(dest_real,  &d_dest_real);
+    AllocateAndCopy(dest_dual,  &d_dest_dual);
+    AllocateAndCopy(dest_hyper, &d_dest_hyper);
+    AllocateAndCopy(input_real,  &d_input_real);
+    AllocateAndCopy(input_dual,  &d_input_dual);
+    AllocateAndCopy(input_hyper, &d_input_hyper);
+
+    // Launch kernel
+    //We need to launch at least (end_real - start_real)*(end_dual - start_dual)*(end_dual - start_dual) threads
+    VectorHyperDualIndexPutKernel<T><<<1, input_hyper.size() >>>(
+         d_input_real, d_input_dual, d_input_hyper,
+         end_real-start_real, dual_size, start_real, end_real,  
+         d_dest_real, d_dest_dual, d_dest_hyper);
+
+    // Copy results to host
+    auto result_real = CopyToHost(d_dest_real, real_size);
+    auto result_dual = CopyToHost(d_dest_dual, real_size*dual_size);
+    auto result_hyper = CopyToHost(d_dest_hyper, real_size*dual_size*dual_size);
+
+    // Free device memory
+    cudaFree(d_dest_real);
+    cudaFree(d_dest_dual);
+    cudaFree(d_dest_hyper);
+    cudaFree(d_input_real);
+    cudaFree(d_input_dual);
+    cudaFree(d_input_hyper);
+
+
+    EXPECT_EQ(result_real.size(), expected_real.size());
+    EXPECT_EQ(result_dual.size(), expected_dual.size());
+    EXPECT_EQ(result_hyper.size(), expected_hyper.size());
+    for ( int i=start_real; i<end_real; ++i) {
+        expected_real[i] = input_real[i-start_real];
+    }
+    for (int i = start_real; i < end_real; ++i) {
+        for ( int j=0; j<dual_size; ++j) {
+            int off = i*dual_size + j;
+            expected_dual[off] = input_dual[(i-start_real)*dual_size + j];
+        }
+    }
+    for (int i = start_real; i < end_real; ++i) {
+        for ( int j=0; j< dual_size; ++j) {
+            for ( int k=0; k<dual_size; ++k) {
+                int off = i*dual_size*dual_size + j*dual_size + k;
+                expected_hyper[off] = input_hyper[(i-start_real)*dual_size*dual_size + j*dual_size + k];
+            }
+        }
+    }
+
+    for (size_t i = 0; i < result_real.size(); ++i) {
+        EXPECT_EQ(result_real[i], expected_real[i]) << "Mismatch at index " << i << " in real part.";
+    }
+    for (size_t i = 0; i < result_dual.size(); ++i) {
+        EXPECT_EQ(result_dual[i], expected_dual[i]) << "Mismatch at index " << i << " in dual part.";
+    }
+    for (size_t i = 0; i < result_hyper.size(); ++i) {
+        EXPECT_EQ(result_hyper[i], expected_hyper[i]) << "Mismatch at index " << i << " in hyper part.";
+    }
+}
+
 
 // Add more tests for IndexGet, IndexPut, ElementwiseMultiply, Square, Pow, and Sqrt similarly.
 // Main entry point for Google Test
