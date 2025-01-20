@@ -1516,6 +1516,83 @@ namespace janus {
         MatrixDualElementwiseMultiply(a_real, a_dual, a_real, a_dual, rows, cols, dual_size, result_real, result_dual);
     }
 
+
+    //Create a method that calculate the result of a MatrixDual multiplied to a VectorDual tensor
+    //Here we are assuming the number of columns in the matrix in the same as the number of rows in the vector
+    //Assume result_real and result_dual are initialized to zero
+    __device__ void MatrixDualVectorDualMultiply(
+        const thrust::complex<double>* a_real, 
+        const thrust::complex<double>* a_dual,
+        const thrust::complex<double>* b_real,
+        const thrust::complex<double>* b_dual,
+        int rows,
+        int cols,
+        int dual_size,
+        thrust::complex<double>* result_real, // size = rows
+        thrust::complex<double>* result_dual) // size = rows * dual_size
+    {
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        // total = rows * (dual_size)   -> one thread per (i,k)
+        int total = rows * dual_size;
+        if (idx >= total) return;
+
+        int i = idx / dual_size; // row index
+        int k = idx % dual_size; // dual index
+
+        // We'll accumulate partial sums in local variables
+        thrust::complex<double> sum_real(0.0, 0.0);
+        thrust::complex<double> sum_dual(0.0, 0.0);
+
+        for (int j = 0; j < cols; ++j) {
+            // A's real/dual
+            thrust::complex<double> aR = a_real[i*cols + j];          // A_real(i,j)
+            thrust::complex<double> aD = a_dual[(i*cols + j)*dual_size + k]; 
+            // a_dual is typically size [rows*cols*dual_size]; index = (i*cols + j)*dual_size + k
+
+            // B's real/dual
+            thrust::complex<double> bR = b_real[j];                    // B_real(j)
+            thrust::complex<double> bD = b_dual[j*dual_size + k]; 
+            // b_dual is [cols*dual_size] for a vector
+
+            // Add real contribution only if k == 0
+            // But we can simply do it once in the same loop: 
+            // The real part of the result is independent of k,
+            // so do it only if k=0. 
+            // Or store partial sums if k=0. 
+            if (k == 0) {
+                sum_real += aR * bR;
+            }
+
+            // Always accumulate dual sum
+            // result_dual(i, k) = sum_j [ a_real(i,j)*b_dual(j,k) + a_dual(i,j,k)*b_real(j) ]
+            sum_dual += aR*bD + aD*bR;
+        }
+
+        // Write out
+        // If k=0 => result_real[i] = sum over j of a_real(i,j)*b_real(j)
+        if (k == 0) {
+            result_real[i] += sum_real; // or result_real[i] = sum_real if we assume zero-initialized
+        }
+
+        // Dual part => store in [i*dual_size + k]
+        result_dual[i*dual_size + k] += sum_dual;
+    }
+
+
+
+
+    __global__ void MatrixDualVectorDualMultiplyKernel(const thrust::complex<double>* a_real, 
+                                                       const thrust::complex<double>* a_dual,
+                                                       const thrust::complex<double>* b_real,
+                                                       const thrust::complex<double>* b_dual,
+                                                       int rows,
+                                                       int cols,
+                                                       int dual_size,
+                                                       thrust::complex<double>* result_real,
+                                                       thrust::complex<double>* result_dual) {
+        MatrixDualVectorDualMultiply(a_real, a_dual, b_real, b_dual, rows, cols, dual_size, result_real, result_dual);
+    }
+
     __global__ void MatrixDualSquareKernel(thrust::complex<double>* a_real, 
                                            thrust::complex<double>* a_dual,
                                            int rows,
@@ -2130,6 +2207,132 @@ __global__ void MatrixHyperDualElementwiseAddKernel(
                                     b_real, b_dual, b_hyper,
                                     rows, cols, dual_size,
                                     result_real, result_dual, result_hyper);
+    }
+
+    /**
+     * Multiply a HyperDual matrix A (rows×cols) by a HyperDual vector B (cols×1).
+     * The result is a HyperDual vector R (rows×1).
+     *
+     * Indexing:
+     *   A_real   : [rows*cols]
+     *   A_dual   : [rows*cols*dual_size]
+     *   A_hyper  : [rows*cols*dual_size*dual_size]
+     *
+     *   B_real   : [cols]
+     *   B_dual   : [cols*dual_size]
+     *   B_hyper  : [cols*dual_size*dual_size]
+     *
+     *   R_real   : [rows]
+     *   R_dual   : [rows*dual_size]
+     *   R_hyper  : [rows*dual_size*dual_size]
+     *
+     * Each thread handles one (i,k,l), summing over j in [0..cols-1].
+     */
+    __device__
+    void MatrixHyperDualVectorHyperDualMultiply(
+        // A: [A_real, A_dual, A_hyper]
+        const thrust::complex<double>* A_real,
+        const thrust::complex<double>* A_dual,
+        const thrust::complex<double>* A_hyper,
+        // B: [B_real, B_dual, B_hyper]
+        const thrust::complex<double>* B_real,
+        const thrust::complex<double>* B_dual,
+        const thrust::complex<double>* B_hyper,
+        // dimensions
+        int rows,
+        int cols,
+        int dual_size,
+        // R: [R_real, R_dual, R_hyper]
+        thrust::complex<double>* R_real,
+        thrust::complex<double>* R_dual,
+        thrust::complex<double>* R_hyper)
+    {
+        // Flatten (i,k,l) -> idx
+        int idx = blockDim.x * blockIdx.x + threadIdx.x;
+        int total = rows * dual_size * dual_size;
+        if (idx >= total) return;
+
+        // decode (i,k,l)
+        int i = idx / (dual_size * dual_size);        // row of the result
+        int rem = idx % (dual_size * dual_size);
+        int k = rem / dual_size;                      // partial index for A
+        int l = rem % dual_size;                      // partial index for B
+
+        // We'll sum local partials for real, dual, hyper
+        thrust::complex<double> sum_real(0,0);
+        thrust::complex<double> sum_dual(0,0);
+        thrust::complex<double> sum_hyper(0,0);
+
+        // sum over columns j
+        for (int j = 0; j < cols; ++j) {
+            // Offsets into A
+            //   A_real(i,j)   => i*cols + j
+            //   A_dual(i,j,k) => (i*cols + j)*dual_size + k
+            //   A_hyper(i,j,k,l) => (i*cols + j)*dual_size*dual_size + k*dual_size + l
+            int offA_real  = i*cols + j;
+            int offA_dual  = (i*cols + j)*dual_size + k;
+            int offA_hyper = (i*cols + j)*dual_size*dual_size + k*dual_size + l;
+
+            thrust::complex<double> aR = A_real[offA_real];
+            thrust::complex<double> aD = A_dual[offA_dual];
+            thrust::complex<double> aH = A_hyper[offA_hyper];
+
+            // Offsets into B
+            //   B_real(j)   => j
+            //   B_dual(j,k) => j*dual_size + k
+            //   B_dual(j,l) => j*dual_size + l
+            //   B_hyper(j,k,l) => j*(dual_size^2) + k*dual_size + l
+            thrust::complex<double> bR = B_real[j];
+            thrust::complex<double> bD_k = B_dual[j*dual_size + k]; // for dual cross with aD
+            thrust::complex<double> bD_l = B_dual[j*dual_size + l]; // for hyper cross
+            thrust::complex<double> bH   = B_hyper[j*dual_size*dual_size + k*dual_size + l];
+
+            // (1) second-order partial
+            //    hyper(i,k,l) += aR*bH + aH*bR + aD*bD_l
+            sum_hyper += (aR*bH) + (aH*bR) + (aD*bD_l);
+
+            // (2) first-order partial: only valid if l == 0
+            //    dual(i,k) += aR*bD_k + aD*bR
+            if (l == 0) {
+                sum_dual += (aR*bD_k) + (aD*bR);
+            }
+
+            // (3) real part: only valid if (k,l) == (0,0)
+            //    real(i) += aR*bR
+            if (k == 0 && l == 0) {
+                sum_real += (aR*bR);
+            }
+        }
+
+        // Write out to R
+        // assume R_* are zero-initialized, or you do R_*[...] = sum_...
+        if (k == 0 && l == 0) {
+            R_real[i] += sum_real;
+        }
+        if (l == 0) {
+            R_dual[i*dual_size + k] += sum_dual;
+        }
+        R_hyper[i*dual_size*dual_size + k*dual_size + l] += sum_hyper;
+    }
+
+    __global__ void MatrixHyperDualVectorHyperDualMultiplyKernel(
+        const thrust::complex<double>* A_real,
+        const thrust::complex<double>* A_dual,
+        const thrust::complex<double>* A_hyper,
+        const thrust::complex<double>* B_real,
+        const thrust::complex<double>* B_dual,
+        const thrust::complex<double>* B_hyper,
+        int rows,
+        int cols,
+        int dual_size,
+        thrust::complex<double>* R_real,
+        thrust::complex<double>* R_dual,
+        thrust::complex<double>* R_hyper)
+    {
+        MatrixHyperDualVectorHyperDualMultiply(A_real, A_dual, A_hyper,
+                                               B_real, B_dual, B_hyper,
+                                               rows, cols, dual_size,
+                                               R_real, R_dual, R_hyper);
     }
 
 

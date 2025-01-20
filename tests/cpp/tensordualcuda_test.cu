@@ -2496,6 +2496,144 @@ TEST(MatrixDualElementwiseMultiplyTest, BasicMultiply)
 }
 
 
+// ---------------------------------------------------------------------------
+// Google Test
+// ---------------------------------------------------------------------------
+TEST(MatrixDualVectorTest, Multiply2x3_DualSize2)
+{
+    // We'll define:
+    //   rows = 2, cols = 3, dual_size = 2.
+    // Then:
+    //   a_real size = rows*cols = 6
+    //   a_dual size = rows*cols*dual_size = 12
+    //   b_real size = cols = 3
+    //   b_dual size = cols*dual_size = 6
+    //   result_real size = rows = 2
+    //   result_dual size = rows*dual_size = 4
+
+    int rows = 2;
+    int cols = 3;
+    int dual_size = 2;
+
+    // We'll fill each array with simple numeric patterns
+    // so we can easily compute a reference solution.
+
+    // 1) Host vectors
+    std::vector<thrust::complex<double>> a_real(rows*cols), a_dual(rows*cols*dual_size);
+    std::vector<thrust::complex<double>> b_real(cols),       b_dual(cols*dual_size);
+
+    // (a) A_real: 
+    //     Let's do: row=0 => (1,2,3), row=1 => (4,5,6), all with no imaginary part.
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            a_real[i*cols + j] = thrust::complex<double>(double(i*cols + j + 1), 0.0);
+        }
+    }
+
+    // (b) A_dual: 
+    //     We'll fill with a pattern so each element differs:
+    //     a_dual( (i*cols+j)*dual_size + k ) = (real=(i+j+0.1+k), imag=0)
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            for (int k = 0; k < dual_size; ++k) {
+                int idx = (i*cols + j)*dual_size + k;
+                double val = double(i + j) + 0.1 + double(k);
+                a_dual[idx] = thrust::complex<double>(val, 0.0);
+            }
+        }
+    }
+
+    // (c) B_real: 
+    //     3 elements => (10, 20, 30)
+    for (int j = 0; j < cols; ++j) {
+        b_real[j] = thrust::complex<double>(double(10*(j+1)), 0.0);
+    }
+
+    // (d) B_dual:
+    //     size=6 => b_dual[j*dual_size + k], fill with pattern
+    //     e.g. b_dual( j,k ) =  ( real=(j*10 + k + 0.5), imag=0 )
+    for (int j = 0; j < cols; ++j) {
+        for (int k = 0; k < dual_size; ++k) {
+            int idx = j*dual_size + k;
+            double val = double(j*10) + double(k) + 0.5;
+            b_dual[idx] = thrust::complex<double>(val, 0.0);
+        }
+    }
+
+    // 2) Device memory
+    thrust::complex<double> *d_a_real=nullptr, *d_a_dual=nullptr;
+    thrust::complex<double> *d_b_real=nullptr, *d_b_dual=nullptr;
+    thrust::complex<double> *d_result_real=nullptr, *d_result_dual=nullptr;
+
+    // Copy inputs to device
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    AllocateAndCopy(b_real, &d_b_real);
+    AllocateAndCopy(b_dual, &d_b_dual);
+
+    // Allocate outputs (rows for real, rows*dual_size for dual)
+    cudaMalloc(&d_result_real, rows*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_result_dual, rows*dual_size*sizeof(thrust::complex<double>));
+
+    // Initialize them to zero
+    cudaMemset(d_result_real, 0, rows*sizeof(thrust::complex<double>));
+    cudaMemset(d_result_dual, 0, rows*dual_size*sizeof(thrust::complex<double>));
+
+    // 3) Launch the kernel
+    // We have one thread per (i,k) => total = rows*dual_size = 4 threads
+    int totalThreads = rows * dual_size; // 2*2=4
+    MatrixDualVectorDualMultiplyKernel<<<1, totalThreads>>>(
+        d_a_real, d_a_dual, 
+        d_b_real, d_b_dual,
+        rows, cols, dual_size,
+        d_result_real, d_result_dual
+    );
+    cudaDeviceSynchronize();
+
+    // 4) Copy results back
+    auto h_result_real = CopyToHost(d_result_real, rows);  // 2
+    auto h_result_dual = CopyToHost(d_result_dual, rows*dual_size); // 4
+
+    // Free device memory
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_b_real);
+    cudaFree(d_b_dual);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+
+    // 5) Compute a reference result on the host
+    //    result_real[i]  = sum_{j=0..2} A_real(i,j) * B_real(j)
+    //    result_dual[i,k] = sum_{j=0..2} [ A_real(i,j)*B_dual(j,k) + A_dual(i,j,k)*B_real(j) ]
+    std::vector<thrust::complex<double>> ref_real(rows, thrust::complex<double>(0,0));
+    std::vector<thrust::complex<double>> ref_dual(rows*dual_size, thrust::complex<double>(0,0));
+
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            auto Ar = a_real[i*cols + j];
+            auto Br = b_real[j];
+            ref_real[i] += (Ar * Br);
+
+            for (int k = 0; k < dual_size; ++k) {
+                auto Ad = a_dual[(i*cols + j)*dual_size + k];
+                auto Bd = b_dual[j*dual_size + k];
+                ref_dual[i*dual_size + k] += (Ar * Bd + Ad * Br);
+            }
+        }
+    }
+
+    // 6) Compare
+    // Real part => 2 elements
+    for (int i = 0; i < rows; ++i) {
+        EXPECT_EQ(h_result_real[i], ref_real[i]) << "Mismatch in real part at i=" << i;
+    }
+
+    // Dual part => 4 elements
+    for (int i = 0; i < rows*dual_size; ++i) {
+        EXPECT_EQ(h_result_dual[i], ref_dual[i]) << "Mismatch in dual part at i=" << i;
+    }
+}
+
 
 //--------------------------------------------------
 // Google Test: MatrixDualSquare
@@ -3403,6 +3541,197 @@ TEST(MatrixHyperDualTest, ElementwiseMul_2x2_dualsize2)
         EXPECT_NEAR(c_hyper[i].imag(), ref_hyper[i].imag(), 1.0e-6) << "Mismatch in hyper part at i=" << i;
     }
 }
+
+
+// ---------------------------------------------------------------------------
+// Test: Multiply a 2x3 hyper-dual matrix by a 3x1 hyper-dual vector
+// ---------------------------------------------------------------------------
+TEST(MatrixHyperDualVectorHyperDualTest, Multiply_2x3_DualSize2)
+{
+    int rows = 2;
+    int cols = 3;
+    int dual_size = 2;
+
+    // A has:
+    //   A_real   => rows*cols = 6
+    //   A_dual   => rows*cols*dual_size = 12
+    //   A_hyper  => rows*cols*dual_size*dual_size = 24
+    int totalA_real  = rows*cols;
+    int totalA_dual  = rows*cols*dual_size;
+    int totalA_hyper = rows*cols*dual_size*dual_size;
+
+    // B has:
+    //   B_real   => cols = 3
+    //   B_dual   => cols*dual_size = 6
+    //   B_hyper  => cols*dual_size*dual_size = 12
+    int totalB_real  = cols;
+    int totalB_dual  = cols*dual_size;
+    int totalB_hyper = cols*dual_size*dual_size;
+
+    // R has:
+    //   R_real   => rows = 2
+    //   R_dual   => rows*dual_size = 4
+    //   R_hyper  => rows*dual_size*dual_size = 8
+    int totalR_real  = rows;
+    int totalR_dual  = rows*dual_size;
+    int totalR_hyper = rows*dual_size*dual_size;
+
+    // 1) Host vectors
+    std::vector<thrust::complex<double>> A_real(totalA_real),
+                                         A_dual(totalA_dual),
+                                         A_hyper(totalA_hyper);
+
+    std::vector<thrust::complex<double>> B_real(totalB_real),
+                                         B_dual(totalB_dual),
+                                         B_hyper(totalB_hyper);
+
+    // Fill them with simple patterns:
+
+    // (a) A_real: row=0 => (1,2,3); row=1 => (4,5,6)
+    for (int i = 0; i < totalA_real; ++i) {
+        double val = double(i+1);
+        A_real[i] = thrust::complex<double>(val, 0.0);
+    }
+
+    // (b) A_dual => just a pattern
+    for (int i = 0; i < totalA_dual; ++i) {
+        double val = 0.1 + double(i);
+        A_dual[i] = thrust::complex<double>(val, 0.0);
+    }
+
+    // (c) A_hyper => another pattern
+    for (int i = 0; i < totalA_hyper; ++i) {
+        double val = 0.01 * double(i);
+        A_hyper[i] = thrust::complex<double>(val, -val); // give it some imag part
+    }
+
+    // (d) B_real => e.g. (10, 20, 30)
+    for (int j = 0; j < totalB_real; ++j) {
+        double val = 10.0 * (j+1);
+        B_real[j] = thrust::complex<double>(val, 0.0);
+    }
+
+    // (e) B_dual => pattern
+    for (int i = 0; i < totalB_dual; ++i) {
+        double val = 0.5 + double(i);
+        B_dual[i] = thrust::complex<double>(val, val*0.1);
+    }
+
+    // (f) B_hyper => pattern
+    for (int i = 0; i < totalB_hyper; ++i) {
+        double val = 0.01 * double(i + 5);
+        B_hyper[i] = thrust::complex<double>(val, val);
+    }
+
+    // 2) Device memory
+    thrust::complex<double> *dA_real, *dA_dual, *dA_hyper;
+    thrust::complex<double> *dB_real, *dB_dual, *dB_hyper;
+    thrust::complex<double> *dR_real, *dR_dual, *dR_hyper;
+
+    AllocateAndCopy(A_real,  &dA_real);
+    AllocateAndCopy(A_dual,  &dA_dual);
+    AllocateAndCopy(A_hyper, &dA_hyper);
+
+    AllocateAndCopy(B_real,  &dB_real);
+    AllocateAndCopy(B_dual,  &dB_dual);
+    AllocateAndCopy(B_hyper, &dB_hyper);
+
+    cudaMalloc(&dR_real,  totalR_real * sizeof(thrust::complex<double>));
+    cudaMalloc(&dR_dual,  totalR_dual * sizeof(thrust::complex<double>));
+    cudaMalloc(&dR_hyper, totalR_hyper * sizeof(thrust::complex<double>));
+
+    // Zero-initialize the result
+    cudaMemset(dR_real,  0, totalR_real*sizeof(thrust::complex<double>));
+    cudaMemset(dR_dual,  0, totalR_dual*sizeof(thrust::complex<double>));
+    cudaMemset(dR_hyper, 0, totalR_hyper*sizeof(thrust::complex<double>));
+
+    // 3) Launch kernel
+    int totalThreads = rows * dual_size * dual_size; // 2*2*2 = 8
+    int blockSize = 128;
+    int gridSize  = (totalThreads + blockSize - 1)/blockSize;
+
+    MatrixHyperDualVectorHyperDualMultiplyKernel<<<gridSize, blockSize>>>(
+        dA_real, dA_dual, dA_hyper,
+        dB_real, dB_dual, dB_hyper,
+        rows, cols, dual_size,
+        dR_real, dR_dual, dR_hyper
+    );
+    cudaDeviceSynchronize();
+
+    // 4) Copy results back
+    auto hR_real  = CopyToHost(dR_real,  totalR_real);
+    auto hR_dual  = CopyToHost(dR_dual,  totalR_dual);
+    auto hR_hyper = CopyToHost(dR_hyper, totalR_hyper);
+
+    // Free device memory
+    cudaFree(dA_real);
+    cudaFree(dA_dual);
+    cudaFree(dA_hyper);
+    cudaFree(dB_real);
+    cudaFree(dB_dual);
+    cudaFree(dB_hyper);
+    cudaFree(dR_real);
+    cudaFree(dR_dual);
+    cudaFree(dR_hyper);
+
+    // 5) Compute reference on CPU
+    // Reference formula:
+    //   R_real[i] = sum_j (A_real(i,j) * B_real[j])
+    //   R_dual(i,k) = sum_j [ A_real(i,j)*B_dual(j,k) + A_dual(i,j,k)*B_real[j] ]
+    //   R_hyper(i,k,l) = sum_j [ 
+    //       A_real(i,j)*B_hyper(j,k,l)
+    //     + A_hyper(i,j,k,l)*B_real[j]
+    //     + A_dual(i,j,k)*B_dual(j,l)
+    //   ]
+
+    std::vector<thrust::complex<double>> ref_real(totalR_real,  thrust::complex<double>(0,0));
+    std::vector<thrust::complex<double>> ref_dual(totalR_dual,  thrust::complex<double>(0,0));
+    std::vector<thrust::complex<double>> ref_hyper(totalR_hyper,thrust::complex<double>(0,0));
+
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            // Offsets in A
+            auto aR = A_real[i*cols + j];
+            for (int k = 0; k < dual_size; ++k) {
+                // A_dual offset
+                auto aD = A_dual[(i*cols + j)*dual_size + k];
+                for (int l = 0; l < dual_size; ++l) {
+                    auto aH = A_hyper[(i*cols + j)*dual_size*dual_size + k*dual_size + l];
+                    // Offsets in B
+                    auto bR   = B_real[j];
+                    auto bDkl = B_dual[j*dual_size + l]; // careful with indexing: j,l for the dual cross
+                    auto bDk  = B_dual[j*dual_size + k]; // for the partial with aD
+                    auto bHkl = B_hyper[j*dual_size*dual_size + k*dual_size + l];
+
+                    // c_hyper(i,k,l) += aR*bH + aH*bR + aD*bD
+                    ref_hyper[i*dual_size*dual_size + k*dual_size + l] +=
+                        (aR * bHkl) + (aH * bR) + (aD * bDkl);
+                }
+                // c_dual(i,k) => we must accumulate aR*bD + aD*bR over j
+                auto bR_ = B_real[j];
+                auto bD_ = B_dual[j*dual_size + k];
+                ref_dual[i*dual_size + k] += (aR*bD_ + aD*bR_);
+            }
+            // c_real(i) => sum_j (aR*bR)
+            ref_real[i] += (aR * B_real[j]);
+        }
+    }
+
+    // 6) Compare
+    for (int i = 0; i < totalR_real; ++i) {
+        EXPECT_EQ(hR_real[i], ref_real[i]) 
+            << "Mismatch in R_real at i=" << i;
+    }
+    for (int i = 0; i < totalR_dual; ++i) {
+        EXPECT_EQ(hR_dual[i], ref_dual[i])
+            << "Mismatch in R_dual at i=" << i;
+    }
+    for (int i = 0; i < totalR_hyper; ++i) {
+        EXPECT_EQ(hR_hyper[i], ref_hyper[i])
+            << "Mismatch in R_hyper at i=" << i;
+    }
+}
+
 
 // Add more tests for IndexGet, IndexPut, ElementwiseMultiply, Square, Pow, and Sqrt similarly.
 // Main entry point for Google Test
