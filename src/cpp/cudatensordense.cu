@@ -2335,6 +2335,596 @@ __global__ void MatrixHyperDualElementwiseAddKernel(
                                                R_real, R_dual, R_hyper);
     }
 
+    /**
+     * MatrixHyperDualPow:
+     *   result_real(i,j)  = [a_real(i,j)]^power
+     *   result_dual(i,j,k)  = power * a_real(i,j)^(power-1) * a_dual(i,j,k)
+     *   result_hyper(i,j,k,l)
+     *       = power * a_real(i,j)^(power-1) * a_hyper(i,j,k,l)
+     *         + power*(power-1)*a_real(i,j)^(power-2) * a_dual(i,j,k)*a_dual(i,j,l)
+     *
+     * We'll do this in three sub-steps:
+     *   (A) real part via MatrixPow
+     *   (B) dual part in a loop up to rows*cols*dual_size
+     *   (C) hyper part in a loop up to rows*cols*dual_size*dual_size
+     */
+    __device__
+    void MatrixHyperDualPow(const thrust::complex<double>* a_real,
+                            const thrust::complex<double>* a_dual,
+                            const thrust::complex<double>* a_hyper,
+                            double power,
+                            int rows,
+                            int cols,
+                            int dual_size,
+                            thrust::complex<double>* result_real,
+                            thrust::complex<double>* result_dual,
+                            thrust::complex<double>* result_hyper)
+    {
+        // STEP (A): Real part => call the same MatrixPow you used for Dual
+        //         We'll do it from each thread, but only some threads do useful work.
+        //         Or (often simpler) you might call a separate kernel beforehand.
+        MatrixPow(a_real, power, rows, cols, result_real);
+
+        // ------------------------------------------------------------------------
+        // STEP (B): Dual part => "power * [a_real^(power-1)] * a_dual"
+        //  We'll use 'idx' in [0 .. rows*cols*dual_size-1].
+        // ------------------------------------------------------------------------
+        {
+            int idx = threadIdx.x + blockIdx.x * blockDim.x;
+            int totalDual = rows * cols * dual_size;
+            if (idx < totalDual) {
+                // decode (i, j, k)
+                int i = idx / (cols * dual_size);
+                int rem = idx % (cols * dual_size);
+                int j = rem / dual_size;
+                // k = rem % dual_size
+
+                // offset for a_real
+                int off = i*cols + j;
+
+                // formula:
+                // result_dual[idx] = power * (a_real(off)^(power - 1)) * a_dual[idx]
+                thrust::complex<double> factor = power * pow(a_real[off], power - 1);
+                result_dual[idx] = factor * a_dual[idx];
+            }
+        }
+
+        // ------------------------------------------------------------------------
+        // STEP (C): Hyper part => 
+        //   result_hyper(i,j,k,l) =
+        //      p * a_real(i,j)^(p-1)*a_hyper(i,j,k,l)
+        //      + p(p-1)*a_real(i,j)^(p-2)* a_dual(i,j,k)* a_dual(i,j,l)
+        // ------------------------------------------------------------------------
+        {
+            int idx = threadIdx.x + blockIdx.x * blockDim.x;
+            int totalHyper = rows * cols * dual_size * dual_size;
+            if (idx < totalHyper) {
+                // decode (i, j, k, l)
+                int i = idx / (cols * dual_size * dual_size);
+                int rem1 = idx % (cols * dual_size * dual_size);
+                int j = rem1 / (dual_size * dual_size);
+                int rem2 = rem1 % (dual_size * dual_size);
+                int k = rem2 / dual_size;
+                int l = rem2 % dual_size;
+
+                int off = i*cols + j;
+
+                // Offsets for a_dual
+                //   a_dual(i,j,k) => (i*cols + j)*dual_size + k
+                //   a_dual(i,j,l) => (i*cols + j)*dual_size + l
+                int off_dual_k = (i*cols + j)*dual_size + k;
+                int off_dual_l = (i*cols + j)*dual_size + l;
+
+                // formula
+                // c_hyper = p a_real^(p-1)* a_hyper + p(p-1)* a_real^(p-2)* (a_dual(k)* a_dual(l))
+                thrust::complex<double> Ar = a_real[off];
+                thrust::complex<double> A_pow_p_minus_1 = pow(Ar, power - 1);
+                thrust::complex<double> A_pow_p_minus_2 = pow(Ar, power - 2);
+
+                // part1 => p * Ar^(p-1) * a_hyper[idx]
+                thrust::complex<double> part1 = power * A_pow_p_minus_1 * a_hyper[idx];
+
+                // part2 => p(p-1)*Ar^(p-2)* a_dual[k]* a_dual[l]
+                thrust::complex<double> part2 = thrust::complex<double>(power*(power - 1), 0.0)
+                                                * A_pow_p_minus_2
+                                                * (a_dual[off_dual_k] * a_dual[off_dual_l]);
+
+                result_hyper[idx] = part1 + part2;
+            }
+        }
+    }
+
+    __global__ void MatrixHyperDualPowKernel(const thrust::complex<double>* a_real,
+                                             const thrust::complex<double>* a_dual,
+                                             const thrust::complex<double>* a_hyper,
+                                             double power,
+                                             int rows,
+                                             int cols,
+                                             int dual_size,
+                                             thrust::complex<double>* result_real,
+                                             thrust::complex<double>* result_dual,
+                                             thrust::complex<double>* result_hyper)
+    {
+        MatrixHyperDualPow(a_real, a_dual, a_hyper, power, rows, cols, dual_size, result_real, result_dual, result_hyper);
+    }
+
+    /**
+     * 2D slice for a hyper-dual matrix.
+     *
+     *  Slices the real, dual, and hyper parts from row range [rowStart, rowEnd)
+     *  and column range [colStart, colEnd).
+     *
+     * Inputs:
+     *   a_real      : [rows * cols]                      real array
+     *   a_dual      : [rows * cols * dual_size]          dual array
+     *   a_hyper     : [rows * cols * dual_size * dual_size] hyper array
+     *   rows, cols  : full matrix dimensions
+     *   dual_size   : dual dimension
+     *   rowStart, rowEnd : row slice range
+     *   colStart, colEnd : column slice range
+     *
+     * Outputs:
+     *   out_real  : [outRows * outCols]
+     *   out_dual  : [outRows * outCols * dual_size]
+     *   out_hyper : [outRows * outCols * dual_size * dual_size]
+     *
+     * where
+     *   outRows = rowEnd - rowStart
+     *   outCols = colEnd - colStart
+     *
+     * Each thread handles one (localRow, localCol, k, l).
+     * If (k,l) == (0,0), we copy the real part.
+     * If l == 0, we copy the dual part.
+     * We always copy the hyper part.
+     */
+    __device__
+    void MatrixHyperDualIndexGet(const thrust::complex<double>* a_real,
+                                const thrust::complex<double>* a_dual,
+                                const thrust::complex<double>* a_hyper,
+                                int rows,
+                                int cols,
+                                int dual_size,
+                                int rowStart,
+                                int rowEnd,
+                                int colStart,
+                                int colEnd,
+                                thrust::complex<double>* out_real,
+                                thrust::complex<double>* out_dual,
+                                thrust::complex<double>* out_hyper)
+    {
+        // 1) Compute the submatrix dimensions
+        int outRows = rowEnd - rowStart;  
+        int outCols = colEnd - colStart;  
+        // total # of submatrix hyper elements
+        int totalHyper = outRows * outCols * dual_size * dual_size;
+
+        // 2) Global thread index
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        if (idx >= totalHyper) return;
+
+        // 3) Decompose idx => (localRow, localCol, k, l)
+        int localRow = idx / (outCols * dual_size * dual_size);
+        int rem1     = idx % (outCols * dual_size * dual_size);
+        int localCol = rem1 / (dual_size * dual_size);
+        int rem2     = rem1 % (dual_size * dual_size);
+        int k        = rem2 / dual_size;
+        int l        = rem2 % dual_size;
+
+        // 4) Map local row,col => global row,col
+        int globalRow = rowStart + localRow;
+        int globalCol = colStart + localCol;
+
+        // Flattened offsets in original matrix
+        int originalOff      = globalRow * cols + globalCol; 
+        int originalDualOffK = originalOff * dual_size + k;
+        int originalDualOffL = originalOff * dual_size + l;
+        int originalHyperOff = (originalOff * dual_size * dual_size) 
+                            + (k * dual_size + l);
+
+        // Flattened offsets in submatrix
+        int subOff        = localRow * outCols + localCol; 
+        int subDualOffK   = subOff * dual_size + k;
+        int subDualOffL   = subOff * dual_size + l;
+        int subHyperOff   = (subOff * dual_size * dual_size)
+                            + (k * dual_size + l);
+
+        // 5) Copy real part if (k,l) == (0,0)
+        if (k == 0 && l == 0) {
+            out_real[subOff] = a_real[originalOff];
+        }
+
+        // 6) Copy dual part if l == 0
+        if (l == 0) {
+            out_dual[subDualOffK] = a_dual[originalDualOffK];
+        }
+
+        // 7) Copy hyper part always
+        out_hyper[subHyperOff] = a_hyper[originalHyperOff];
+    }
+
+
+    __global__
+    void MatrixHyperDualIndexGetKernel(const thrust::complex<double>* a_real,
+                                    const thrust::complex<double>* a_dual,
+                                    const thrust::complex<double>* a_hyper,
+                                    int rows,
+                                    int cols,
+                                    int dual_size,
+                                    int rowStart,
+                                    int rowEnd,
+                                    int colStart,
+                                    int colEnd,
+                                    thrust::complex<double>* out_real,
+                                    thrust::complex<double>* out_dual,
+                                    thrust::complex<double>* out_hyper)
+    {
+        MatrixHyperDualIndexGet(
+            a_real, a_dual, a_hyper,
+            rows, cols, dual_size,
+            rowStart, rowEnd, colStart, colEnd,
+            out_real, out_dual, out_hyper
+        );
+    }
+
+
+    /**
+     * Copy a sub-slice from a source hyper-dual matrix into a destination hyper-dual matrix.
+     *
+     * Source matrix (HyperDual):
+     *   src_real  : [srcRows * srcCols]
+     *   src_dual  : [srcRows * srcCols * dual_size]
+     *   src_hyper : [srcRows * srcCols * dual_size * dual_size]
+     *
+     * Sub-slice in source: rows [rowStartSrc..rowEndSrc), cols [colStartSrc..colEndSrc).
+     *
+     * Destination matrix (HyperDual):
+     *   dst_real  : [dstRows * dstCols]
+     *   dst_dual  : [dstRows * dstCols * dual_size]
+     *   dst_hyper : [dstRows * dstCols * dual_size * dual_size]
+     *
+     * We place that sub-slice into destination starting at (rowStartDst, colStartDst).
+     */
+    __device__ void MatrixHyperDualIndexPut(
+        // Source
+        const thrust::complex<double>* src_real,
+        const thrust::complex<double>* src_dual,
+        const thrust::complex<double>* src_hyper,
+        int srcRows,
+        int srcCols,
+        int dual_size,
+        int rowStartSrc, int rowEndSrc,
+        int colStartSrc, int colEndSrc,
+        // Destination
+        thrust::complex<double>* dst_real,
+        thrust::complex<double>* dst_dual,
+        thrust::complex<double>* dst_hyper,
+        int dstRows,
+        int dstCols,
+        int rowStartDst,
+        int colStartDst
+    )
+    {
+        // 1) sub-slice shape
+        int subRows = rowEndSrc - rowStartSrc;  
+        int subCols = colEndSrc - colStartSrc;  
+
+        // 2) total number of sub-slice hyper elements
+        //    We have subRows*subCols for each real entry, and dual_size*dual_size for hyper dimension
+        int totalHyper = subRows * subCols * dual_size * dual_size;
+
+        // 3) Thread index
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        if (idx >= totalHyper) return;
+
+        // 4) Decompose idx => localRow, localCol, k, l
+        // localRow in [0..subRows-1], localCol in [0..subCols-1], k,l in [0..dual_size-1]
+        int localRow = idx / (subCols * dual_size * dual_size);
+        int remainder1 = idx % (subCols * dual_size * dual_size);
+        int localCol = remainder1 / (dual_size * dual_size);
+        int remainder2 = remainder1 % (dual_size * dual_size);
+        int k = remainder2 / dual_size;
+        int l = remainder2 % dual_size;
+
+        // 5) Map to global coords in the SOURCE
+        int srcRow = rowStartSrc + localRow;
+        int srcCol = colStartSrc + localCol;
+        // Flattened offsets in src
+        int srcOff      = srcRow * srcCols + srcCol; 
+        int srcDualOffK = srcOff * dual_size + k;
+        int srcDualOffL = srcOff * dual_size + l;
+        int srcHyperOff = (srcOff * dual_size * dual_size) + (k*dual_size + l);
+
+        // 6) Map to global coords in the DEST
+        int dstRow = rowStartDst + localRow;
+        int dstCol = colStartDst + localCol;
+        // Flattened offsets in dst
+        int dstOff      = dstRow * dstCols + dstCol;
+        int dstDualOffK = dstOff * dual_size + k;
+        int dstDualOffL = dstOff * dual_size + l;
+        int dstHyperOff = (dstOff * dual_size * dual_size) + (k*dual_size + l);
+
+        // 7) Copy real part if (k,l) == (0,0)
+        if (k == 0 && l == 0) {
+            dst_real[dstOff] = src_real[srcOff];
+        }
+
+        // 8) Copy dual part if l == 0
+        //   => one copy per (i,j,k)
+        if (l == 0) {
+            dst_dual[dstDualOffK] = src_dual[srcDualOffK];
+        }
+
+        // 9) Copy hyper part always
+        dst_hyper[dstHyperOff] = src_hyper[srcHyperOff];
+    }
+
+    __global__ 
+    void MatrixHyperDualIndexPutKernel(
+        // Source
+        const thrust::complex<double>* src_real,
+        const thrust::complex<double>* src_dual,
+        const thrust::complex<double>* src_hyper,
+        int srcRows,
+        int srcCols,
+        int dual_size,
+        int rowStartSrc, int rowEndSrc,
+        int colStartSrc, int colEndSrc,
+        // Destination
+        thrust::complex<double>* dst_real,
+        thrust::complex<double>* dst_dual,
+        thrust::complex<double>* dst_hyper,
+        int dstRows,
+        int dstCols,
+        int rowStartDst,
+        int colStartDst
+    )
+    {
+        MatrixHyperDualIndexPut(src_real, src_dual, src_hyper,
+                                srcRows, srcCols, dual_size,
+                                rowStartSrc, rowEndSrc, colStartSrc, colEndSrc,
+                                dst_real, dst_dual, dst_hyper,
+                                dstRows, dstCols,
+                                rowStartDst, colStartDst);
+    }
+
+
+    /**
+     * Squeeze operation for a hyper-dual matrix but ONLY if the dimension being
+     * squeezed is exactly 1 in size. Otherwise, no change in shape or data.
+     *
+     * Behavior:
+     *   - If dim=0 and rows=1, we produce an output shaped by 'cols'.
+     *        result_real  -> length=cols
+     *        result_dual  -> length=cols*dual_size
+     *        result_hyper -> length=cols*dual_size*dual_size
+     *     Each entry in (i=0, j) becomes the j-th output index.
+     *
+     *   - If dim=1 and cols=1, we produce an output shaped by 'rows'.
+     *        result_real  -> length=rows
+     *        result_dual  -> length=rows*dual_size
+     *        result_hyper -> length=rows*dual_size*dual_size
+     *     Each entry in (i, j=0) becomes the i-th output index.
+     *
+     *   - Otherwise, we do "no effect":
+     *        i.e. we can either skip writing or copy the entire matrix as-is
+     *        if you want identical input->output. (Below, we skip.)
+     *
+     */
+    __device__
+    void MatrixHyperDualSqueeze(
+        const thrust::complex<double>* a_real,
+        const thrust::complex<double>* a_dual,
+        const thrust::complex<double>* a_hyper,
+        int rows,
+        int cols,
+        int dual_size,
+        int dim,
+        // Output arrays
+        thrust::complex<double>* result_real,
+        thrust::complex<double>* result_dual,
+        thrust::complex<double>* result_hyper)
+    {
+        // Check if we actually do a squeeze
+        bool doSqueezeRows = (dim == 0 && rows == 1);
+        bool doSqueezeCols = (dim == 1 && cols == 1);
+
+        if (!doSqueezeRows && !doSqueezeCols) {
+            // No effect. Option A: do nothing
+            return;
+        }
+
+        // We'll have exactly rows*cols*(dual_size^2) threads if we do the copy
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        int totalHyper = rows * cols * dual_size * dual_size;
+        if (idx >= totalHyper) return;
+
+        // Decompose (i, j, k, l)
+        int i = idx / (cols * dual_size * dual_size);
+        int rem1 = idx % (cols * dual_size * dual_size);
+        int j = rem1 / (dual_size * dual_size);
+        int rem2 = rem1 % (dual_size * dual_size);
+        int k = rem2 / dual_size;
+        int l = rem2 % dual_size;
+
+        // Flatten offsets in the original
+        int offReal  = i*cols + j;
+        int offDual  = offReal*dual_size + k;
+        int offHyper = offReal*dual_size*dual_size + (k*dual_size + l);
+
+        if (doSqueezeRows) {
+            // rows=1 => There's only i=0. The dimension is "removed."
+            // The resulting shape is (cols) for real, etc.
+            // So the new index is just j.
+            // real => if (k,l)==(0,0), result_real[j] = a_real[offReal]
+            if (k==0 && l==0) {
+                result_real[j] = a_real[offReal];
+            }
+            // dual => if (l==0) => result_dual[j*dual_size + k] = ...
+            if (l==0) {
+                result_dual[j*dual_size + k] = a_dual[offDual];
+            }
+            // hyper => result_hyper[j*(dual_size^2) + k*dual_size + l] = ...
+            int outHyperIdx = j*dual_size*dual_size + k*dual_size + l;
+            result_hyper[outHyperIdx] = a_hyper[offHyper];
+        }
+        else {
+            // doSqueezeCols => dim=1 && cols=1 => There's only j=0
+            // The resulting shape is (rows)
+            // new index is i
+            if (k==0 && l==0) {
+                result_real[i] = a_real[offReal];
+            }
+            if (l==0) {
+                result_dual[i*dual_size + k] = a_dual[offDual];
+            }
+            int outHyperIdx = i*dual_size*dual_size + k*dual_size + l;
+            result_hyper[outHyperIdx] = a_hyper[offHyper];
+        }
+    }
+
+    __global__
+    void MatrixHyperDualSqueezeKernel(
+        const thrust::complex<double>* a_real,
+        const thrust::complex<double>* a_dual,
+        const thrust::complex<double>* a_hyper,
+        int rows,
+        int cols,
+        int dual_size,
+        int dim,
+        thrust::complex<double>* result_real,
+        thrust::complex<double>* result_dual,
+        thrust::complex<double>* result_hyper)
+    {
+        MatrixHyperDualSqueeze(
+            a_real, a_dual, a_hyper,
+            rows, cols, dual_size,
+            dim,
+            result_real, result_dual, result_hyper
+        );
+    }
+
+    /**
+     * @brief signCond-like method for a HyperDual matrix.
+     *
+     * This extends the MatrixDualSigncond logic to second-order hyper parts.
+     *
+     * For each entry (i,j), we compute:
+     *   a_sign = sign(a_real(i,j)) with tolerance
+     *   b_sign = sign(b_real(i,j)) with tolerance
+     *
+     * Then:
+     *   - real: only once if (k,l)==(0,0)
+     *   - dual: if (l==0)
+     *   - hyper: always
+     *
+     * sign logic: 
+     *   if (b_sign >= 0) {
+     *       result_xxx = (a_sign >= 0) ? a_xxx : -a_xxx
+     *   } else {
+     *       result_xxx = (a_sign >= 0) ? -a_xxx : a_xxx
+     *   }
+     */
+    template <typename T>
+    __device__ void MatrixHyperDualSigncond(
+        // A
+        const thrust::complex<T>* a_real,
+        const thrust::complex<T>* a_dual,
+        const thrust::complex<T>* a_hyper,
+        // B
+        const thrust::complex<T>* b_real,
+        // ignoring b_dual,b_hyper since we only need b's real part for sign
+        int rows, 
+        int cols, 
+        int dual_size,
+        // Outputs
+        thrust::complex<T>* result_real,
+        thrust::complex<T>* result_dual,
+        thrust::complex<T>* result_hyper,
+        // tolerance
+        T tol = T(1.0e-6))
+    {
+        // Thread index
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int totalHyper = rows * cols * dual_size * dual_size;
+        if (idx >= totalHyper) return;
+
+        // Decompose (i,j,k,l)
+        int i = idx / (cols * dual_size * dual_size);
+        int rem1 = idx % (cols * dual_size * dual_size);
+        int j = rem1 / (dual_size * dual_size);
+        int rem2 = rem1 % (dual_size * dual_size);
+        int k = rem2 / dual_size;
+        int l = rem2 % dual_size;
+
+        // Offsets
+        int real_idx   = i*cols + j; 
+        // a_real[ real_idx ]
+        int dual_off   = (i*cols + j)*dual_size + k; 
+        int hyper_off  = (i*cols + j)*dual_size*dual_size + (k*dual_size + l);
+
+        // sign of a_real(i,j) and b_real(i,j)
+        T a_val = a_real[real_idx].real();
+        T b_val = b_real[real_idx].real();
+
+        int a_sign = (fabs(a_val) >= tol) ? ( (a_val >= 0) ? +1 : -1 ) : +1;
+        int b_sign = (fabs(b_val) >= tol) ? ( (b_val >= 0) ? +1 : -1 ) : +1;
+
+        // Real part => only once if (k,l)==(0,0)
+        if (k==0 && l==0) {
+            thrust::complex<T> A_re = a_real[real_idx]; 
+            if (b_sign >= 0) {
+                result_real[real_idx] = (a_sign >= 0) ? A_re : -A_re;
+            } else {
+                result_real[real_idx] = (a_sign >= 0) ? -A_re : A_re;
+            }
+        }
+
+        // Dual part => only if l==0
+        // We do the same sign logic
+        if (l == 0) {
+            thrust::complex<T> A_du = a_dual[dual_off];
+            if (b_sign >= 0) {
+                result_dual[ (i*cols + j)*dual_size + k] 
+                    = (a_sign >=0) ? A_du : -A_du;
+            } else {
+                result_dual[ (i*cols + j)*dual_size + k]
+                    = (a_sign >=0) ? -A_du : A_du;
+            }
+        }
+
+        // Hyper part => always
+        // same sign logic
+        thrust::complex<T> A_hy = a_hyper[hyper_off];
+        if (b_sign >= 0) {
+            result_hyper[hyper_off] = (a_sign>=0)? A_hy : -A_hy;
+        } else {
+            result_hyper[hyper_off] = (a_sign>=0)? -A_hy : A_hy;
+        }
+    }
+
+    __global__
+    void MatrixHyperDualSigncondKernel(
+        const thrust::complex<double>* a_real,
+        const thrust::complex<double>* a_dual,
+        const thrust::complex<double>* a_hyper,
+        const thrust::complex<double>* b_real, 
+        // ignoring b_dual, b_hyper
+        int rows,
+        int cols,
+        int dual_size,
+        thrust::complex<double>* result_real,
+        thrust::complex<double>* result_dual,
+        thrust::complex<double>* result_hyper,
+        double tol = 1.0e-6)
+    {
+        MatrixHyperDualSigncond<double>(
+            a_real, a_dual, a_hyper,
+            b_real,
+            rows, cols, dual_size,
+            result_real, result_dual, result_hyper,
+            tol
+        );
+    }
 
 
 } // namespace Janus

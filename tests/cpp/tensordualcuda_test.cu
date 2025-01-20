@@ -3733,6 +3733,994 @@ TEST(MatrixHyperDualVectorHyperDualTest, Multiply_2x3_DualSize2)
 }
 
 
+
+// ---------------------------------------------------------------------------
+// Google Test: MatrixHyperDualPowTest
+// ---------------------------------------------------------------------------
+TEST(MatrixHyperDualPowTest, Power2_2x2_dual2)
+{
+    // We'll do a small matrix: rows=2, cols=2, dual_size=2,
+    // and set power=2.0 for a quick check.
+
+    int rows = 2;
+    int cols = 2;
+    int dual_size = 2;
+    double power = 2.0;
+
+    // Matrix shape => 4 entries for real
+    // dual shape => 4 * 2 = 8
+    // hyper shape => 4 * 2 * 2 = 16
+
+    int totalReal   = rows * cols;             // 4
+    int totalDual   = rows * cols * dual_size; // 8
+    int totalHyper  = rows * cols * dual_size * dual_size; //16
+
+    // 1) Host arrays
+    std::vector<thrust::complex<double>> a_real(totalReal),
+                                         a_dual(totalDual),
+                                         a_hyper(totalHyper);
+
+    // (a) Fill a_real => e.g.: (1,0), (2,0), (3,0), (4,0)
+    for (int i = 0; i < totalReal; ++i) {
+        a_real[i] = thrust::complex<double>(double(i+1), 0.0);
+    }
+
+    // (b) a_dual => small pattern
+    //     e.g., a_dual[i] = (0.1 + i, -0.2 - i)
+    for (int i = 0; i < totalDual; ++i) {
+        double re = 0.1 + double(i);
+        double im = -0.2 - double(i);
+        a_dual[i] = thrust::complex<double>(re, im);
+    }
+
+    // (c) a_hyper => fill with e.g. (0.01*i, 0.02*i)
+    for (int i = 0; i < totalHyper; ++i) {
+        double re = 0.01 * i;
+        double im = 0.02 * i;
+        a_hyper[i] = thrust::complex<double>(re, im);
+    }
+
+    // 2) Allocate device arrays
+    thrust::complex<double>* d_a_real   = nullptr;
+    thrust::complex<double>* d_a_dual   = nullptr;
+    thrust::complex<double>* d_a_hyper  = nullptr;
+    thrust::complex<double>* d_r_real   = nullptr;
+    thrust::complex<double>* d_r_dual   = nullptr;
+    thrust::complex<double>* d_r_hyper  = nullptr;
+
+    AllocateAndCopy(a_real,  &d_a_real);
+    AllocateAndCopy(a_dual,  &d_a_dual);
+    AllocateAndCopy(a_hyper, &d_a_hyper);
+
+    cudaMalloc(&d_r_real,  totalReal  * sizeof(thrust::complex<double>));
+    cudaMalloc(&d_r_dual,  totalDual  * sizeof(thrust::complex<double>));
+    cudaMalloc(&d_r_hyper, totalHyper * sizeof(thrust::complex<double>));
+
+    // Zero out the result
+    cudaMemset(d_r_real,  0, totalReal*sizeof(thrust::complex<double>));
+    cudaMemset(d_r_dual,  0, totalDual*sizeof(thrust::complex<double>));
+    cudaMemset(d_r_hyper, 0, totalHyper*sizeof(thrust::complex<double>));
+
+    // 3) Launch the kernel
+    int totalThreads = totalHyper; // 16
+    int blockSize = 128;
+    int gridSize = (totalThreads + blockSize - 1)/blockSize;
+    MatrixHyperDualPowKernel<<<gridSize, blockSize>>>(
+        d_a_real, d_a_dual, d_a_hyper,
+        power,
+        rows, cols, dual_size,
+        d_r_real, d_r_dual, d_r_hyper
+    );
+    cudaDeviceSynchronize();
+
+    // 4) Copy results back
+    auto h_r_real  = CopyToHost(d_r_real,  totalReal);
+    auto h_r_dual  = CopyToHost(d_r_dual,  totalDual);
+    auto h_r_hyper = CopyToHost(d_r_hyper, totalHyper);
+
+    // Free device memory
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_a_hyper);
+    cudaFree(d_r_real);
+    cudaFree(d_r_dual);
+    cudaFree(d_r_hyper);
+
+    // 5) Compute reference on CPU
+    //    For each entry x in [a_real, a_dual, a_hyper],
+    //    we do:
+    //       real = (a_real)^2
+    //       dual(k) = 2 * a_real^(2-1) * a_dual(k)
+    //       hyper(k,l) = 2*a_real^(1)* a_hyper(k,l)
+    //                   + 2*(2-1)*a_real^(0)* a_dual(k)*a_dual(l)
+    //                 = 2*a_real* a_hyper(k,l) + 2*1*a_dual(k)*a_dual(l)
+
+    std::vector<thrust::complex<double>> ref_real(totalReal);
+    std::vector<thrust::complex<double>> ref_dual(totalDual);
+    std::vector<thrust::complex<double>> ref_hyper(totalHyper);
+
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            int off = i*cols + j;
+            thrust::complex<double> Ar = a_real[off];
+
+            // real => (Ar)^2
+            auto realVal = Ar * Ar;
+
+            // fill it
+            ref_real[off] = realVal;
+
+            // dual => for k in [0..1]
+            for (int k = 0; k < dual_size; ++k) {
+                int dualOff = (i*cols + j)*dual_size + k;
+                thrust::complex<double> Ad = a_dual[dualOff];
+                // result = 2 * Ar^(2-1) * Ad = 2 * Ar * Ad
+                ref_dual[dualOff] = thrust::complex<double>(2.0,0.0) * (Ar * Ad);
+            }
+
+            // hyper => for k,l in [0..1]
+            for (int k = 0; k < dual_size; ++k) {
+                for (int l = 0; l < dual_size; ++l) {
+                    int hyperOff = (i*cols + j)*dual_size*dual_size + k*dual_size + l;
+                    thrust::complex<double> Ah = a_hyper[hyperOff];
+                    // formula:
+                    //   2*Ar^1 * Ah + 2*(2-1)* Ar^(0)* a_dual(k)*a_dual(l)
+                    // = 2*Ar*Ah + 2* a_dual(k)*a_dual(l)
+                    auto Ad_k = a_dual[(i*cols + j)*dual_size + k];
+                    auto Ad_l = a_dual[(i*cols + j)*dual_size + l];
+                    thrust::complex<double> part1 = 2.0 * Ar * Ah; 
+                    thrust::complex<double> part2 = 2.0 * (Ad_k * Ad_l);
+                    ref_hyper[hyperOff] = part1 + part2;
+                }
+            }
+        }
+    }
+
+    // 6) Compare
+    // Real part
+    for (int i = 0; i < totalReal; ++i) {
+        EXPECT_NEAR(h_r_real[i].real(), ref_real[i].real(), 1.0e-6) << "Mismatch real at index i=" << i;
+        EXPECT_NEAR(h_r_real[i].imag(), ref_real[i].imag(), 1.0e-6) << "Mismatch real at index i=" << i;
+    }
+    // Dual part
+    for (int i = 0; i < totalDual; ++i) {
+        EXPECT_NEAR(h_r_dual[i].real(), ref_dual[i].real(), 1.0e-6) << "Mismatch dual at index i=" << i;
+        EXPECT_NEAR(h_r_dual[i].imag(), ref_dual[i].imag(), 1.0e-6) << "Mismatch dual at index i=" << i;
+    }
+    // Hyper part
+    for (int i = 0; i < totalHyper; ++i) {
+        EXPECT_NEAR(h_r_hyper[i].real(), ref_hyper[i].real(), 1.0e-6) << "Mismatch hyper at index i=" << i;
+        EXPECT_NEAR(h_r_hyper[i].imag(), ref_hyper[i].imag(), 1.0e-6) << "Mismatch hyper at index i=" << i;
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Test: Slicing a 3x4 matrix with row range [1,3) and col range [1,3)
+// ---------------------------------------------------------------------------
+TEST(MatrixHyperDualIndexGetTest, Slice3x4_DualSize2)
+{
+    // 1) Setup
+    int rows = 3;
+    int cols = 4;
+    int dual_size = 2;
+
+    int rowStart = 1;
+    int rowEnd   = 3; // => outRows = 2
+    int colStart = 1;
+    int colEnd   = 3; // => outCols = 2
+
+    // Full matrix sizes
+    //   real => rows*cols = 3*4=12
+    //   dual => rows*cols*dual_size = 12*2=24
+    //   hyper=> rows*cols*dual_size*dual_size =12*2*2=48
+    int total_real  = rows*cols; 
+    int total_dual  = rows*cols*dual_size;
+    int total_hyper = rows*cols*dual_size*dual_size;
+
+    // Output submatrix sizes
+    //   outRows=2, outCols=2
+    //   out_real => 4
+    //   out_dual => 4*2=8
+    //   out_hyper => 4*2*2=16
+    int outRows = rowEnd - rowStart; // 2
+    int outCols = colEnd - colStart; // 2
+    int out_real_size  = outRows*outCols;          // 4
+    int out_dual_size  = outRows*outCols*dual_size; // 8
+    int out_hyper_size = outRows*outCols*dual_size*dual_size; // 16
+
+    // 2) Create host input arrays
+    std::vector<thrust::complex<double>> a_real(total_real);
+    std::vector<thrust::complex<double>> a_dual(total_dual);
+    std::vector<thrust::complex<double>> a_hyper(total_hyper);
+
+    // Fill them with some simple pattern:
+    // (a) a_real => e.g. real(i,j)= (i+1)*10 + j => so we can see differences easily
+    // For i in [0..2], j in [0..3]
+    // e.g. row0 => (10,11,12,13), row1 => (20,21,22,23), row2 => (30,31,32,33)
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            a_real[i*cols + j] = thrust::complex<double>(double((i+1)*10 + j), 0.0);
+        }
+    }
+
+    // (b) a_dual => length=24, fill with pattern a_dual[idx] = (idx +0.1, -idx*0.1)
+    for (int idx = 0; idx < total_dual; ++idx) {
+        double re = double(idx) + 0.1;
+        double im = -0.1*idx;
+        a_dual[idx] = thrust::complex<double>(re, im);
+    }
+
+    // (c) a_hyper => length=48 => fill with (0.01*i, 0.02*i)
+    for (int i = 0; i < total_hyper; ++i) {
+        double re = 0.01 * i;
+        double im = 0.02 * i;
+        a_hyper[i] = thrust::complex<double>(re, im);
+    }
+
+    // 3) Allocate device memory and copy
+    thrust::complex<double>* d_a_real=nullptr;
+    thrust::complex<double>* d_a_dual=nullptr;
+    thrust::complex<double>* d_a_hyper=nullptr;
+
+    AllocateAndCopy(a_real,  &d_a_real);
+    AllocateAndCopy(a_dual,  &d_a_dual);
+    AllocateAndCopy(a_hyper, &d_a_hyper);
+
+    // Output arrays
+    thrust::complex<double>* d_out_real=nullptr;
+    thrust::complex<double>* d_out_dual=nullptr;
+    thrust::complex<double>* d_out_hyper=nullptr;
+
+    cudaMalloc(&d_out_real,  out_real_size*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_out_dual,  out_dual_size*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_out_hyper, out_hyper_size*sizeof(thrust::complex<double>));
+
+    // 4) Launch kernel
+    int totalThreads = outRows*outCols*dual_size*dual_size; // 2*2*2*2=8
+    int blockSize=128;
+    int gridSize=(totalThreads + blockSize-1)/blockSize;
+
+    MatrixHyperDualIndexGetKernel<<<gridSize, blockSize>>>(
+        d_a_real, d_a_dual, d_a_hyper,
+        rows, cols, dual_size,
+        rowStart, rowEnd, colStart, colEnd,
+        d_out_real, d_out_dual, d_out_hyper
+    );
+    cudaDeviceSynchronize();
+
+    // 5) Copy results back
+    auto h_out_real  = CopyToHost(d_out_real,  out_real_size);
+    auto h_out_dual  = CopyToHost(d_out_dual,  out_dual_size);
+    auto h_out_hyper = CopyToHost(d_out_hyper, out_hyper_size);
+
+    // free device mem
+    cudaFree(d_a_real);
+    cudaFree(d_a_dual);
+    cudaFree(d_a_hyper);
+    cudaFree(d_out_real);
+    cudaFree(d_out_dual);
+    cudaFree(d_out_hyper);
+
+    // 6) Compute the reference on host
+    // We'll do nested loops:
+    //   i in [rowStart..rowEnd-1]
+    //   j in [colStart..colEnd-1]
+    //   localRow = i - rowStart
+    //   localCol = j - colStart
+    // Then copy:
+    //   out_real[localOff] = a_real[globalOff], etc.
+    //   out_dual[localOff*dual_size + k] = a_dual[globalOff*dual_size + k]
+    //   out_hyper[localOff*dual_size^2 + k*dual_size + l] = ...
+    std::vector<thrust::complex<double>> ref_real(out_real_size);
+    std::vector<thrust::complex<double>> ref_dual(out_dual_size);
+    std::vector<thrust::complex<double>> ref_hyper(out_hyper_size);
+
+    for (int i = rowStart; i < rowEnd; ++i) {
+        for (int j = colStart; j < colEnd; ++j) {
+            int localRow = i - rowStart; 
+            int localCol = j - colStart;
+            int outOff   = localRow*outCols + localCol; // for real
+
+            // copy real
+            ref_real[outOff] = a_real[i*cols + j];
+
+            // copy dual
+            for (int k = 0; k < dual_size; ++k) {
+                int outDualOff = outOff*dual_size + k;
+                ref_dual[outDualOff] = a_dual[(i*cols + j)*dual_size + k];
+            }
+
+            // copy hyper
+            for (int k = 0; k < dual_size; ++k) {
+                for (int l = 0; l < dual_size; ++l) {
+                    int outHyperOff = outOff*dual_size*dual_size + k*dual_size + l;
+                    ref_hyper[outHyperOff] = a_hyper[(i*cols + j)*dual_size*dual_size + k*dual_size + l];
+                }
+            }
+        }
+    }
+
+    // 7) Compare
+    // real part
+    for (int i = 0; i < out_real_size; ++i) {
+        EXPECT_EQ(h_out_real[i], ref_real[i]) 
+            << "Mismatch in real slice at i=" << i;
+    }
+
+    // dual part
+    for (int i = 0; i < out_dual_size; ++i) {
+        EXPECT_EQ(h_out_dual[i], ref_dual[i]) 
+            << "Mismatch in dual slice at i=" << i;
+    }
+
+    // hyper part
+    for (int i = 0; i < out_hyper_size; ++i) {
+        EXPECT_EQ(h_out_hyper[i], ref_hyper[i]) 
+            << "Mismatch in hyper slice at i=" << i;
+    }
+}
+
+
+
+// ---------------------------------------------------------------------------
+// Test: Copy a 2x2 sub-slice from a 3x4 source (rows=3,cols=4) into a 5x5 dest
+// ---------------------------------------------------------------------------
+TEST(MatrixHyperDualIndexPutTest, SubSlice3x4_Into5x5)
+{
+    using T = double;
+
+    // 1) Setup source dimensions
+    int srcRows = 3;
+    int srcCols = 4;
+    int dual_size = 2;
+
+    // We define a sub-slice in the source: row range [1..3), col range [1..3)
+    int rowStartSrc = 1, rowEndSrc = 3;  // => subRows=2
+    int colStartSrc = 1, colEndSrc = 3;  // => subCols=2
+
+    // => sub-slice shape = 2x2
+
+    // 2) Setup destination dimensions
+    int dstRows = 5;
+    int dstCols = 5;
+
+    // 3) Compute array sizes
+    // source real => srcRows*srcCols=3*4=12
+    // source dual => 12*dual_size=24
+    // source hyper => 12*(dual_size^2)=48
+    int srcTotalReal  = srcRows*srcCols; 
+    int srcTotalDual  = srcRows*srcCols*dual_size;
+    int srcTotalHyper = srcRows*srcCols*dual_size*dual_size;
+
+    // destination real => dstRows*dstCols=5*5=25
+    // destination dual => 25*dual_size=50
+    // destination hyper => 25*(dual_size^2)=100
+    int dstTotalReal  = dstRows*dstCols; 
+    int dstTotalDual  = dstTotalReal*dual_size;  // 25*2=50
+    int dstTotalHyper = dstTotalReal*dual_size*dual_size; //25*2*2=100
+
+    // 4) Create host arrays for source
+    std::vector<thrust::complex<T>> src_real(srcTotalReal);
+    std::vector<thrust::complex<T>> src_dual(srcTotalDual);
+    std::vector<thrust::complex<T>> src_hyper(srcTotalHyper);
+
+    // Fill them with some pattern:
+    // a) src_real => row i => ( (i+1)*10 + j ) as real
+    for (int i = 0; i < srcRows; ++i) {
+        for (int j = 0; j < srcCols; ++j) {
+            int off = i*srcCols + j;
+            double val = double((i+1)*10 + j); 
+            src_real[off] = thrust::complex<T>(val, 0.0);
+        }
+    }
+    // b) src_dual => length=24 => fill with (0.1+ idx, -0.2-idx)
+    for (int i = 0; i < srcTotalDual; ++i) {
+        double re = 0.1 + double(i);
+        double im = -0.2 - double(i);
+        src_dual[i] = thrust::complex<T>(re, im);
+    }
+    // c) src_hyper => length=48 => fill with (0.01*i, 0.02*i)
+    for (int i = 0; i < srcTotalHyper; ++i) {
+        double re = 0.01* i;
+        double im = 0.02* i;
+        src_hyper[i] = thrust::complex<T>(re, im);
+    }
+
+    // 5) Create host arrays for destination
+    // We'll fill them with a different pattern so we can confirm that only 
+    // the sub-slice region is changed.
+    std::vector<thrust::complex<T>> dst_real(dstTotalReal),
+                                    dst_dual(dstTotalDual),
+                                    dst_hyper(dstTotalHyper);
+    // e.g. set everything to (999,999) so we can detect overwrites
+    for (int i = 0; i < dstTotalReal; ++i) {
+        dst_real[i] = thrust::complex<T>(999.0, 999.0);
+    }
+    for (int i = 0; i < dstTotalDual; ++i) {
+        dst_dual[i] = thrust::complex<T>(999.0, 999.0);
+    }
+    for (int i = 0; i < dstTotalHyper; ++i) {
+        dst_hyper[i] = thrust::complex<T>(999.0, 999.0);
+    }
+
+    // 6) Allocate device memory & copy
+    thrust::complex<T>* d_src_real=nullptr;
+    thrust::complex<T>* d_src_dual=nullptr;
+    thrust::complex<T>* d_src_hyper=nullptr;
+
+    thrust::complex<T>* d_dst_real=nullptr;
+    thrust::complex<T>* d_dst_dual=nullptr;
+    thrust::complex<T>* d_dst_hyper=nullptr;
+
+    AllocateAndCopy(src_real,  &d_src_real);
+    AllocateAndCopy(src_dual,  &d_src_dual);
+    AllocateAndCopy(src_hyper, &d_src_hyper);
+
+    // copy the "dst_" arrays to device
+    size_t dstRealBytes  = dstTotalReal*sizeof(thrust::complex<T>);
+    size_t dstDualBytes  = dstTotalDual*sizeof(thrust::complex<T>);
+    size_t dstHyperBytes = dstTotalHyper*sizeof(thrust::complex<T>);
+
+    cudaMalloc(&d_dst_real,  dstRealBytes);
+    cudaMalloc(&d_dst_dual,  dstDualBytes);
+    cudaMalloc(&d_dst_hyper, dstHyperBytes);
+
+    cudaMemcpy(d_dst_real,  dst_real.data(),  dstRealBytes,  cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dst_dual,  dst_dual.data(),  dstDualBytes,  cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dst_hyper, dst_hyper.data(), dstHyperBytes, cudaMemcpyHostToDevice);
+
+    // 7) Launch the kernel
+    int subRows = rowEndSrc - rowStartSrc; // 2
+    int subCols = colEndSrc - colStartSrc; // 2
+    int totalHyper = subRows * subCols * dual_size * dual_size; // 2*2*2*2=8
+
+    int blockSize = 128;
+    int gridSize  = (totalHyper + blockSize - 1)/blockSize;
+
+    int rowStartDst = 1; 
+    int colStartDst = 2;  // we place the 2x2 sub-slice in the dest at (1,2)
+
+    MatrixHyperDualIndexPutKernel<<<gridSize, blockSize>>>(
+        // source
+        d_src_real, d_src_dual, d_src_hyper,
+        srcRows, srcCols, dual_size,
+        rowStartSrc, rowEndSrc,
+        colStartSrc, colEndSrc,
+        // destination
+        d_dst_real, d_dst_dual, d_dst_hyper,
+        dstRows, dstCols,
+        rowStartDst, colStartDst
+    );
+    cudaDeviceSynchronize();
+
+    // 8) Copy the destination back to host
+    cudaMemcpy(dst_real.data(),  d_dst_real,  dstRealBytes,  cudaMemcpyDeviceToHost);
+    cudaMemcpy(dst_dual.data(),  d_dst_dual,  dstDualBytes,  cudaMemcpyDeviceToHost);
+    cudaMemcpy(dst_hyper.data(), d_dst_hyper, dstHyperBytes, cudaMemcpyDeviceToHost);
+
+    // free device memory
+    cudaFree(d_src_real);
+    cudaFree(d_src_dual);
+    cudaFree(d_src_hyper);
+    cudaFree(d_dst_real);
+    cudaFree(d_dst_dual);
+    cudaFree(d_dst_hyper);
+
+    // 9) Build a host reference
+    // We'll replicate the logic: for each localRow in [0..subRows-1],
+    // localCol in [0..subCols-1], copy the real, dual, hyper from src to dst
+    //  at (rowStartDst+localRow, colStartDst+localCol).
+    // We'll create reference arrays same size as the dest,
+    // then fill with 999,999, and override sub-slice region from source.
+
+    std::vector<thrust::complex<T>> ref_real(dstTotalReal,  thrust::complex<T>(999,999));
+    std::vector<thrust::complex<T>> ref_dual(dstTotalDual,  thrust::complex<T>(999,999));
+    std::vector<thrust::complex<T>> ref_hyper(dstTotalHyper,thrust::complex<T>(999,999));
+
+    // copy the sub-slice from source
+    for (int localRow=0; localRow < subRows; ++localRow) {
+        for (int localCol=0; localCol < subCols; ++localCol) {
+            int srcRow = rowStartSrc + localRow; 
+            int srcCol = colStartSrc + localCol; 
+            int srcOff = srcRow*srcCols + srcCol;
+
+            int dstRow = rowStartDst + localRow; 
+            int dstCol = colStartDst + localCol; 
+            int dstOff = dstRow*dstCols + dstCol;
+
+            // copy real
+            ref_real[dstOff] = src_real[srcOff];
+
+            // copy dual
+            for (int k = 0; k < dual_size; ++k) {
+                int srcDualOff = srcOff*dual_size + k;
+                int dstDualOff = dstOff*dual_size + k;
+                ref_dual[dstDualOff] = src_dual[srcDualOff];
+            }
+
+            // copy hyper
+            for (int k = 0; k < dual_size; ++k) {
+                for (int l=0; l< dual_size; ++l) {
+                    int srcHyperOff = srcOff*dual_size*dual_size + k*dual_size + l;
+                    int dstHyperOff = dstOff*dual_size*dual_size + k*dual_size + l;
+                    ref_hyper[dstHyperOff] = src_hyper[srcHyperOff];
+                }
+            }
+        }
+    }
+
+    // 10) Compare
+    // Compare ref_real vs. dst_real, etc.  Everything outside sub-slice 
+    // should remain (999,999).  Inside sub-slice should match the src sub-slice.
+    for (int i = 0; i < dstTotalReal; ++i) {
+        EXPECT_EQ(dst_real[i], ref_real[i]) << "Mismatch real at i=" << i;
+    }
+    for (int i = 0; i < dstTotalDual; ++i) {
+        EXPECT_EQ(dst_dual[i], ref_dual[i]) << "Mismatch dual at i=" << i;
+    }
+    for (int i = 0; i < dstTotalHyper; ++i) {
+        EXPECT_EQ(dst_hyper[i], ref_hyper[i]) << "Mismatch hyper at i=" << i;
+    }
+}
+
+
+
+
+
+// ---------------------------------------------------------------------------
+// Test A: (rows=1, cols=3, dim=0) => we remove the row dimension
+//         so result shape => real=3, dual=3*dual_size, hyper=3*dual_size^2
+// ---------------------------------------------------------------------------
+TEST(MatrixHyperDualSqueezeTest, Rows1_Cols3_Dim0)
+{
+    int rows=1, cols=3, dual_size=2, dim=0; 
+    // => total real=1*3=3, dual=3*2=6, hyper=3*2*2=12
+
+    // Fill host arrays
+    std::vector<thrust::complex<double>> a_real(rows*cols), 
+                                         a_dual(rows*cols*dual_size),
+                                         a_hyper(rows*cols*dual_size*dual_size);
+    for (int i=0; i<(int)a_real.size(); ++i) {
+        a_real[i] =thrust::complex<double>(double(i+1), 0.0 );
+    }
+    for (int i=0; i<(int)a_dual.size(); ++i) {
+        a_dual[i] = thrust::complex<double>( double(i+0.1), double(i+0.2) );
+    }
+    for (int i=0; i<(int)a_hyper.size(); ++i) {
+        a_hyper[i] = thrust::complex<double>( 0.01* i, 0.02*i );
+    }
+
+    // Device copies
+    thrust::complex<double>* d_a_real=nullptr,* d_a_dual=nullptr,* d_a_hyper=nullptr;
+    AllocateAndCopy(a_real,  &d_a_real);
+    AllocateAndCopy(a_dual,  &d_a_dual);
+    AllocateAndCopy(a_hyper, &d_a_hyper);
+
+    // We'll store the result in shape => real=3, dual=3*2=6, hyper=3*2*2=12
+    std::vector<thrust::complex<double>> hostR_real(cols), 
+                                         hostR_dual(cols*dual_size),
+                                         hostR_hyper(cols*dual_size*dual_size);
+    // device
+    thrust::complex<double>* d_r_real=nullptr,* d_r_dual=nullptr,* d_r_hyper=nullptr;
+    cudaMalloc(&d_r_real,   cols*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_r_dual,   cols*dual_size*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_r_hyper,  cols*dual_size*dual_size*sizeof(thrust::complex<double>));
+
+    // Launch kernel
+    int totalHyper = rows*cols*dual_size*dual_size; // 1*3*(2*2)=12
+    int blockSize=128;
+    int gridSize=(totalHyper+blockSize-1)/blockSize;
+    MatrixHyperDualSqueezeKernel<<<gridSize, blockSize>>>(
+        d_a_real, d_a_dual, d_a_hyper,
+        rows, cols, dual_size,
+        dim,
+        d_r_real, d_r_dual, d_r_hyper
+    );
+    cudaDeviceSynchronize();
+
+    // Copy back
+    auto r_real  = CopyToHost(d_r_real,  cols);
+    auto r_dual  = CopyToHost(d_r_dual,  cols*dual_size);
+    auto r_hyper = CopyToHost(d_r_hyper, cols*dual_size*dual_size);
+
+    // Build reference
+    // Because rows=1 => i=0 is the only row
+    // => result index = j
+    // real => if (k,l)==(0,0), result_real[j] = a_real[j]
+    // dual => if l==0 => result_dual[j*dual_size+k] = a_dual[j*dual_size+k]
+    // hyper=> result_hyper[ j*(dsize^2) + k*dsize + l ] = ...
+    std::vector<thrust::complex<double>> ref_real(cols),
+                                         ref_dual(cols*dual_size),
+                                         ref_hyper(cols*dual_size*dual_size);
+    // We'll just do direct copy because i=0
+    for (int j0=0; j0<cols; ++j0) {
+        // real
+        ref_real[j0] = a_real[j0]; // only (k,l)==(0,0) but effectively storing last
+        // dual
+        for (int k0=0; k0<dual_size; ++k0) {
+            ref_dual[j0*dual_size + k0] = a_dual[j0*dual_size + k0];
+        }
+        // hyper
+        for (int k0=0; k0<dual_size; ++k0){
+          for (int l0=0; l0<dual_size; ++l0){
+             ref_hyper[j0*dual_size*dual_size + k0*dual_size + l0] 
+                = a_hyper[j0*dual_size*dual_size + k0*dual_size + l0];
+          }
+        }
+    }
+
+    // Compare
+    for (int i=0; i<cols; ++i){
+       EXPECT_EQ(r_real[i], ref_real[i]) << "Mismatch real at col="<<i<<" rows=1 case";
+    }
+    for (int i=0; i< (int)ref_dual.size(); ++i){
+       EXPECT_EQ(r_dual[i], ref_dual[i]) << "Mismatch dual at i="<<i<<" rows=1 case";
+    }
+    for (int i=0; i< (int)ref_hyper.size(); ++i){
+       EXPECT_EQ(r_hyper[i], ref_hyper[i]) << "Mismatch hyper at i="<<i<<" rows=1 case";
+    }
+
+    cudaFree(d_a_real);  cudaFree(d_a_dual);  cudaFree(d_a_hyper);
+    cudaFree(d_r_real);  cudaFree(d_r_dual);  cudaFree(d_r_hyper);
+}
+
+// ---------------------------------------------------------------------------
+// Test B: (rows=4, cols=1, dim=1) => we remove the column dimension
+//         result shape => real=4, dual=4*2, hyper=4*(2*2)
+// ---------------------------------------------------------------------------
+TEST(MatrixHyperDualSqueezeTest, Rows4_Cols1_Dim1)
+{
+    int rows=4, cols=1, dual_size=2, dim=1;
+    // total real=4*1=4, dual=4*1*2=8, hyper=4*1*(2*2)=16
+
+    std::vector<thrust::complex<double>> a_real(rows*cols),
+                                         a_dual(rows*cols*dual_size),
+                                         a_hyper(rows*cols*dual_size*dual_size);
+    for (int i=0; i<(int)a_real.size(); ++i){
+        a_real[i] = thrust::complex<double>(double(i+10), 0.0 );
+    }
+    for (int i=0; i<(int)a_dual.size(); ++i){
+        double re= i+0.1, im= i+0.2;
+        a_dual[i] = thrust::complex<double>(re, im);
+    }
+    for (int i=0; i<(int)a_hyper.size(); ++i){
+        double re=0.01*i, im=0.02*i;
+        a_hyper[i] = thrust::complex<double>(re, im);
+    }
+
+    thrust::complex<double>* d_a_real=nullptr,* d_a_dual=nullptr,* d_a_hyper=nullptr;
+    AllocateAndCopy(a_real,  &d_a_real);
+    AllocateAndCopy(a_dual,  &d_a_dual);
+    AllocateAndCopy(a_hyper, &d_a_hyper);
+
+    // result => real=rows=4, dual=4*2=8, hyper=4*(2*2)=16
+    thrust::complex<double>* d_r_real=nullptr, *d_r_dual=nullptr, *d_r_hyper=nullptr;
+    cudaMalloc(&d_r_real,  rows*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_r_dual,  rows*dual_size*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_r_hyper, rows*dual_size*dual_size*sizeof(thrust::complex<double>));
+    cudaMemset(d_r_real,  0, rows*sizeof(thrust::complex<double>));
+    cudaMemset(d_r_dual,  0, rows*dual_size*sizeof(thrust::complex<double>));
+    cudaMemset(d_r_hyper, 0, rows*dual_size*dual_size*sizeof(thrust::complex<double>));
+
+    int totalHyper=rows*cols*dual_size*dual_size; //4*1*(2*2)=16
+    int blockSize=128;
+    int gridSize=(totalHyper+blockSize-1)/blockSize;
+
+    MatrixHyperDualSqueezeKernel<<<gridSize,blockSize>>>(
+        d_a_real, d_a_dual, d_a_hyper,
+        rows, cols, dual_size,
+        dim,
+        d_r_real, d_r_dual, d_r_hyper
+    );
+    cudaDeviceSynchronize();
+
+    auto r_real  = CopyToHost(d_r_real,  rows);
+    auto r_dual  = CopyToHost(d_r_dual,  rows*dual_size);
+    auto r_hyper = CopyToHost(d_r_hyper, rows*dual_size*dual_size);
+
+    // Build ref
+    // Because cols=1 => j=0 is the only column
+    // => result index is i
+    std::vector<thrust::complex<double>> ref_real(rows),
+                                         ref_dual(rows*dual_size),
+                                         ref_hyper(rows*dual_size*dual_size);
+    for (int i0=0; i0<rows; ++i0){
+       ref_real[i0] = a_real[i0]; // j=0
+       for (int k0=0; k0<dual_size; ++k0){
+         ref_dual[i0*dual_size + k0] = a_dual[i0*dual_size + k0];
+       }
+       for (int k0=0; k0<dual_size; ++k0){
+         for (int l0=0; l0<dual_size; ++l0){
+           int off= (i0*cols + 0)*dual_size*dual_size + k0*dual_size + l0;
+           ref_hyper[i0*dual_size*dual_size + k0*dual_size + l0] = a_hyper[off];
+         }
+       }
+    }
+
+    for (int i=0; i<rows; ++i){
+        EXPECT_EQ(r_real[i], ref_real[i])
+            << "Mismatch real i="<<i<<" for (rows=4,cols=1,dim=1)";
+    }
+    for (int i=0; i<(int)ref_dual.size(); ++i){
+        EXPECT_EQ(r_dual[i], ref_dual[i])
+            << "Mismatch dual i="<<i;
+    }
+    for (int i=0; i<(int)ref_hyper.size(); ++i){
+        EXPECT_EQ(r_hyper[i], ref_hyper[i])
+            << "Mismatch hyper i="<<i;
+    }
+
+    cudaFree(d_a_real); cudaFree(d_a_dual); cudaFree(d_a_hyper);
+    cudaFree(d_r_real); cudaFree(d_r_dual); cudaFree(d_r_hyper);
+}
+
+// ---------------------------------------------------------------------------
+// Test C: If dimension isn't 1 in the chosen 'dim', we do "no effect" => 
+// no shape change. We'll just do one example: rows=2, cols=3, dim=1 but cols=3
+// so we expect no writing. We'll store the result in separate arrays 
+// but verify they're unchanged from an initial "garbage" pattern.
+// ---------------------------------------------------------------------------
+TEST(MatrixHyperDualSqueezeTest, NoEffectDim1WhenColsNot1)
+{
+    int rows=2, cols=3, dual_size=2, dim=1;
+    // Because cols !=1, we do nothing.
+
+    // Build a small input
+    int totalReal= rows*cols;  //2*3=6
+    int totalDual= totalReal*dual_size; //6*2=12
+    int totalHyper= totalReal*dual_size*dual_size; //6*(2*2)=24
+    std::vector<thrust::complex<double>> a_real(totalReal), 
+                                         a_dual(totalDual),
+                                         a_hyper(totalHyper);
+    for (int i=0; i<totalReal; ++i){
+        a_real[i]=thrust::complex<double>(double(i+1),0);
+    }
+    for (int i=0; i<totalDual; ++i){
+        double re=i+0.1, im=i+0.2;
+        a_dual[i]=thrust::complex<double>(re,im);
+    }
+    for (int i=0; i<totalHyper; ++i){
+        double re=0.01*i, im=0.02*i;
+        a_hyper[i]=thrust::complex<double>(re,im);
+    }
+
+    // We'll allocate some result arrays but fill them with "garbage" 
+    // to detect if anything changes.
+    // We'll guess the "squeezed" shape might be something else, but we actually 
+    // don't expect the code to do anything at all.
+    std::vector<thrust::complex<double>> r_realH(5, {999,999}),
+                                         r_dualH(10,{999,999}),
+                                         r_hyperH(20,{999,999});
+    auto r_realC= r_realH, r_dualC=r_dualH, r_hyperC=r_hyperH; 
+      // copy for compare after kernel
+
+    // Device
+    thrust::complex<double>* d_a_real=nullptr,* d_a_dual=nullptr,* d_a_hyper=nullptr;
+    AllocateAndCopy(a_real, &d_a_real);
+    AllocateAndCopy(a_dual, &d_a_dual);
+    AllocateAndCopy(a_hyper,&d_a_hyper);
+
+    // For results, let's allocate the same shape we put in host 
+    // but the code won't do anything if the dimension isn't 1
+    thrust::complex<double>* d_r_real=nullptr,* d_r_dual=nullptr,* d_r_hyper=nullptr;
+    cudaMalloc(&d_r_real,   r_realH.size()*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_r_dual,   r_dualH.size()*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_r_hyper,  r_hyperH.size()*sizeof(thrust::complex<double>));
+    cudaMemcpy(d_r_real,   r_realH.data(),  r_realH.size()*sizeof(thrust::complex<double>), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_r_dual,   r_dualH.data(),  r_dualH.size()*sizeof(thrust::complex<double>), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_r_hyper,  r_hyperH.data(), r_hyperH.size()*sizeof(thrust::complex<double>),cudaMemcpyHostToDevice);
+
+    // Launch 
+    totalHyper= rows*cols*dual_size*dual_size; //24
+    int blockSize=128;
+    int gridSize=(totalHyper+blockSize-1)/blockSize;
+    MatrixHyperDualSqueezeKernel<<<gridSize, blockSize>>>(
+        d_a_real, d_a_dual, d_a_hyper,
+        rows, cols, dual_size,
+        dim, 
+        d_r_real, d_r_dual, d_r_hyper
+    );
+    cudaDeviceSynchronize();
+
+    // get results
+    auto r_realOut= CopyToHost(d_r_real,  r_realH.size());
+    auto r_dualOut= CopyToHost(d_r_dual,  r_dualH.size());
+    auto r_hyperOut=CopyToHost(d_r_hyper, r_hyperH.size());
+
+    // Compare => expect no changes
+    for (size_t i=0; i<r_realH.size(); ++i){
+       EXPECT_EQ(r_realOut[i], r_realC[i]) 
+           << "Expected no change in real i="<<i<<" because squeeze not triggered.";
+    }
+    for (size_t i=0; i<r_dualH.size(); ++i){
+       EXPECT_EQ(r_dualOut[i], r_dualC[i])
+           << "Expected no change in dual i="<<i<<" because squeeze not triggered.";
+    }
+    for (size_t i=0; i<r_hyperH.size(); ++i){
+       EXPECT_EQ(r_hyperOut[i], r_hyperC[i])
+           << "Expected no change in hyper i="<<i<<" because squeeze not triggered.";
+    }
+
+    cudaFree(d_a_real); cudaFree(d_a_dual); cudaFree(d_a_hyper);
+    cudaFree(d_r_real); cudaFree(d_r_dual); cudaFree(d_r_hyper);
+}
+
+
+
+// ---------------------------------------------------------------------------
+// Google Test for MatrixHyperDualSigncondKernel
+// ---------------------------------------------------------------------------
+TEST(MatrixHyperDualSigncondTest, Basic_2x2_dual2)
+{
+    // We pick: rows=2, cols=2, dual_size=2
+    // => a_real, b_real => 4 elements each
+    // => a_dual, b_dual => 4 * 2 = 8 elements each, 
+    // => a_hyper, b_hyper => 4 * 2 * 2 = 16 elements each
+    // We'll only use b_real for sign, ignoring b_dual/b_hyper if we want.
+
+    // 1) Setup
+    int rows=2, cols=2, dual_size=2;
+    int totalReal  = rows*cols;             // 4
+    int totalDual  = totalReal*dual_size;   // 8
+    int totalHyper = totalReal*dual_size*dual_size; // 16
+    double tol=1.0e-6;
+
+    // 2) Host arrays: a_real, a_dual, a_hyper, b_real
+    std::vector<thrust::complex<double>> a_real(totalReal),
+                                         a_dual(totalDual),
+                                         a_hyper(totalHyper),
+                                         b_real(totalReal);
+    // Fill a with patterns
+    // a_real => e.g. [ -2, -0.0001, 1, 3 ] to test sign logic 
+    // (some negative, some small near zero, some positive)
+    a_real[0] = thrust::complex<double>(-2.0,  0.0);
+    a_real[1] = thrust::complex<double>(-0.0001, 0.0); // close to zero
+    a_real[2] = thrust::complex<double>(1.0,   0.0);
+    a_real[3] = thrust::complex<double>(3.0,   0.0);
+
+    // a_dual => fill with arbitrary patterns
+    for (int i=0; i<totalDual; ++i) {
+        double re = i+0.1, im = i+0.2;
+        a_dual[i] = thrust::complex<double>(re, im);
+    }
+    // a_hyper => fill with distinct pattern
+    for (int i=0; i<totalHyper; ++i) {
+        double re=0.01*(i), im=0.02*(i);
+        a_hyper[i] = thrust::complex<double>(re, im);
+    }
+
+    // b_real => e.g. [ 0.00005, -4, 10, -1 ]
+    // We'll see how that toggles sign logic
+    b_real[0] = thrust::complex<double>(0.00005, 0.0); 
+    b_real[1] = thrust::complex<double>(-4.0,    0.0);
+    b_real[2] = thrust::complex<double>(10.0,    0.0);
+    b_real[3] = thrust::complex<double>(-1.0,    0.0);
+
+    // 3) Device memory
+    thrust::complex<double>* d_a_real=nullptr,* d_a_dual=nullptr,* d_a_hyper=nullptr;
+    thrust::complex<double>* d_b_real=nullptr;
+    AllocateAndCopy(a_real,   &d_a_real);
+    AllocateAndCopy(a_dual,   &d_a_dual);
+    AllocateAndCopy(a_hyper,  &d_a_hyper);
+    AllocateAndCopy(b_real,   &d_b_real);
+
+    // 4) Allocate device memory for result
+    std::vector<thrust::complex<double>> dummy_real(totalReal), 
+                                         dummy_dual(totalDual), 
+                                         dummy_hyper(totalHyper);
+    thrust::complex<double>* d_result_real=nullptr,
+                            * d_result_dual=nullptr,
+                            * d_result_hyper=nullptr;
+    cudaMalloc(&d_result_real,  totalReal*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_result_dual,  totalDual*sizeof(thrust::complex<double>));
+    cudaMalloc(&d_result_hyper, totalHyper*sizeof(thrust::complex<double>));
+
+    // 5) Launch kernel
+    int totalThreads= rows*cols * dual_size*dual_size; // 2*2*(2*2)=8
+    int blockSize=128;
+    int gridSize=(totalThreads+blockSize-1)/blockSize;
+
+    MatrixHyperDualSigncondKernel<<<gridSize, blockSize>>>(
+        d_a_real, d_a_dual, d_a_hyper,
+        d_b_real,
+        rows, cols, dual_size,
+        d_result_real, d_result_dual, d_result_hyper,
+        tol
+    );
+    cudaDeviceSynchronize();
+
+    // 6) Copy result back
+    auto res_real  = CopyToHost(d_result_real,  totalReal);
+    auto res_dual  = CopyToHost(d_result_dual,  totalDual);
+    auto res_hyper = CopyToHost(d_result_hyper, totalHyper);
+
+    // free device
+    cudaFree(d_a_real);    cudaFree(d_a_dual);    cudaFree(d_a_hyper);
+    cudaFree(d_b_real);
+    cudaFree(d_result_real);
+    cudaFree(d_result_dual);
+    cudaFree(d_result_hyper);
+
+    // 7) Build host reference
+    // For each (i,j):
+    //   a_sign = sign( a_real(i,j).real() ) with tol
+    //   b_sign = sign( b_real(i,j).real() ) with tol
+    //   Then real => only once if (k,l)=(0,0)
+    //   dual => if (l=0)
+    //   hyper => for all (k,l)
+    // sign logic => if (b_sign>=0), result= (a_sign>=0)? +a : -a
+    //               else,           result= (a_sign>=0)? -a : +a
+
+    auto ref_real  = std::vector<thrust::complex<double>>(totalReal);
+    auto ref_dual  = std::vector<thrust::complex<double>>(totalDual);
+    auto ref_hyper = std::vector<thrust::complex<double>>(totalHyper);
+
+    for (int i0=0; i0<rows; ++i0) {
+      for (int j0=0; j0<cols; ++j0) {
+        int offReal = i0*cols + j0;
+        double aVal= a_real[offReal].real();
+        double bVal= b_real[offReal].real();
+        int a_sign= (fabs(aVal)>=tol)? ((aVal>=0)? +1 : -1) : +1;
+        int b_sign= (fabs(bVal)>=tol)? ((bVal>=0)? +1 : -1) : +1;
+
+        // real => if (k,l)==(0,0)
+        // let's do it once
+        thrust::complex<double> A_r= a_real[offReal];
+        thrust::complex<double> r_r;
+        if (b_sign>=0) {
+          r_r= (a_sign>=0)? A_r : -A_r;
+        } else {
+          r_r= (a_sign>=0)? -A_r : A_r;
+        }
+        // store
+        ref_real[offReal]= r_r;
+
+        // dual => for k in [0..1], l=0
+        for (int k0=0; k0<dual_size; ++k0){
+          int offDual= offReal*dual_size + k0;
+          auto A_du= a_dual[offDual];
+          if (b_sign>=0) {
+            ref_dual[offDual]= (a_sign>=0)? A_du : -A_du;
+          } else {
+            ref_dual[offDual]= (a_sign>=0)? -A_du : A_du;
+          }
+        }
+
+        // hyper => for k0,l0 in [0..1]
+        for (int k0=0; k0<dual_size; ++k0){
+          for (int l0=0; l0<dual_size; ++l0){
+            int offHyp= offReal*dual_size*dual_size + k0*dual_size + l0;
+            auto A_hy= a_hyper[offHyp];
+            if (b_sign>=0) {
+              ref_hyper[offHyp]= (a_sign>=0)? A_hy : -A_hy;
+            } else {
+              ref_hyper[offHyp]= (a_sign>=0)? -A_hy : A_hy;
+            }
+          }
+        }
+      }
+    }
+
+    // 8) Compare
+    // real => 4
+    for (int i=0; i< totalReal; ++i) {
+      EXPECT_EQ(res_real[i], ref_real[i])
+          << "Mismatch real at i="<<i;
+    }
+    // dual => 8
+    for (int i=0; i< totalDual; ++i) {
+      EXPECT_EQ(res_dual[i], ref_dual[i])
+          << "Mismatch dual at i="<<i;
+    }
+    // hyper =>16
+    for (int i=0; i< totalHyper; ++i) {
+      EXPECT_EQ(res_hyper[i], ref_hyper[i])
+          << "Mismatch hyper at i="<<i;
+    }
+}
+
+
 // Add more tests for IndexGet, IndexPut, ElementwiseMultiply, Square, Pow, and Sqrt similarly.
 // Main entry point for Google Test
 int main(int argc, char **argv) {
