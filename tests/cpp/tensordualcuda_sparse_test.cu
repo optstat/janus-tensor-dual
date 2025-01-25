@@ -2,10 +2,6 @@
 #include <cuda_runtime.h>
 #include <iostream>
 #include <cassert>
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
-#include <thrust/scan.h>
-#include <thrust/version.h>
 
 #include "../../src/cpp/cudatensorsparse.cu"
 // Include your VectorBool implementation here
@@ -5405,6 +5401,419 @@ TEST(CSRMatrixDimSum, SmallExample)
     cudaFree(dResult);
 }
 
+
+
+
+
+// -----------------------------------------------------------------------------
+// A small CPU reference approach to build the "dense" version of (rows x cols),
+// do the slice [start..end), and then build a reference 2D matrix of shape
+// (end-start) x 1. Then convert that 2D matrix to a host-based CSR that we
+// can compare with the device-based result. We'll do a naive "dense2csr" approach.
+// -----------------------------------------------------------------------------
+void HostMatrixIndexGetCSR_Reference(
+    // Original matrix in "dense" row-major form
+    int rows, int cols,
+    const std::vector<thrust::complex<double>>& denseA, // length = rows*cols
+
+    int startIndex,
+    int endIndex,
+
+    // outputs: a host-based CSR for the slice => shape = (endIndex - startIndex) x 1
+    int& outRows, // = (end-start)
+    int& outCols, // = 1
+    std::vector<int>& outRowPtr,
+    std::vector<int>& outColIdx,
+    std::vector<thrust::complex<double>>& outData
+)
+{
+    // shape of the slice
+    int sliceLen = endIndex - startIndex;
+    outRows = sliceLen;
+    outCols = 1;
+
+    // Build a (sliceLen x 1) dense array 'Cdense'
+    std::vector<thrust::complex<double>> Cdense(sliceLen, thrust::complex<double>(0,0));
+
+    // copy slice
+    for (int idx = startIndex; idx < endIndex; idx++){
+        Cdense[idx - startIndex] = denseA[idx];
+    }
+
+    // Now convert 'Cdense' to CSR, skipping zeros
+    // row i => 1 column => if Cdense[i] != 0 => col=0 => val
+    outRowPtr.resize(sliceLen+1);
+    int nnzCount=0;
+    for (int i=0; i<sliceLen; i++){
+        // each row has 0 or 1 nonzero
+        if (thrust::abs(Cdense[i]) != 0.0) {
+            nnzCount++;
+        }
+    }
+    outData.resize(nnzCount);
+    outColIdx.resize(nnzCount);
+
+    // fill rowPtr
+    int rowPtr=0;
+    int pos=0;
+    outRowPtr[0] = 0;
+    for (int i=0; i<sliceLen; i++){
+        int rowNnz=0;
+        if (thrust::abs(Cdense[i]) != 0.0) {
+            rowNnz=1;
+        }
+        outRowPtr[i+1] = outRowPtr[i] + rowNnz;
+        if (rowNnz == 1) {
+            // col=0
+            outColIdx[pos] = 0;
+            outData[pos]   = Cdense[i];
+            pos++;
+        }
+    }
+}
+
+
+
+
+// -----------------------------------------------------------------------------
+// CPU Reference: Build a subrange slice of [start..end) in row-major flattening
+// without converting the entire matrix to dense. We'll just iterate over
+// each nonzero in the original CSR, compute its denseIdx = r*cols + c, and if
+// in [start..end) => newRow = denseIdx - start => col=0 => store in a temp
+// and then convert that to CSR by grouping them by newRow.
+//
+// The final shape => (end-start) x 1
+// -----------------------------------------------------------------------------
+void HostMatrixIndexGetCSR_Reference(
+    // original matrix in CSR (host arrays) with shape=(rows x cols)
+    int rows, int cols,
+    const std::vector<int>& rowPtr,
+    const std::vector<int>& colIdx,
+    const std::vector<thrust::complex<double>>& vals,
+
+    long long startIdx,
+    long long endIdx,
+
+    // outputs: shape => (endIdx-startIdx) x 1
+    int& outRows,
+    int& outCols,
+    std::vector<int>& outRowPtr,
+    std::vector<int>& outColIdx,
+    std::vector<thrust::complex<double>>& outVals
+)
+{
+    long long sliceLen = endIdx - startIdx;
+    outRows = static_cast<int>(sliceLen);
+    outCols = 1;
+
+    // We'll store a list of (newRow, val). col=0 always.
+    // Then we'll sort by newRow, build rowPtr from that.
+    struct NZ {
+        int row;
+        thrust::complex<double> val;
+    };
+    std::vector<NZ> nzList;
+
+    // For each row r:
+    for(int r=0; r<rows; r++){
+        for(int i=rowPtr[r]; i<rowPtr[r+1]; i++){
+            int c = colIdx[i];
+            long long denseIdx = (long long)r*cols + c;
+            if(denseIdx >= startIdx && denseIdx < endIdx){
+                int newRow = static_cast<int>(denseIdx - startIdx);
+                nzList.push_back({ newRow, vals[i] });
+            }
+        }
+    }
+    // sort by row
+    std::sort(nzList.begin(), nzList.end(),
+              [](auto& a, auto& b){return a.row < b.row;});
+
+    // Now build rowPtr by counting how many entries each row has
+    outRowPtr.clear();
+    outRowPtr.resize(outRows+1, 0);
+
+    for(auto& nz : nzList){
+        outRowPtr[nz.row+1] += 1;
+    }
+    for(int r=1; r<=outRows; r++){
+        outRowPtr[r] += outRowPtr[r-1];
+    }
+    int nnzC = (int)nzList.size();
+    outColIdx.resize(nnzC);
+    outVals.resize(nnzC);
+
+    // fill colIdx=0, data from the sorted list
+    // We do a standard gather approach
+    std::vector<int> offsetPerRow(outRows);
+    for(int r=0; r<outRows; r++){
+        offsetPerRow[r] = outRowPtr[r];
+    }
+    for(const auto& nz : nzList){
+        int row = nz.row;
+        int pos = offsetPerRow[row]++;
+        outColIdx[pos] = 0; 
+        outVals[pos]   = nz.val;
+    }
+}
+
+
+// -----------------------------------------------------------------------------
+// A CPU reference function for slicing a CSR matrix in 2D
+//   We do row range [rowStart..rowEnd) and col range [colStart..colEnd).
+//   We'll produce a new host-based CSR with shape = (outRows x outCols).
+// -----------------------------------------------------------------------------
+void HostMatrixSlice2D_Reference(
+    // original matrix dims
+    int Arows, int Acols,
+
+    // original CSR on host
+    const std::vector<int>& ArowPtr,
+    const std::vector<int>& AcolIdx,
+    const std::vector<thrust::complex<double>>& Avals,
+
+    // slicing ranges
+    int rowStart, int rowEnd,
+    int colStart, int colEnd,
+
+    // outputs
+    int& outRows, int& outCols,
+    std::vector<int>& outRowPtr,
+    std::vector<int>& outColIdx,
+    std::vector<thrust::complex<double>>& outVals
+)
+{
+    // basic checks
+    if(rowEnd<rowStart || colEnd<colStart ||
+       rowStart<0 || rowEnd> Arows ||
+       colStart<0|| colEnd> Acols){
+        throw std::runtime_error("Invalid slice in CPU reference");
+    }
+    outRows = rowEnd - rowStart;
+    outCols = colEnd - colStart;
+
+    // We'll store each row in a temporary vector of (col, val).
+    std::vector<std::vector<std::pair<int,thrust::complex<double>>>> rowAccum(outRows);
+
+    for(int r = rowStart; r<rowEnd; r++){
+        int newR = r - rowStart;
+        for(int i = ArowPtr[r]; i < ArowPtr[r+1]; i++){
+            int c = AcolIdx[i];
+            if(c >= colStart && c< colEnd){
+                int newC = c - colStart;
+                rowAccum[newR].push_back({newC, Avals[i]});
+            }
+        }
+    }
+
+    // now we compress them into final CSR
+    outRowPtr.resize(outRows+1, 0);
+    int nnz=0;
+    for(int r=0; r<outRows; r++){
+        nnz +=(int) rowAccum[r].size();
+    }
+
+    outColIdx.resize(nnz);
+    outVals.resize(nnz);
+
+    outRowPtr[0]=0;
+    for(int r=1; r<=outRows; r++){
+        outRowPtr[r] = outRowPtr[r-1] + (int)rowAccum[r-1].size();
+    }
+    int offset=0;
+    for(int r=0; r<outRows; r++){
+        for(auto& e : rowAccum[r]){
+            outColIdx[offset] = e.first;
+            outVals[offset]   = e.second;
+            offset++;
+        }
+    }
+}
+
+
+
+// -----------------------------------------------------------------------------
+// Test Cases
+// -----------------------------------------------------------------------------
+
+TEST(SparseMatrix2DSlice, EntireMatrix)
+{
+    // We'll do a small 3x4 matrix with 5 nonzeros
+    // row0 => col0=>10, col2=> 2
+    // row1 => col1=>(5,2)
+    // row2 => col0=>(-1,0), col3=>(3,4)
+    // So rowPtr = [0,2,3,5], colIdx=[0,2, 1, 0,3], vals=...
+    // shape=3x4 => total 12 in flatten but we keep 5 nonzeros
+    int rows=3, cols=4;
+    std::vector<int> rowPtr= {0,2,3,5};
+    std::vector<int> colIdx= {0,2, 1, 0,3};
+    std::vector<thrust::complex<double>> vals= {
+        {10,0}, {2,0}, {5,2}, {-1,0}, {3,4}
+    };
+
+    SparseMatrixCSR dA= BuildDeviceMatrixCSR(rows, cols, rowPtr, colIdx, vals);
+
+    // entire matrix => row slice= [0..3), col slice=[0..4)
+    SparseMatrixCSR dSlice= MatrixIndexGetCSR_2D(dA, 0,3, 0,4);
+
+    // copy back
+    std::vector<int> sRowPtr, sColIdx;
+    std::vector<thrust::complex<double>> sVals;
+    CopyDeviceMatrixToHost(dSlice, sRowPtr, sColIdx, sVals);
+
+    // CPU reference
+    int refRows,refCols;
+    std::vector<int> refRowPtr, refColIdx;
+    std::vector<thrust::complex<double>> refVals;
+    HostMatrixSlice2D_Reference(
+        rows, cols,
+        rowPtr, colIdx, vals,
+        0,3, 0,4,
+        refRows, refCols,
+        refRowPtr, refColIdx, refVals
+    );
+
+    // compare shapes
+    EXPECT_EQ(dSlice.rows_, refRows);
+    EXPECT_EQ(dSlice.cols_, refCols);
+    EXPECT_EQ(dSlice.nnz_, (int)refVals.size());
+    ASSERT_EQ(sRowPtr.size(), (size_t)refRows+1);
+    ASSERT_EQ(sColIdx.size(), refVals.size());
+    ASSERT_EQ(sVals.size(),   refVals.size());
+
+    // compare data
+    for(int i=0; i< (int)sRowPtr.size(); i++){
+        EXPECT_EQ(sRowPtr[i], refRowPtr[i]) << "RowPtr mismatch i="<<i;
+    }
+    for(int i=0; i<(int)refVals.size(); i++){
+        EXPECT_EQ(sColIdx[i], refColIdx[i]) << "ColIdx mismatch i="<<i;
+        EXPECT_DOUBLE_EQ(sVals[i].real(), refVals[i].real())<<"real mismatch i="<<i;
+        EXPECT_DOUBLE_EQ(sVals[i].imag(), refVals[i].imag())<<"imag mismatch i="<<i;
+    }
+
+    //cleanup
+    cudaFree(dA.row_ptr_);cudaFree(dA.col_idx_);cudaFree(dA.data_);
+    cudaFree(dSlice.row_ptr_);cudaFree(dSlice.col_idx_);cudaFree(dSlice.data_);
+}
+
+TEST(SparseMatrix2DSlice, SubRowsSubCols)
+{
+    // same example, but we do sub slices
+    int rows=3, cols=4;
+    std::vector<int> rowPtr= {0,2,3,5};
+    std::vector<int> colIdx= {0,2, 1, 0,3};
+    std::vector<thrust::complex<double>> vals= {
+        {10,0}, {2,0}, {5,2}, {-1,0}, {3,4}
+    };
+    SparseMatrixCSR dA= BuildDeviceMatrixCSR(rows, cols, rowPtr, colIdx, vals);
+
+    // let's do row slice= [1..3), col slice= [1..3).
+    // That means we keep row1..row2, col1..col2 => shape=2x2
+    // row1 => col1 => (5,2)
+    // row2 => col0=> -1, col3=> (3,4) => but col0 not in [1..3), col3 not in [1..3)
+    // => we skip them => so row2 has no valid entries in col1..3?
+    // Actually col3=3 => 3 not < 3 => skip.
+    // final => row1 => col(1->0) => (5,2)
+    // row2 => no entries
+    // so shape=2x2 => rowPtr= [0,1,1], colIdx= [0], vals=[(5,2)]
+    SparseMatrixCSR dSlice= MatrixIndexGetCSR_2D(dA, 1,3, 1,3);
+
+    // copy
+    std::vector<int> sRowPtr, sColIdx;
+    std::vector<thrust::complex<double>> sVals;
+    CopyDeviceMatrixToHost(dSlice, sRowPtr, sColIdx, sVals);
+
+    // CPU ref
+    int refRows,refCols;
+    std::vector<int> refRowPtr, refColIdx;
+    std::vector<thrust::complex<double>> refVals;
+    HostMatrixSlice2D_Reference(
+        rows, cols,
+        rowPtr, colIdx, vals,
+        1,3, 1,3,
+        refRows, refCols,
+        refRowPtr, refColIdx, refVals
+    );
+
+    EXPECT_EQ(dSlice.rows_, refRows); // 2
+    EXPECT_EQ(dSlice.cols_, refCols); // 2
+    EXPECT_EQ(dSlice.nnz_,  (int)refVals.size()); // 1
+    ASSERT_EQ(sRowPtr.size(), (size_t)refRows+1); // 3
+    ASSERT_EQ(sColIdx.size(), refVals.size());
+    ASSERT_EQ(sVals.size(),   refVals.size());
+
+    for(int i=0; i<(int)sRowPtr.size(); i++){
+        EXPECT_EQ(sRowPtr[i], refRowPtr[i])<<"RowPtr mismatch i="<<i;
+    }
+    for(int i=0; i<(int)refVals.size(); i++){
+        EXPECT_EQ(sColIdx[i], refColIdx[i])<<"colIdx mismatch i="<<i;
+        EXPECT_DOUBLE_EQ(sVals[i].real(), refVals[i].real())<<"real mismatch i="<<i;
+        EXPECT_DOUBLE_EQ(sVals[i].imag(), refVals[i].imag())<<"imag mismatch i="<<i;
+    }
+
+    cudaFree(dA.row_ptr_);cudaFree(dA.col_idx_);cudaFree(dA.data_);
+    cudaFree(dSlice.row_ptr_);cudaFree(dSlice.col_idx_);cudaFree(dSlice.data_);
+}
+
+TEST(SparseMatrix2DSlice, OutOfRange)
+{
+    // same small matrix
+    int rows=3, cols=4;
+    std::vector<int> rowPtr= {0,2,3,5};
+    std::vector<int> colIdx= {0,2, 1, 0,3};
+    std::vector<thrust::complex<double>> vals= {
+        {10,0}, {2,0}, {5,2}, {-1,0}, {3,4}
+    };
+    SparseMatrixCSR dA= BuildDeviceMatrixCSR(rows, cols, rowPtr, colIdx, vals);
+
+    // row slice => [2..5), but we only have rows=0..2 => rowEnd=3 => outOfRange
+    EXPECT_THROW({
+        SparseMatrixCSR dSlice= MatrixIndexGetCSR_2D(dA, 2,5, 0,2);
+        // cleanup if no throw
+        cudaFree(dSlice.row_ptr_);cudaFree(dSlice.col_idx_);cudaFree(dSlice.data_);
+    }, std::runtime_error);
+
+    // likewise for col slice => [3..5) but we have col=0..3 => colEnd=4 => 5 is outOfRange
+    EXPECT_THROW({
+        SparseMatrixCSR dSlice= MatrixIndexGetCSR_2D(dA, 0,2, 3,5);
+        cudaFree(dSlice.row_ptr_);cudaFree(dSlice.col_idx_);cudaFree(dSlice.data_);
+    }, std::runtime_error);
+
+    // cleanup
+    cudaFree(dA.row_ptr_);cudaFree(dA.col_idx_);cudaFree(dA.data_);
+}
+
+TEST(SparseMatrix2DSlice, ZeroRowsOrCols)
+{
+    // same small matrix
+    int rows=3, cols=4;
+    std::vector<int> rowPtr= {0,2,3,5};
+    std::vector<int> colIdx= {0,2, 1, 0,3};
+    std::vector<thrust::complex<double>> vals= {
+        {10,0}, {2,0}, {5,2}, {-1,0}, {3,4}
+    };
+    SparseMatrixCSR dA= BuildDeviceMatrixCSR(rows, cols, rowPtr, colIdx, vals);
+
+    // We'll do rowStart=1..1 => rowEnd=1 => that means no rows selected => shape=(0 x ???)
+    // We expect a 0-row result => row_ptr= [0], col_idx/vals empty
+    SparseMatrixCSR dSlice= MatrixIndexGetCSR_2D(dA, 1,1, 0,2);
+    // => shape=0 x 2 => no nnz
+    EXPECT_EQ(dSlice.rows_, 0);
+    EXPECT_EQ(dSlice.cols_, 2);
+    EXPECT_EQ(dSlice.nnz_,  0);
+
+    // copy
+    std::vector<int> sRowPtr, sColIdx;
+    std::vector<thrust::complex<double>> sVals;
+    CopyDeviceMatrixToHost(dSlice, sRowPtr, sColIdx, sVals);
+
+    EXPECT_EQ(sRowPtr.size(), (size_t)0+1); // 1
+    EXPECT_EQ(sColIdx.size(), (size_t)0);
+    EXPECT_EQ(sVals.size(),   (size_t)0);
+
+    cudaFree(dA.row_ptr_);cudaFree(dA.col_idx_);cudaFree(dA.data_);
+    cudaFree(dSlice.row_ptr_);cudaFree(dSlice.col_idx_);cudaFree(dSlice.data_);
+}
 
 
 // Add more tests for IndexGet, IndexPut, ElementwiseMultiply, Square, Pow, and Sqrt similarly.

@@ -9,6 +9,11 @@
 #include <memory>
 #include <vector>
 #include <thrust/complex.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+#include <thrust/scan.h>
+#include <thrust/version.h>
+
 
 namespace janus {
 
@@ -1664,6 +1669,7 @@ void VectorHyperDualIndexPutSparse(
         }
     }
 }
+
 template <typename T>
 __global__
 void VectorHyperDualIndexPutSparseKernel(
@@ -1700,22 +1706,104 @@ void VectorHyperDualIndexPutSparseKernel(
     );
 }
 
-
-
-
-
-// Minimal container for CSR on device memory
+// A simple device/host struct to hold CSR data on the GPU.
+// This is *not* fully device-usable from inside kernels in its methods.
+// We'll write separate kernels for parallel slicing.
+template <typename T>
 struct SparseMatrixCSR
 {
-    int rows_; // Number of rows
-    int cols_; // Number of columns
-    int nnz_;  // Number of nonzero entries
+    int m;         // number of rows
+    int n;         // number of columns
+    int *rowPtr;   // device pointer, size = (m+1)
+    int *colIdx;   // device pointer, size = nnz
+    T   *data;     // device pointer, size = nnz
 
-    // Device pointers
-    int*                 row_ptr_; // length = rows_+1
-    int*                 col_idx_; // length = nnz_
-    thrust::complex<double>* data_;  // length = nnz_
+    SparseMatrixCSR() : m(0), n(0), rowPtr(nullptr), colIdx(nullptr), data(nullptr) {}
+
+    SparseMatrixCSR(int rows, int cols, int *rPtr, int *cIdx, T *vals)
+      : m(rows), n(cols), rowPtr(rPtr), colIdx(cIdx), data(vals)
+    {}
+
+    // Simple utility to report basic info
+    void printInfo() const {
+        printf("SparseMatrixCSR info: %d x %d, rowPtr=%p, colIdx=%p, data=%p\n",
+               m, n, (void*)rowPtr, (void*)colIdx, (void*)data);
+    }
 };
+
+// -----------------------------------------------------------------------------
+//  KERNEL 1: Count how many non-zeros in each row i fall into [colStart, colEnd).
+// -----------------------------------------------------------------------------
+__global__
+void countSliceElementsKernel(const int *rowPtr,
+                              const int *colIdx,
+                              int m,
+                              int rowStart, int rowEnd,
+                              int colStart, int colEnd,
+                              int *sliceCounts)
+{
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= (rowEnd - rowStart)) return; // local row in [0..(newM-1)]
+    
+    // Map local row back to the original row in [rowStart..rowEnd)
+    int origRow = rowStart + row;
+    
+    int start = rowPtr[origRow];
+    int end   = rowPtr[origRow + 1];
+    
+    int count = 0;
+    for (int k = start; k < end; ++k) {
+        int c = colIdx[k];
+        if (c >= colStart && c < colEnd) {
+            count++;
+        }
+    }
+    sliceCounts[row] = count;
+}
+
+// -----------------------------------------------------------------------------
+//  KERNEL 2: Fill the new submatrix colIdx/data using the row offsets computed
+//            from prefix sum. 
+// -----------------------------------------------------------------------------
+template <typename T>
+__global__
+void fillSliceKernel(const int *rowPtr,
+                     const int *colIdx,
+                     const T   *vals,
+                     int m,
+                     int rowStart, int rowEnd,
+                     int colStart, int colEnd,
+                     const int *newRowPtr, // prefix sum array
+                     int       *newColIdx,
+                     T         *newData)
+{
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= (rowEnd - rowStart)) return;
+    
+    int origRow = rowStart + row;
+    int start = rowPtr[origRow];
+    int end   = rowPtr[origRow + 1];
+    
+    // The offset in the submatrix's colIdx/data for this row
+    int offset = newRowPtr[row];
+
+    int c = 0; // local index within this row
+    for (int k = start; k < end; ++k) {
+        int origCol = colIdx[k];
+        if (origCol >= colStart && origCol < colEnd) {
+            newColIdx[offset + c] = origCol - colStart;
+            newData[offset + c]   = vals[k];
+            c++;
+        }
+    }
+}
+
+
+
+
+
+
+
 
 // A small utility to check return codes. Replace as needed for your error handling.
 static void checkCusparseStatus(cusparseStatus_t status, const char* msg)
@@ -1726,160 +1814,7 @@ static void checkCusparseStatus(cusparseStatus_t status, const char* msg)
     }
 }
 
-/**
- * Add two double-complex CSR matrices A+B using cuSPARSE: 
- *   C = A + B
- *
- * On input, A and B are device-based CSR stored in thrust::complex<double>.
- * On output, returns a newly allocated CSR (on device) for C.
- *
- * The function uses:
- *   cusparseZcsrgeam2_bufferSizeExt
- *   cusparseZcsrgeam2Nnz
- *   cusparseZcsrgeam2
- *
- * This requires:
- *   - A.rows_ == B.rows_  (same #rows)
- *   - A.cols_ == B.cols_  (same #cols)
- *   - A.data_ is in device memory
- *   - B.data_ is also in device memory
- *
- * The returned SparseMatrixCSR has device pointers for row_ptr_, col_idx_, data_,
- * fully allocated and filled. Its nnz_ is set appropriately.
- */
-SparseMatrixCSR AddMatricesCSR_cuSPARSE(cusparseHandle_t handle,
-                                        const SparseMatrixCSR& A,
-                                        const SparseMatrixCSR& B)
-{
-    // 1) Check dimensions
-    if (A.rows_ != B.rows_ || A.cols_ != B.cols_) {
-        throw std::runtime_error("Dimension mismatch in AddMatricesCSR_cuSPARSE");
-    }
-    int rows = A.rows_;
-    int cols = A.cols_;
 
-    // 2) Create cuSPARSE matrix descriptors for A, B, C
-    cusparseMatDescr_t descrA = nullptr;
-    cusparseMatDescr_t descrB = nullptr;
-    cusparseMatDescr_t descrC = nullptr;
-
-    checkCusparseStatus(cusparseCreateMatDescr(&descrA), "createMatDescr(A)");
-    checkCusparseStatus(cusparseCreateMatDescr(&descrB), "createMatDescr(B)");
-    checkCusparseStatus(cusparseCreateMatDescr(&descrC), "createMatDescr(C)");
-
-    // Typically, we set them to general / 0-based
-    checkCusparseStatus(cusparseSetMatType(descrA, CUSPARSE_MATRIX_TYPE_GENERAL),
-                        "setMatType(A)");
-    checkCusparseStatus(cusparseSetMatIndexBase(descrA, CUSPARSE_INDEX_BASE_ZERO),
-                        "setIndexBase(A)");
-
-    checkCusparseStatus(cusparseSetMatType(descrB, CUSPARSE_MATRIX_TYPE_GENERAL),
-                        "setMatType(B)");
-    checkCusparseStatus(cusparseSetMatIndexBase(descrB, CUSPARSE_INDEX_BASE_ZERO),
-                        "setIndexBase(B)");
-
-    checkCusparseStatus(cusparseSetMatType(descrC, CUSPARSE_MATRIX_TYPE_GENERAL),
-                        "setMatType(C)");
-    checkCusparseStatus(cusparseSetMatIndexBase(descrC, CUSPARSE_INDEX_BASE_ZERO),
-                        "setIndexBase(C)");
-
-    // 3) Prepare alpha=1, beta=1 for C = 1*A + 1*B
-    // For "double complex" we use cuDoubleComplex
-    cuDoubleComplex alpha = make_cuDoubleComplex(1.0, 0.0);
-    cuDoubleComplex beta  = make_cuDoubleComplex(1.0, 0.0);
-
-    // We'll reinterpret thrust::complex<double>* as cuDoubleComplex*
-    // (They have the same memory layout in practice.)
-    const cuDoubleComplex* Avals = reinterpret_cast<const cuDoubleComplex*>(A.data_);
-    const cuDoubleComplex* Bvals = reinterpret_cast<const cuDoubleComplex*>(B.data_);
-
-    // 4) Query buffer size for the geam2 operation
-    size_t bufferSize = 0;
-    checkCusparseStatus(
-        cusparseZcsrgeam2_bufferSizeExt(
-            handle, rows, cols,
-            &alpha,
-            descrA, A.nnz_, Avals, A.row_ptr_, A.col_idx_,
-            &beta,
-            descrB, B.nnz_, Bvals, B.row_ptr_, B.col_idx_,
-            descrC,
-            nullptr, // C values (unknown yet)
-            nullptr, // C row_ptr
-            nullptr, // C col_idx
-            &bufferSize
-        ), 
-        "csrgeam2_bufferSizeExt");
-
-    void* dBuffer = nullptr;
-    cudaMalloc(&dBuffer, bufferSize);
-
-    // 5) Compute # of nonzeros in C (nnzC) and fill row pointer for C
-    int* dCrowPtr = nullptr;
-    cudaMalloc(&dCrowPtr, (rows+1)*sizeof(int));
-    int nnzC = 0; // We will read it from geam2Nnz
-
-    checkCusparseStatus(
-        cusparseXcsrgeam2Nnz(
-            handle, rows, cols,
-            descrA, A.nnz_, A.row_ptr_, A.col_idx_,
-            descrB, B.nnz_, B.row_ptr_, B.col_idx_,
-            descrC, dCrowPtr, &nnzC,
-            dBuffer
-        ),
-        "csrgeam2Nnz"
-    );
-    // now dCrowPtr[] is the row pointer for C, and nnzC is the total number of nonzeros
-
-    // 6) Allocate col/val arrays for C
-    int* dCcolIdx = nullptr;
-    cuDoubleComplex* dCvals = nullptr; // store them as cuDoubleComplex
-    cudaMalloc(&dCcolIdx, nnzC*sizeof(int));
-    cudaMalloc(&dCvals,   nnzC*sizeof(cuDoubleComplex));
-
-    // 7) Actually compute C = alpha*A + beta*B
-    checkCusparseStatus(
-        cusparseZcsrgeam2(
-            handle, rows, cols,
-            &alpha,
-            descrA, A.nnz_, Avals, A.row_ptr_, A.col_idx_,
-            &beta,
-            descrB, B.nnz_, Bvals, B.row_ptr_, B.col_idx_,
-            descrC, dCvals, dCrowPtr, dCcolIdx,
-            dBuffer
-        ),
-        "csrgeam2"
-    );
-
-    // 8) Build the final output struct
-    SparseMatrixCSR C;
-    C.rows_ = rows;
-    C.cols_ = cols;
-    C.nnz_  = nnzC;
-    C.row_ptr_ = dCrowPtr;
-    C.col_idx_ = dCcolIdx;
-
-    // We need to store them as thrust::complex<double>*,
-    // so do a reinterpret_cast (the memory layout is the same).
-    C.data_ = reinterpret_cast<thrust::complex<double>*>(dCvals);
-
-    // 9) Cleanup
-    cudaFree(dBuffer);
-    cusparseDestroyMatDescr(descrA);
-    cusparseDestroyMatDescr(descrB);
-    cusparseDestroyMatDescr(descrC);
-
-    // Return the new device-based CSR matrix C
-    return C;
-}
-
-// a small helper to check cuSPARSE status
-static void checkCusparse(cusparseStatus_t status, const char* msg)
-{
-    if (status != CUSPARSE_STATUS_SUCCESS) {
-        std::cerr << "cuSPARSE error at " << msg << std::endl;
-        throw std::runtime_error("cuSPARSE Error");
-    }
-}
 
 // create a descriptor in 0-based indexing
 cusparseMatDescr_t createCsrDescr()
@@ -1891,15 +1826,16 @@ cusparseMatDescr_t createCsrDescr()
     return descr;
 }
 
+template <typename T>
 __device__
 void CSRMatrixReduceBlock(
-    const thrust::complex<double>* data,
+    const thrust::complex<T>* data,
     int nnz,
-    thrust::complex<double>* blockSum)
+    thrust::complex<T>* blockSum)
 {
     // blockSum is a single-element array in global memory 
     // for storing the sum from this block.
-    extern __shared__ thrust::complex<double> shmem[]; 
+    extern __shared__ thrust::complex<T> shmem[]; 
     int tid = threadIdx.x;
     int globalIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -1925,29 +1861,31 @@ void CSRMatrixReduceBlock(
     }
 }
 
+template <typename T>
 __global__
 void CSRMatrixReduceBlockKernel(
-    const thrust::complex<double>* data,
+    const thrust::complex<T>* data,
     int nnz,
-    thrust::complex<double>* blockSums)
+    thrust::complex<T>* blockSums)
 {
     CSRMatrixReduceBlock(data, nnz, blockSums);
 }
 
 
+template <typename T>
 __global__
 void CSRMatrixPartialReduceKernel(
-    const thrust::complex<double>* data,
+    const thrust::complex<T>* data,
     int nnz,
-    thrust::complex<double>* partialSums)
+    thrust::complex<T>* partialSums)
 {
-    extern __shared__ thrust::complex<double> shmem[]; 
+    extern __shared__ thrust::complex<T> shmem[]; 
     int tid = threadIdx.x;
     int blockSize = blockDim.x;
     int blockStart = blockIdx.x * blockSize*2; // we'll do a 2-reads approach
     int idx = blockStart + tid;
 
-    thrust::complex<double> val(0,0);
+    thrust::complex<T> val(0,0);
     // read 1
     if (idx < nnz) {
         val += data[idx];
@@ -1975,16 +1913,18 @@ void CSRMatrixPartialReduceKernel(
         partialSums[blockIdx.x] = shmem[0];
     }
 }
+
+template <typename T>
 __global__
 void CSRMatrixFinalReduceKernel(
-    const thrust::complex<double>* partialSums,
+    const thrust::complex<T>* partialSums,
     int n, // number of partial sums
-    thrust::complex<double>* out)
+    thrust::complex<T>* out)
 {
-    extern __shared__ thrust::complex<double> shmem[];
+    extern __shared__ thrust::complex<T> shmem[];
     int tid = threadIdx.x;
     int idx = tid;
-    thrust::complex<double> val(0,0);
+    thrust::complex<T> val(0,0);
     if (idx < n) {
         val = partialSums[idx];
     }
@@ -2004,7 +1944,8 @@ void CSRMatrixFinalReduceKernel(
     }
 }
 
-thrust::complex<double> CSRMatrixReduceAll(const SparseMatrixCSR& A)
+template <typename T>
+thrust::complex<T> CSRMatrixReduceAll(const SparseMatrixCSR& A)
 {
     int nnz = A.nnz_;
     if (nnz <= 0) {
@@ -2154,6 +2095,62 @@ void CSRMatrixSumAlongDim(
     );
     cudaDeviceSynchronize();
 }
+
+
+
+// Create a cuSPARSE descriptor with 0-based indexing
+cusparseMatDescr_t createDescr()
+{
+    cusparseMatDescr_t descr;
+    cusparseCreateMatDescr(&descr);
+    cusparseSetMatIndexBase(descr, CUSPARSE_INDEX_BASE_ZERO);
+    cusparseSetMatType(descr, CUSPARSE_MATRIX_TYPE_GENERAL);
+    return descr;
+}
+
+__device__ void getDensePosFromCsrIndices(int nnz,
+                                        int N, //Number of rows
+                                        int L, //Number of columns
+                                        int *csr_row_ptrs,
+                                        int *col_ptrs,
+                                        int *denseIdx)
+                                        {
+    for (int i = 0; i < nnz; i++) {
+        for (int j = csr_row_ptrs[i]; j < csr_row_ptrs[i + 1]; j++) {
+            int col = col_ptrs[j];
+            denseIdx[i] = i * L + col;
+        }
+
+    }
+}
+
+template <typename T>
+__device__ void indexGet(int nnz,
+                        T *source_vals,
+                        int *row_ptrs,
+                        int *col_ptrs,
+                        int *denseIdx,
+                        int *row_slice,
+                        int *col_slice,
+                        T *target_vals,
+                        int *target_rows,
+                        int *target_cols)
+{
+    //First convert the csr indices to dense indices
+    getDensePosFromCsrIndices(nnz, row_ptrs[nnz], col_ptrs, denseIdx);
+    //Now copy the values to the target
+}
+
+static void CheckCudaError(const char* msg)
+{
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        std::cerr << msg << " : " << cudaGetErrorString(err) << std::endl;
+        throw std::runtime_error("CUDA error in " + std::string(msg));
+    }
+}
+
 
 }  // namespace janus
 
