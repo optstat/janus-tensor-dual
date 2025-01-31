@@ -182,4 +182,4 @@ endif(COVERAGE)
 
 string(TIMESTAMP TACO_BUILD_DATE "%Y-%m-%d")
 configure_file("include/taco/version.h.in" "include/taco/version.h" @ONLY)
-install(FILES "${CMAKE_BINARY_DIR}/include/taco/version.h" DESTINATION "include/taco")
+#install(FILES "${CMAKE_BINARY_DIR}/include/taco/version.h" DESTINATION "include/taco")

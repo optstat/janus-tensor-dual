@@ -1944,70 +1944,6 @@ void CSRMatrixFinalReduceKernel(
     }
 }
 
-template <typename T>
-thrust::complex<T> CSRMatrixReduceAll(const SparseMatrixCSR& A)
-{
-    int nnz = A.nnz_;
-    if (nnz <= 0) {
-        // empty => sum is 0
-        return thrust::complex<double>(0,0);
-    }
-
-    // 1) pick a block size, e.g. 256
-    int blockSize = 256;
-    // We'll do 2 reads per thread => each block handles 512 elements
-    int gridSize = (nnz + (blockSize*2) - 1) / (blockSize*2);
-
-    // allocate partial sums for kernel1
-    thrust::complex<double>* dPartialSums = nullptr;
-    cudaMalloc(&dPartialSums, gridSize*sizeof(thrust::complex<double>));
-
-    // run kernel1
-    size_t shmemSize = blockSize*sizeof(thrust::complex<double>);
-    CSRMatrixPartialReduceKernel<<<gridSize, blockSize, shmemSize>>>(
-        A.data_, nnz, dPartialSums
-    );
-    cudaDeviceSynchronize();
-
-    // 2) Now reduce partialSums with a final kernel
-    // blockDim = next pow2 >= gridSize, or we can just do the same blockSize. 
-    // but let's keep it simple: use blockSize = 256 again
-    int blockSize2 = 256;
-    // we need 1 block to sum all partial sums, but we might not be able to 
-    // if gridSize > 256. Instead we do a second pass. 
-    // Let's do the same approach:
-    int gridSize2 = (gridSize + (blockSize2*2) -1)/(blockSize2*2);
-
-    thrust::complex<double>* dPartialSums2 = nullptr;
-    cudaMalloc(&dPartialSums2, gridSize2*sizeof(thrust::complex<double>));
-
-    CSRMatrixPartialReduceKernel<<<gridSize2, blockSize2, shmemSize>>>(
-        dPartialSums,
-        gridSize,
-        dPartialSums2
-    );
-    cudaDeviceSynchronize();
-
-    // We keep going until we get 1 partial sum left, but let's do a 
-    // simpler approach: once we get small enough, copy to host, do CPU sum. 
-    // For demonstration, let's do that now if (gridSize2 <= blockSize2).
-    int finalSize = gridSize2;
-    std::vector<thrust::complex<double>> hPartial(finalSize);
-    cudaMemcpy(hPartial.data(), dPartialSums2,
-               finalSize*sizeof(thrust::complex<double>),
-               cudaMemcpyDeviceToHost);
-
-    thrust::complex<double> finalSum(0,0);
-    for (int i=0; i<finalSize; i++){
-        finalSum += hPartial[i];
-    }
-
-    // cleanup
-    cudaFree(dPartialSums);
-    cudaFree(dPartialSums2);
-
-    return finalSum;
-}
 
 __device__
 void CSRMatrixSumDim(
@@ -2065,36 +2001,6 @@ void CSRMatrixSumDimKernel(
                     result);
 }
 
-void CSRMatrixSumAlongDim(
-    const SparseMatrixCSR& A,
-    int dim, // 0 => sum over rows => per-col result
-             // 1 => sum over cols => per-row result
-    thrust::complex<double>* dResult // device pointer to store the sum
-)
-{
-    // Check dimension
-    if (dim < 0 || dim > 1) {
-        throw std::runtime_error("dim must be 0 or 1");
-    }
-
-    // The length of result depends on dim
-    int outLen = (dim == 0) ? A.cols_ : A.rows_;
-
-    // We typically need to zero-initialize dResult[outLen].
-    cudaMemset(dResult, 0, outLen*sizeof(thrust::complex<double>));
-
-    // Launch
-    int blockSize = 256;
-    int gridSize  = (A.rows_ + blockSize - 1)/blockSize;
-
-    CSRMatrixSumDimKernel<<<gridSize, blockSize>>>(
-        A.row_ptr_, A.col_idx_, A.data_,
-        A.rows_, A.cols_, A.nnz_,
-        dim,
-        dResult
-    );
-    cudaDeviceSynchronize();
-}
 
 
 
@@ -2124,22 +2030,6 @@ __device__ void getDensePosFromCsrIndices(int nnz,
     }
 }
 
-template <typename T>
-__device__ void indexGet(int nnz,
-                        T *source_vals,
-                        int *row_ptrs,
-                        int *col_ptrs,
-                        int *denseIdx,
-                        int *row_slice,
-                        int *col_slice,
-                        T *target_vals,
-                        int *target_rows,
-                        int *target_cols)
-{
-    //First convert the csr indices to dense indices
-    getDensePosFromCsrIndices(nnz, row_ptrs[nnz], col_ptrs, denseIdx);
-    //Now copy the values to the target
-}
 
 static void CheckCudaError(const char* msg)
 {
