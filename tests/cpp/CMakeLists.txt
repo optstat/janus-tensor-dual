@@ -54,7 +54,7 @@ target_include_directories(dualtest_cuda_sparse
 
 # Link TACO, GTest, and libtorch
 # Specify the Taco library
-set(TACO_LIB ${CMAKE_BINARY_DIR}/lib/libtaco.so)
+#set(TACO_LIB ${CMAKE_BINARY_DIR}/lib/libtaco.so)
 
 target_link_libraries(dualtest
     PRIVATE

@@ -5,7 +5,6 @@
 #include <type_traits> // For std::is_scalar
 #include <vector>
 #include <sstream>  // For std::ostringstream
-#include <taco.h>
 using TensorIndex = torch::indexing::TensorIndex;
 using Slice = torch::indexing::Slice;
 
@@ -176,6 +175,18 @@ public:
     // Copy constructor
     TensorDual(const TensorDual& other)
         : r(other.r.clone()), d(other.d.clone()), dtype(other.dtype), device_(other.device_) {}
+    
+    //Equality operator that simply returns a reference
+    TensorDual& operator=(const TensorDual& other) {
+        if (this != &other) {
+            r = other.r.clone();
+            d = other.d.clone();
+            dtype = other.dtype;
+            device_ = other.device_;
+        }
+        return *this;
+    }
+
 
     // Move assignment operator
     TensorDual& operator=(TensorDual&& other) noexcept {
