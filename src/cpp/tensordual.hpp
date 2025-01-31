@@ -2861,6 +2861,29 @@ public:
     }
 
     /**
+     * @brief Performs an in-place update of elements in the TensorDual object using a scalar value.
+     * 
+     * This method updates the real (`r`) and dual (`d`) components of the TensorDual object in-place
+     * for the specified elements based on a `TensorIndex`. The real part is updated to the given scalar,
+     * and the dual part is reset to zero.
+     * 
+     * @tparam Scalar A scalar type compatible with the tensor's data type.
+     * @param mask A TensorIndex specifying the elements to update.
+     * @param value A scalar value to assign to the real part.
+     * @throws std::invalid_argument If the mask is incompatible with the tensor dimensions or the scalar value is invalid.
+     */
+    void index_put_(const torch::Tensor& mask, const double value) {
+        // Validate the mask's compatibility with the real tensor dimensions
+        if (mask.sizes() != r.sizes()) {
+            throw std::invalid_argument("Mask must be compatible with the dimensions of the real tensor.");
+        }
+
+        // Perform the in-place update for the real and dual components
+        r.index_put_({mask}, value); // Update the real part with the scalar value
+        d.index_put_({mask}, 0.0);   // Reset the dual part to zero
+    }
+
+    /**
      * @brief Performs an in-place update of elements in the TensorDual object using a vector of TensorIndex.
      * 
      * This method updates the real (`r`) and dual (`d`) components of the TensorDual object in-place
@@ -5534,6 +5557,29 @@ public:
         // Perform the in-place update
         this->r.index_put_({mask}, value.r);
         this->d.index_put_({mask}, value.d);
+    }
+
+
+    /**
+     * @brief Performs an in-place update of elements in the TensorMatDual object using a scalar value.
+     * 
+     * This method updates the real (`r`) and dual (`d`) components of the TensorDual object in-place
+     * for the specified indices. The real part is updated to the given scalar value, and the dual part
+     * is reset to zero.
+     * 
+     * @param mask A vector of TensorIndex specifying the elements to update.
+     * @param value A scalar value to assign to the real part.
+     * @throws std::invalid_argument If the mask size exceeds the dimensions of the real tensor.
+     */
+    void index_put_(const std::vector<torch::indexing::TensorIndex>& mask, const double& value) {
+        // Validate the mask size
+        if (mask.size() > r.dim()) {
+            throw std::invalid_argument("Mask size exceeds dimensions of the real tensor.");
+        }
+
+        // Perform the in-place update for the real and dual components
+        r.index_put_(mask, value);  // Update the real part with the scalar value
+        d.index_put_(mask, 0.0);    // Reset the dual part to zero
     }
 
 
