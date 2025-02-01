@@ -1430,19 +1430,13 @@ TEST(TensorDualTest, AdditionWithUndefinedTensor) {
 TEST(TensorDualTest, AdditionWithTensorDimensionMismatch) {
     // Input TensorDual object and mismatched torch::Tensor
     TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
-    torch::Tensor other = torch::randn({3, 2});
+    torch::Tensor other = torch::randn({2, 1});
+    //This should be fine
+    TensorDual result = x + other;
+    EXPECT_EQ(result.r.sizes(), x.r.sizes());
+    EXPECT_EQ(result.d.sizes(), x.d.sizes());
 
-    EXPECT_THROW(
-        {
-            try {
-                TensorDual result = x + other;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: The other tensor must have the same shape as the real part of the TensorDual.", e.what());
-                throw;
-            }
-        },
-        std::invalid_argument
-    );
+
 }
 
 // Test: High-dimensional tensors

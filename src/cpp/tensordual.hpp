@@ -1093,9 +1093,6 @@ public:
             throw std::invalid_argument("Cannot add TensorDual with an undefined tensor.");
         }
 
-        if (r.sizes() != other.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: The other tensor must have the same shape as the real part of the TensorDual.");
-        }
 
         // Perform addition on the real part and return a new TensorDual
         return TensorDual(r + other, d.clone());
