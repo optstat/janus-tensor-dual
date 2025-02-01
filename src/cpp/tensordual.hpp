@@ -2331,7 +2331,7 @@ public:
         }
         TensorDual res;
         //If there are any negative values in the real part convert the dual number to complex
-        if (!torch::all(r >= 0).item<bool>()) {
+        if (!torch::is_complex(r) && !torch::all(r >= 0).item<bool>()) {
             res = complex();
         }
 
@@ -3150,7 +3150,7 @@ public:
       auto dc = d;
       auto hc = h;
       //If there are negative numbers convert to complex
-      if ((r < 0).any().item<bool>() && (r.is_complex() == false)) {
+      if ((r.is_complex() == false) && (r < 0).any().item<bool>()) {
             rc = torch::complex(r, torch::zeros_like(r).to(r.device()));
             dc = torch::complex(d, torch::zeros_like(d).to(d.device()));
             hc = torch::complex(h, torch::zeros_like(h).to(h.device()));
