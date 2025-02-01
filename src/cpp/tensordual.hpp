@@ -1262,9 +1262,6 @@ public:
             throw std::invalid_argument("Cannot multiply: Input tensor is undefined.");
         }
 
-        if (other.sizes() != r.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.");
-        }
 
         // Compute the real and dual parts
         auto real = other * r;
@@ -1414,10 +1411,6 @@ public:
             throw std::invalid_argument("Cannot compare: Input tensor is undefined.");
         }
 
-        // Check broadcast compatibility
-        if (r.sizes() != other.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.");
-        }
 
         // Perform element-wise comparison of the real part
         return (r > other).squeeze(-1);
@@ -1480,9 +1473,6 @@ public:
             throw std::invalid_argument("Cannot compare: Input tensor is undefined.");
         }
 
-        if (r.sizes() != other.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.");
-        }
 
         // Perform element-wise comparison
         return (r < other).squeeze(-1);
@@ -1544,9 +1534,6 @@ public:
             throw std::invalid_argument("Cannot compare: Input tensor is undefined.");
         }
 
-        if (r.sizes() != other.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.");
-        }
 
         // Perform element-wise comparison
         return (r >= other).squeeze(-1);
@@ -1588,9 +1575,6 @@ public:
             throw std::invalid_argument("Cannot compare: Input tensor is undefined.");
         }
 
-        if (r.sizes() != other.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.");
-        }
 
         // Perform element-wise equality comparison
         return (r == other).squeeze(-1);
@@ -1652,9 +1636,6 @@ public:
             throw std::invalid_argument("Cannot compare: Input tensor is undefined.");
         }
 
-        if (r.sizes() != other.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.");
-        }
 
         // Perform element-wise inequality comparison
         return (r != other).squeeze(-1);

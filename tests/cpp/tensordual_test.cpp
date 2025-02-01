@@ -2033,24 +2033,6 @@ TEST(TensorDualTest, MultiplicationWithUndefinedTensor) {
     );
 }
 
-// Test: Dimension mismatch
-TEST(TensorDualTest, MultiplicationWithTensorDimensionMismatch) {
-    // Input TensorDual object and mismatched torch::Tensor
-    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
-    torch::Tensor other = torch::randn({3, 2});
-
-    EXPECT_THROW(
-        {
-            try {
-                TensorDual result = x * other;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
-                throw;
-            }
-        },
-        std::invalid_argument
-    );
-}
 
 // Test: High-dimensional tensors
 TEST(TensorDualTest, MultiplicationWithTensorHighDimensional) {
@@ -2779,24 +2761,6 @@ TEST(TensorDualTest, GreaterThanWithTensorUndefined) {
     );
 }
 
-// Test: Dimension mismatch
-TEST(TensorDualTest, GreaterThanWithTensorDimensionMismatch) {
-    // Input TensorDual object and torch::Tensor with mismatched dimensions
-    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
-    torch::Tensor other = torch::randn({3, 2});
-
-    EXPECT_THROW(
-        {
-            try {
-                torch::Tensor result = x > other;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
-                throw;
-            }
-        },
-        std::invalid_argument
-    );
-}
 
 // Test: High-dimensional tensors
 TEST(TensorDualTest, GreaterThanWithTensorHighDimensional) {
@@ -3098,24 +3062,6 @@ TEST(TensorDualTest, LessThanWithTensorUndefined) {
     );
 }
 
-// Test: Dimension mismatch
-TEST(TensorDualTest, LessThanWithTensorDimensionMismatch) {
-    // Input TensorDual object and torch::Tensor with mismatched dimensions
-    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
-    torch::Tensor other = torch::randn({3, 2});
-
-    EXPECT_THROW(
-        {
-            try {
-                torch::Tensor result = x < other;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
-                throw;
-            }
-        },
-        std::invalid_argument
-    );
-}
 
 // Test: High-dimensional tensors
 TEST(TensorDualTest, LessThanWithTensorHighDimensional) {
@@ -3415,24 +3361,6 @@ TEST(TensorDualTest, GreaterThanOrEqualWithTensorUndefined) {
     );
 }
 
-// Test: Dimension mismatch
-TEST(TensorDualTest, GreaterThanOrEqualWithTensorDimensionMismatch) {
-    // Input TensorDual object and torch::Tensor with mismatched dimensions
-    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
-    torch::Tensor other = torch::randn({3, 2});
-
-    EXPECT_THROW(
-        {
-            try {
-                torch::Tensor result = x >= other;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
-                throw;
-            }
-        },
-        std::invalid_argument
-    );
-}
 
 
 // Test: GPU tensors
@@ -3604,24 +3532,6 @@ TEST(TensorDualTest, EqualityWithTensorUndefined) {
     );
 }
 
-// Test: Dimension mismatch
-TEST(TensorDualTest, EqualityWithTensorDimensionMismatch) {
-    // Input TensorDual object and torch::Tensor with mismatched dimensions
-    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
-    torch::Tensor other = torch::randn({3, 2});
-
-    EXPECT_THROW(
-        {
-            try {
-                torch::Tensor result = x == other;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
-                throw;
-            }
-        },
-        std::invalid_argument
-    );
-}
 
 
 // Test: GPU tensors
@@ -3887,24 +3797,6 @@ TEST(TensorDualTest, InequalityWithTensorUndefined) {
     );
 }
 
-// Test: Dimension mismatch
-TEST(TensorDualTest, InequalityWithTensorDimensionMismatch) {
-    // Input TensorDual object and torch::Tensor with mismatched dimensions
-    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
-    torch::Tensor other = torch::randn({3, 2});
-
-    EXPECT_THROW(
-        {
-            try {
-                torch::Tensor result = x != other;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: Input tensor must have the same shape as the real part of the TensorDual.", e.what());
-                throw;
-            }
-        },
-        std::invalid_argument
-    );
-}
 
 
 // Test: GPU tensors
