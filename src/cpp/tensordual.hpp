@@ -1312,7 +1312,7 @@ public:
         }
 
         // Perform element-wise comparison of the real parts
-        return r <= other.r;
+        return (r <= other.r).squeeze(-1);
     }
 
 
@@ -1335,7 +1335,7 @@ public:
         }
 
         // Perform element-wise comparison of the real parts
-        return r == other.r;
+        return (r == other.r).squeeze(-1);
     }
 
 
@@ -1357,7 +1357,7 @@ public:
 
 
         // Perform element-wise comparison of the real part
-        return r <= other;
+        return (r <= other).squeeze(-1);
     }
     /**
      * @brief Overload the less-than-or-equal-to (<=) operator for TensorDual and a scalar.
@@ -1372,7 +1372,7 @@ public:
     template <typename Scalar>
     torch::Tensor operator<=(const Scalar& scalar) const {
         // Perform element-wise comparison of the real part
-        return r <= scalar;
+        return (r <= scalar).squeeze(-1);
     }
 
     /**
@@ -1394,7 +1394,7 @@ public:
         }
 
         // Perform element-wise comparison of the real parts
-        return r > other.r;
+        return (r > other.r).squeeze(-1);
     }
 
     /**
@@ -1420,7 +1420,7 @@ public:
         }
 
         // Perform element-wise comparison of the real part
-        return r > other;
+        return (r > other).squeeze(-1);
     }
 
     /**
@@ -1436,7 +1436,7 @@ public:
     template <typename Scalar>
     torch::Tensor operator>(const Scalar& scalar) const {
         // Perform element-wise comparison directly with the scalar
-        return r > scalar;
+        return (r > scalar).squeeze(-1);
     }
 
     /**
@@ -1458,7 +1458,7 @@ public:
         }
 
         // Perform element-wise comparison of the real parts
-        return r < other.r;
+        return (r < other.r).squeeze(-1);
     }
 
 
@@ -1485,7 +1485,7 @@ public:
         }
 
         // Perform element-wise comparison
-        return r < other;
+        return (r < other).squeeze(-1);
     }
 
     /**
@@ -1501,7 +1501,7 @@ public:
     template <typename Scalar>
     torch::Tensor operator<(const Scalar& scalar) const {
         // Perform element-wise comparison of the real part with the scalar
-        return r < scalar;
+        return (r < scalar).squeeze(-1);
     }
 
 
@@ -1524,7 +1524,7 @@ public:
         }
 
         // Perform element-wise comparison of the real parts
-        return r >= other.r;
+        return (r >= other.r).squeeze(-1);
     }
 
     /**
@@ -1549,7 +1549,7 @@ public:
         }
 
         // Perform element-wise comparison
-        return r >= other;
+        return (r >= other).squeeze(-1);
     }
 
 
@@ -1567,7 +1567,7 @@ public:
     template <typename Scalar>
     torch::Tensor operator>=(const Scalar& scalar) const {
         // Perform element-wise comparison directly with the scalar
-        return r >= scalar;
+        return (r >= scalar).squeeze(-1);
     }
 
 
@@ -1593,7 +1593,7 @@ public:
         }
 
         // Perform element-wise equality comparison
-        return r == other;
+        return (r == other).squeeze(-1);
     }
 
     /**
@@ -1610,7 +1610,7 @@ public:
     template <typename Scalar>
     torch::Tensor operator==(const Scalar& scalar) const {
         // Perform element-wise equality comparison directly with the scalar
-        return r == scalar;
+        return (r == scalar).squeeze(-1);
     }
 
     /**
@@ -1632,7 +1632,7 @@ public:
         }
 
         // Perform element-wise inequality comparison
-        return r != other.r;
+        return (r != other.r).squeeze(-1);
     }
 
     /**
@@ -1657,7 +1657,7 @@ public:
         }
 
         // Perform element-wise inequality comparison
-        return r != other;
+        return (r != other).squeeze(-1);
     }
 
 
@@ -1675,7 +1675,7 @@ public:
     template <typename Scalar>
     torch::Tensor operator!=(const Scalar& scalar) const {
         // Perform element-wise inequality comparison directly with the scalar
-        return r != scalar;
+        return (r != scalar).squeeze(-1);
     }
 
     /**
@@ -2764,8 +2764,15 @@ public:
 
 
         // Index the real and dual tensors using the mask
+        //Make sure the dimensions remain consistent if pytorch removes the singleton dimensions
         auto indexed_r = r.index({mask});
+        if (indexed_r.dim() == 1) {
+            indexed_r = indexed_r.unsqueeze(1);
+        }
         auto indexed_d = d.index({mask});
+        if (indexed_d.dim() == 2) {
+            indexed_d = indexed_d.unsqueeze(1);
+        }
 
         // Return the masked TensorDual
         return TensorDual(indexed_r, indexed_d);
