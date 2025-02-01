@@ -7821,6 +7821,12 @@ TensorDual max(const TensorDual& lhs, const torch::Tensor& rhs) {
 
     // Create a mask where the real part of lhs is greater than rhs
     auto mask = lhs.r > rhs;
+    auto rhsl = rhs;
+
+    //If the rhs tensor is a scalar value, broadcast it to the same shape as lhs.r
+    if (rhs.dim() == 0) {
+        rhsl = rhs.expand_as(lhs.r);
+    }
 
     // Initialize tensors for the result of real and dual parts
     auto resr = torch::zeros_like(lhs.r);
@@ -7828,7 +7834,8 @@ TensorDual max(const TensorDual& lhs, const torch::Tensor& rhs) {
 
     // Assign the maximum real part values based on the mask
     resr.index_put_({mask}, lhs.r.index({mask}));
-    resr.index_put_({~mask}, rhs.index({~mask}));
+
+    resr.index_put_({~mask}, rhsl.index({~mask}));
 
     // Assign the corresponding dual part based on the mask
     resd.index_put_({mask}, lhs.d.index({mask}));
