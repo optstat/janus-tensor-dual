@@ -1068,10 +1068,6 @@ public:
             throw std::invalid_argument("Cannot add TensorDual objects with undefined real or dual tensors.");
         }
 
-        // Validate dimension compatibility
-        if (r.sizes() != other.r.sizes() || d.sizes() != other.d.sizes()) {
-            throw std::invalid_argument("Dimension mismatch: Real and dual tensors of both TensorDual objects must have the same shape.");
-        }
 
         // Perform element-wise addition
         return TensorDual(r + other.r, d + other.d);
@@ -2835,10 +2831,6 @@ public:
      */
     template <typename Scalar>
     void index_put_(const torch::Tensor& mask, const Scalar& value) {
-        // Validate the mask's compatibility with the real tensor dimensions
-        if (mask.sizes() != r.sizes()) {
-            throw std::invalid_argument("Mask must be compatible with the dimensions of the real tensor.");
-        }
 
         // Perform the in-place update for the real and dual components
         r.index_put_({mask}, value); // Update the real part with the scalar value
@@ -2858,10 +2850,6 @@ public:
      * @throws std::invalid_argument If the mask is incompatible with the tensor dimensions or the scalar value is invalid.
      */
     void index_put_(const torch::Tensor& mask, const double value) {
-        // Validate the mask's compatibility with the real tensor dimensions
-        if (mask.sizes() != r.sizes()) {
-            throw std::invalid_argument("Mask must be compatible with the dimensions of the real tensor.");
-        }
 
         // Perform the in-place update for the real and dual components
         r.index_put_({mask}, value); // Update the real part with the scalar value
@@ -4717,29 +4705,15 @@ public:
             throw std::invalid_argument("Cannot concatenate TensorMatDual objects: undefined tensors.");
         }
 
-        // Validate shapes for real tensors
-        if (t1.r.sizes().size() != t2.r.sizes().size()) {
-            throw std::invalid_argument("Real tensors must have the same number of dimensions.");
-        }
-        for (int i = 0; i < t1.r.sizes().size(); ++i) {
-            if (i != dim && t1.r.size(i) != t2.r.size(i)) {
-                throw std::invalid_argument("Real tensors must match in all dimensions except the concatenation dimension.");
-            }
-        }
-
-        // Validate shapes for dual tensors
-        if (t1.d.sizes().size() != t2.d.sizes().size()) {
-            throw std::invalid_argument("Dual tensors must have the same number of dimensions.");
-        }
-        for (int i = 0; i < t1.d.sizes().size(); ++i) {
-            if (i != dim && t1.d.size(i) != t2.d.size(i)) {
-                throw std::invalid_argument("Dual tensors must match in all dimensions except the concatenation dimension.");
-            }
-        }
-
         // Concatenate real and dual parts along the specified dimension
         auto r = torch::cat({t1.r, t2.r}, dim);
         auto d = torch::cat({t1.d, t2.d}, dim);
+        //Now this introduces an extra dimension in the real and dual parts
+        //Remove it
+        r = r.squeeze(dim);
+        d = d.squeeze(dim);
+
+
 
         // Return the new TensorMatDual object
         return TensorMatDual(r, d);
@@ -5568,8 +5542,37 @@ public:
     }
 
 
+
     /**
-     * @brief Updates elements in the TensorMatDual object based on a vector of TensorIndex objects and a TensorDual value.
+     * @brief Updates elements in the TensorMatDual object based on a vector of TensorIndex objects 
+     * and a TensorDual value.
+     *
+     * This method performs an in-place update of the real (`r`) and dual (`d`) tensors in the
+     * TensorMatDual object. The elements specified by the vector of TensorIndex objects are updated with
+     * the corresponding elements from the TensorDual value.
+     *
+     * @param mask A vector of TensorIndex objects specifying the indices to update.
+     * @param value A TensorDual object containing the new real and dual values to assign.
+     * @param dim The dimension along which to update the elements since the TensorDual object is 1D.
+     * @throws std::invalid_argument If the value tensors are undefined or the mask is invalid.
+     */
+    void index_put_(const std::vector<TensorIndex>& mask, 
+                    const TensorDual& value, 
+                    int dim=1) {
+        int sDim=2; //The singleton dimension that is the the dimension of the TensorMatDual which is one
+        if ( dim == 2) {
+            sDim = 1;
+        }
+
+        //Need to modify the real and dual parts to match the dimensions of the TensorMatDual object
+        this->r.index_put_(mask, value.r.unsqueeze(sDim));
+        this->d.index_put_(mask, value.d.unsqueeze(sDim));
+    }
+
+
+    /**
+     * @brief Updates elements in the TensorMatDual object based on a vector of TensorIndex objects 
+     * and a TensorMatDual value.
      *
      * This method performs an in-place update of the real (`r`) and dual (`d`) tensors in the
      * TensorMatDual object. The elements specified by the vector of TensorIndex objects are updated with

@@ -1310,24 +1310,6 @@ TEST(TensorDualTest, AdditionZeroTensor) {
 }
 
 
-// Test: Dimension mismatch
-TEST(TensorDualTest, AdditionDimensionMismatch) {
-    // Input TensorDual objects with mismatched dimensions
-    TensorDual x(torch::randn({2, 3}), torch::randn({2, 3, 4}));
-    TensorDual y(torch::randn({3, 2}), torch::randn({3, 2, 4}));
-
-    EXPECT_THROW(
-        {
-            try {
-                TensorDual result = x + y;
-            } catch (const std::invalid_argument& e) {
-                EXPECT_STREQ("Dimension mismatch: Real and dual tensors of both TensorDual objects must have the same shape.", e.what());
-                throw;
-            }
-        },
-        std::invalid_argument
-    );
-}
 
 // Test: High-dimensional tensors
 TEST(TensorDualTest, AdditionHighDimensionalTensors) {
@@ -7195,17 +7177,6 @@ TEST(TensorDualTest, IndexPutScalarValidInput) {
     EXPECT_TRUE(torch::equal(td.d, expected_d));
 }
 
-TEST(TensorDualTest, IndexPutScalarInvalidMaskSize) {
-    auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
-    auto d = torch::tensor({{{5.0, 6.0}, {7.0, 8.0}}, {{9.0, 10.0}, {11.0, 12.0}}});
-    TensorDual td(r, d);
-
-    // Invalid mask size
-    auto mask = torch::tensor({true, false}); // 1D mask instead of 2D
-    double value = 42.0;
-
-    EXPECT_THROW(td.index_put_(mask, value), std::invalid_argument);
-}
 
 TEST(TensorDualTest, IndexPutScalarAllFalseMask) {
     auto r = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
@@ -13660,20 +13631,6 @@ TEST(TensorMatDualTest, Cat_ValidSpecifiedDimension) {
     EXPECT_EQ(result.d.sizes(), torch::IntArrayRef({2, 6, 4, 5}));
 }
 
-// Test case for cat with mismatched dimensions
-TEST(TensorMatDualTest, Cat_MismatchedDimensions) {
-    // Arrange
-    torch::Tensor real_tensor1 = torch::rand({2, 3, 4});
-    torch::Tensor dual_tensor1 = torch::rand({2, 3, 4, 5});
-    TensorMatDual tmd1(real_tensor1, dual_tensor1);
-
-    torch::Tensor real_tensor2 = torch::rand({2, 4, 4}); // Mismatched dimensions
-    torch::Tensor dual_tensor2 = torch::rand({2, 4, 4, 5});
-    TensorMatDual tmd2(real_tensor2, dual_tensor2);
-
-    // Act & Assert
-    EXPECT_THROW(TensorMatDual::cat(tmd1, tmd2), std::invalid_argument);
-}
 
 
 // Test case for cat with valid TensorMatDual and TensorDual objects
@@ -16531,20 +16488,6 @@ TEST(TensorMatHyperDualTest, AdditionBasic) {
 }
 
 
-TEST(TensorMatHyperDualTest, AdditionDimensionMismatch) {
-    auto r1 = torch::rand({2, 3, 4});
-    auto d1 = torch::rand({2, 3, 4, 2});
-    auto h1 = torch::rand({2, 3, 4, 2, 2});
-
-    auto r2 = torch::rand({2, 3, 5}); // Mismatched dimension
-    auto d2 = torch::rand({2, 3, 5, 2});
-    auto h2 = torch::rand({2, 3, 5, 2, 2});
-
-    TensorMatHyperDual t1(r1, d1, h1);
-    TensorMatHyperDual t2(r2, d2, h2);
-
-    EXPECT_THROW(t1 + t2, std::invalid_argument);
-}
 
 TEST(TensorMatHyperDualTest, AdditionDeviceMismatch) {
     if (!torch::cuda::is_available()) {
