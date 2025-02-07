@@ -238,7 +238,7 @@ namespace janus {
 
 
 
-   torch::Tensor signcond(const torch::Tensor &a, const torch::Tensor &b) 
+   /*torch::Tensor signcond(const torch::Tensor &a, const torch::Tensor &b) 
    {
      torch::Tensor a_sign, b_sign;
      a_sign = custom_sign(torch::real(a));
@@ -249,6 +249,29 @@ namespace janus {
      auto result = (b_sign >= 0) * ((a_sign >= 0) * a + (a_sign < 0) * -a) +
              (b_sign < 0)* ((a_sign >= 0) *-a + (a_sign < 0) *a);
      return result;
+   }*/
+
+   torch::Tensor signcond(const torch::Tensor &a, const torch::Tensor &b)
+   {
+    // This small threshold for |b| can be tuned as needed:
+    const double eps = 1e-15;
+
+    // Magnitude of b
+    torch::Tensor b_abs = b.abs();
+
+    // Boolean mask: true where |b| < eps
+    torch::Tensor small_mask = b_abs < eps;
+
+    // Phase factor conj(b) / |b|
+    // (For real b, conj(b) == b, so this gives ±1 as usual.)
+    torch::Tensor phase = torch::conj(b) / b_abs;  // same shape as b
+
+    // Wherever |b| < eps, replace with 1.0
+    // (ensures a “positive” sign when b is very small or zero)
+    phase = torch::where(small_mask, torch::ones_like(phase), phase);
+
+    // Finally multiply a by the chosen “sign” (phase)
+    return phase * a;
    }
 
 

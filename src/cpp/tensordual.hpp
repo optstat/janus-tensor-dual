@@ -199,6 +199,14 @@ public:
         return *this;
     }
 
+    //Conjugate
+    TensorDual conj() const {
+        //If it is a complex tensor
+        if (r.dtype() == torch::kComplexDouble || r.dtype() == torch::kComplexFloat) {
+            return TensorDual(r.conj(), d.conj());
+        }
+    }
+
     // Deep copy
     TensorDual deepCopy() const {
         return TensorDual(r.clone(), d.clone());
@@ -3014,6 +3022,10 @@ public:
         return *this;
     }
 
+    TensorHyperDual conj() const {
+        return TensorHyperDual(this->r.conj(), this->d.conj(), this->h.conj());
+    }
+
     torch::Device device() const {
         return this->device_;
     }
@@ -4349,6 +4361,11 @@ public:
         
         // Return a new TensorMatDual object
         return TensorMatDual(rc, dc);
+    }
+
+
+    TensorMatDual conj() const {
+        return TensorMatDual(this->r.conj(), this->d.conj());
     }
 
     /**
