@@ -2,7 +2,7 @@
 #define JANUS_UTIL_HPP
 
 #include <torch/torch.h>
-#include "tensordual.hpp"
+#include "dual.hpp"
 #include <iostream>
 //#include <taco.h>
 
@@ -351,22 +351,6 @@ namespace janus {
     core = temp; // Core tensor
    }
 
-   TensorDual signcond(const TensorDual &a, const TensorDual &b) 
-   {
-     std::cerr << "signcond TensorDual" << std::endl;
-     torch::Tensor a_sign, b_sign;
-     a_sign = custom_sign(torch::real(a.r));
-     std::cerr << "a_sign = " << a_sign << std::endl;
-     b_sign = custom_sign(torch::real(b.r));
-     std::cerr << "b_sign = " << b_sign << std::endl;
-     //If the number is very small assume the sign is positive to ensure compatibility with matlab
-
-     auto result = TensorDual::einsum("mi,mi->mi", (b_sign >= 0) , (TensorDual::einsum("mi,mi->mi", (a_sign >= 0) , a))) + 
-                   TensorDual::einsum("mi,mi->mi",(a_sign < 0) , -a) +
-             TensorDual::einsum("mi,mi->mi",(b_sign < 0), (TensorDual::einsum("mi,mi->mi",(a_sign >= 0) ,-a))) + 
-             TensorDual::einsum("mi,mi->mi",(a_sign < 0),a);
-     return result;
-   }
 
    TensorHyperDual signcond(const TensorHyperDual &a, const TensorHyperDual &b) 
    {

@@ -3,6 +3,8 @@
 #include <torch/torch.h>
 #include <stdexcept>
 #include <utility>
+#include <algorithm>
+namespace janus {
 class TensorMatHyperDual {
     public:
         // ── data ────────────────────────────────────────────────
@@ -481,9 +483,9 @@ class TensorMatHyperDual {
                 throw std::invalid_argument("cat(): real parts must match when dim==2.");
     
             // verify all parts are compatible
-            if (!same_on_other_axes(A.r, B.r, dim) ||
-                !same_on_other_axes(A.d, B.d, dim) ||
-                !same_on_other_axes(A.h, B.h, dim))
+            if (!same_on_other_axes(A.r, B.r) ||
+                !same_on_other_axes(A.d, B.d) ||
+                !same_on_other_axes(A.h, B.h))
                 throw std::invalid_argument("cat(): tensor shapes mismatch on non-concatenated axes.");
     
             // concatenate
@@ -801,13 +803,18 @@ class TensorMatHyperDual {
         // adds a singleton column axis, giving shapes
         //   r : [N,1] , d : [N,1,D] , h : [N,1,D,D]
         //
-        [[nodiscard]] TensorMatHyperDual operator/(const TensorHyperDual& oth) const {
-            // Promote `oth` to a 1-column TensorMatHyperDual
-            TensorMatHyperDual divisor(oth, /*dim=*/1);   // [N,1] / [N,1,D] / [N,1,D,D]
-    
-            // Re-use the TensorMatHyperDual ÷ TensorMatHyperDual logic
-            return *this / divisor;                       // broadcast across L columns
+        [[nodiscard]] TensorMatHyperDual operator/(const TensorHyperDual& oth) const
+        {
+            // build a [N,1] matrix view of `oth`
+            TensorMatHyperDual divisor(
+                oth.r.unsqueeze(1),     // (N)   -> (N,1)
+                oth.d.unsqueeze(1),     // (N,D) -> (N,1,D)
+                oth.h.unsqueeze(1));    // (N,D,D) -> (N,1,D,D)
+        
+            // now re-use mat ÷ mat implementation (broadcasted over columns)
+            return *this / divisor;
         }
+        
     
         
         // ─────────────────────────────────────────────────────────────
@@ -1192,111 +1199,47 @@ class TensorMatHyperDual {
         inline void index_put_(const torch::indexing::TensorIndex &mask,
                                const TensorMatHyperDual &value)
         {
-            using torch::indexing::Slice;
-    
-            const auto N = r.size(0);
-            const auto L = r.size(1);
-            const auto D = d.size(2);
-    
-            /* ── infer K (number of columns being written) ───────── */
+            using namespace torch::indexing; // Slice, None, …
+
+            const auto N = r.size(0); // rows
+            const auto L = r.size(1); // columns
+            const auto D = d.size(2); // dual width
+
+            /* --------------------------------------------------------------
+            1.  How many columns (K) does ‘mask’ refer to?
+            Instead of deciphering Slice / SymInt internals, ask
+            PyTorch to index a dummy 1-D tensor and take its length.
+            ----------------------------------------------------------------*/
             int64_t K;
-            if (mask.is_slice())
-            {
-                auto s = mask.slice();
-                K = (s.start().has_value() ? *s.start() : 0);
-                int64_t stop = s.stop().has_value() ? *s.stop() : L;
-                int64_t step = s.step().has_value() ? *s.step() : 1;
-                K = (stop - K + (step - 1)) / step; // ceil div
-            }
-            else if (mask.is_integer())
-            {
-                K = 1;
-            }
-            else if (mask.is_none())
-            {
-                K = L; // full slice
+            if (mask.is_none())
+            { //  A[:, :]   («:» => all)
+                K = L;
             }
             else
-            {
-                throw std::invalid_argument("index_put_: unsupported TensorIndex type.");
+            { //  integer, slice, list, …
+                // dummy 1-D vector  [0, 1, …, L-1]   — lives on CPU, int64
+                auto dummy = torch::arange(L, torch::kLong);
+                auto picked = dummy.index({mask}); // result shape [K]
+                K = picked.size(0);
             }
-    
-            /* ── shape checks on value ───────────────────────────── */
-            if (value.r.sizes() != torch::IntArrayRef({N, K}) ||
-                value.d.sizes() != torch::IntArrayRef({N, K, D}) ||
-                value.h.sizes() != torch::IntArrayRef({N, K, D, D}))
-                throw std::invalid_argument("index_put_: value shapes do not match the masked slice.");
-    
-            /* ── write real part (row Slice(), column mask) ─────── */
-            r.index_put_({Slice(), mask}, value.r); // [N,K]
-    
-            /* ── write dual part (add trailing Slice() for D) ───── */
-            d.index_put_({Slice(), mask, Slice()}, value.d); // [N,K,D]
-    
-            /* ── write hyper-dual part (two trailing D axes) ────── */
-            h.index_put_({Slice(), mask, Slice(), Slice()}, value.h); // [N,K,D,D]
+
+            /* --------------------------------------------------------------
+            2.  Shape sanity for the replacement block
+            r : [N,K]     d : [N,K,D]     h : [N,K,D,D]
+            ----------------------------------------------------------------*/
+            TORCH_CHECK(value.r.sizes() == torch::IntArrayRef({N, K}) &&
+                            value.d.sizes() == torch::IntArrayRef({N, K, D}) &&
+                            value.h.sizes() == torch::IntArrayRef({N, K, D, D}),
+                        "index_put_: value tensors have incompatible shapes");
+
+            /* --------------------------------------------------------------
+            3.  Write the new data
+            ----------------------------------------------------------------*/
+            r.index_put_({Slice(), mask}, value.r);                   // (N,K)
+            d.index_put_({Slice(), mask, Slice()}, value.d);          // (N,K,D)
+            h.index_put_({Slice(), mask, Slice(), Slice()}, value.h); // (N,K,D,D)
         }
-    
-        // ─────────────────────────────────────────────────────────────
-        // In-place assignment on the **column axis** using a single
-        // TensorIndex (`mask`) that selects one or more columns.
-        //
-        //   • mask may be Slice(), IntArrayRef, or a single integer.
-        //   • `value` must have exactly the same number of rows N and
-        //     the same dual size D, but may have 1 or more columns
-        //     matching mask’s length K.
-        //
-        // Shapes accepted for `value`
-        //   r : [N,K]          d : [N,K,D]          h : [N,K,D,D]
-        //
-        inline void index_put_(const torch::indexing::TensorIndex &mask,
-                               const TensorMatHyperDual &value)
-        {
-            using torch::indexing::Slice;
-    
-            const auto N = r.size(0);
-            const auto L = r.size(1);
-            const auto D = d.size(2);
-    
-            /* ── infer K (number of columns being written) ───────── */
-            int64_t K;
-            if (mask.is_slice())
-            {
-                auto s = mask.slice();
-                K = (s.start().has_value() ? *s.start() : 0);
-                int64_t stop = s.stop().has_value() ? *s.stop() : L;
-                int64_t step = s.step().has_value() ? *s.step() : 1;
-                K = (stop - K + (step - 1)) / step; // ceil div
-            }
-            else if (mask.is_integer())
-            {
-                K = 1;
-            }
-            else if (mask.is_none())
-            {
-                K = L; // full slice
-            }
-            else
-            {
-                throw std::invalid_argument("index_put_: unsupported TensorIndex type.");
-            }
-    
-            /* ── shape checks on value ───────────────────────────── */
-            if (value.r.sizes() != torch::IntArrayRef({N, K}) ||
-                value.d.sizes() != torch::IntArrayRef({N, K, D}) ||
-                value.h.sizes() != torch::IntArrayRef({N, K, D, D}))
-                throw std::invalid_argument("index_put_: value shapes do not match the masked slice.");
-    
-            /* ── write real part (row Slice(), column mask) ─────── */
-            r.index_put_({Slice(), mask}, value.r); // [N,K]
-    
-            /* ── write dual part (add trailing Slice() for D) ───── */
-            d.index_put_({Slice(), mask, Slice()}, value.d); // [N,K,D]
-    
-            /* ── write hyper-dual part (two trailing D axes) ────── */
-            h.index_put_({Slice(), mask, Slice(), Slice()}, value.h); // [N,K,D,D]
-        }
-    
+
         // ─────────────────────────────────────────────────────────────
         // Masked assignment with an ordinary tensor.
         //
@@ -1331,4 +1274,4 @@ class TensorMatHyperDual {
             h.index_put_(mask_h, 0.0); // hyper [*,*,D,D]
         }
     };
-    
+}

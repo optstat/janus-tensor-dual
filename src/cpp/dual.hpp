@@ -1,6 +1,5 @@
 #pragma once
 #include <torch/torch.h>
-#include <torch/index.h>
 
 #include <type_traits> // For std::is_scalar
 #include <vector>
@@ -120,35 +119,8 @@ void safe_update(
 #include "tensordual.hpp"
 #include "tensorhyperdual.hpp"
 #include "tensormatdual.hpp"
-
-// ─────────────────────────────────────────────────────────────
-// Build an “identity” TensorMatHyperDual:
-//
-//   r  : N×N   identity
-//   d  : N×N×D zeros
-//   h  : N×N×D×D zeros
-//
-// where
-//   N = length of the TensorHyperDual (this->r)
-//   D = dual dimension  (this->d.size(-1))
-//
-TensorMatHyperDual TensorHyperDual::eye() const
-{
-    /* -------- determine sizes ---------------------------------------- */
-    const int64_t N = this->r.size(-1);       // vector length
-    const int64_t D = this->d.size(-1);       // dual dimension
-
-    /* -------- real part: identity matrix ----------------------------- */
-    torch::Tensor r_mat = torch::eye(N, this->r.options());             // [N,N]
-
-    /* -------- dual part: zeros --------------------------------------- */
-    torch::Tensor d_mat = torch::zeros({ N, N, D }, this->d.options()); // [N,N,D]
-
-    /* -------- hyperdual part: zeros ---------------------------------- */
-    torch::Tensor h_mat = torch::zeros({ N, N, D, D }, this->h.options()); // [N,N,D,D]
-
-    return TensorMatHyperDual(r_mat, d_mat, h_mat);
-}
+#include "tensormathyperdual.hpp"
+namespace janus {
 
 
 /**
@@ -195,7 +167,7 @@ TensorMatDual TensorDual::unsqueeze(int dim) {
 //            dual : [N,N,D]          (zeros)
 // ----------------------------------------------------------------------------
 TensorMatDual TensorDual::eye() const
-{
+{   
     /* ----- sanity checks -------------------------------------------------- */
     if (!r.defined() || !d.defined())
         throw std::runtime_error("TensorDual::eye(): tensors are undefined.");
@@ -251,40 +223,6 @@ inline TensorDual operator*(const torch::Tensor& tensor,
 }
 
 
-// ─────────────────────────────────────────────────────────────
-// Element-wise product   torch::Tensor  *  TensorDual
-//
-//   • `tensor` may be
-//         – scalar          ()          (broadcast to N)
-//         – row vector      [N]
-//
-//   • Result:
-//         real : tensor * td.r          [N]
-//         dual : tensor * td.d          [N,D]
-//
-[[nodiscard]]
-inline TensorDual operator*(const torch::Tensor& tensor,
-                            const TensorDual&    td)
-{
-    /* ── sanity checks ────────────────────────────────────── */
-    if (!tensor.defined())
-        throw std::invalid_argument("operator*: lhs tensor is undefined.");
-    if (!td.r.defined() || !td.d.defined())
-        throw std::invalid_argument("operator*: rhs TensorDual is undefined.");
-    if (tensor.device() != td.r.device())
-        throw std::invalid_argument("operator*: lhs and rhs must reside on the same device.");
-
-    /* ── broadcastability ---------------------------------- */
-    // Accept scalar or 1-D vector length N
-    if (!(tensor.dim() == 0 || (tensor.dim() == 1 && tensor.size(0) == td.r.size(0))))
-        throw std::invalid_argument("operator*: lhs tensor must be scalar or length-N vector.");
-
-    /* ── compute ------------------------------------------- */
-    torch::Tensor real_out = tensor * td.r;                   // [N]
-    torch::Tensor dual_out = tensor.unsqueeze(-1) * td.d;     // [N,1] * [N,D] → [N,D]
-
-    return TensorDual(std::move(real_out), std::move(dual_out));
-}
 
 
 // ─────────────────────────────────────────────────────────────
@@ -1122,26 +1060,31 @@ inline TensorMatDual ger(const TensorDual& x,
     /* -------- sanity checks ----------------------------------------- */
     if (!x.r.defined() || !x.d.defined() ||
         !y.r.defined() || !y.d.defined())
-        throw std::invalid_argument("ger(TensorDual,TensorDual): operands undefined.");
+        throw std::invalid_argument(
+            "ger(TensorDual,TensorDual): operands undefined.");
 
-    const int64_t P = x.r.size(0);          // length of x
-    const int64_t Q = y.r.size(0);
+    const int64_t P = x.r.size(0);          // |x|
+    const int64_t Q = y.r.size(0);          // |y|
     const int64_t D = x.d.size(1);
 
     if (y.d.size(1) != D)
         throw std::invalid_argument("ger: dual dimensions do not match.");
 
-    /* -------- real part  r = x.r ⊗ y.r ------------------------------- */
-    torch::Tensor r = x.r.unsqueeze(1) * y.r.unsqueeze(0);          // [P,Q]
+    /* -------- real part  r = x.r ⊗ y.r ------------------------------ */
+    torch::Tensor r = x.r.unsqueeze(1) * y.r.unsqueeze(0);            // [P,Q]
 
-    /* -------- dual part --------------------------------------------- */
-    // term1 = x.r ⊗ y.d
-    torch::Tensor term1 = x.r.unsqueeze({1,2}) * y.d.unsqueeze(0);  // [P,Q,D]
+    /* -------- dual part -------------------------------------------- */
+    // term1 = x.r ⊗ y.d           → [P,1,1] · [1,Q,D] = [P,Q,D]
+    torch::Tensor term1 = x.r.unsqueeze(1).unsqueeze(2)               // [P,1,1]
+                         * y.d.unsqueeze(0);                          // [1,Q,D]
 
-    // term2 = x.d ⊗ y.r
-    torch::Tensor term2 = x.d.unsqueeze(1) * y.r.unsqueeze({0,2});  // [P,Q,D]
+    // term2 = x.d ⊗ y.r           → [P,1,D] · [1,Q,1] = [P,Q,D]
+    torch::Tensor term2 = x.d.unsqueeze(1)                            // [P,1,D]
+                         * y.r.unsqueeze(0).unsqueeze(2);             // [1,Q,1]
 
-    torch::Tensor d = term1 + term2;                                // [P,Q,D]
+    torch::Tensor d = term1 + term2;                                  // [P,Q,D]
 
     return TensorMatDual(std::move(r), std::move(d));
+}
+
 }

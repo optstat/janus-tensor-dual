@@ -1,13 +1,13 @@
 #pragma once
 #include <torch/torch.h>
-#include <torch/index.h>
+
 
 #include <type_traits> // For std::is_scalar
 #include <vector>
 #include <sstream>  // For std::ostringstream
 #include <iomanip>   // for std::setprecision
 #include <stdexcept>
-
+namespace janus {
 /**
  * @brief The TensorMatDual class tracks first‑order sensitivities of a matrix.
  *
@@ -72,6 +72,7 @@ class TensorMatDual {
             this->device_ = other.device_;
         }
     
+        
         // ──────────────────────────────────────────────────────────────────────────────
         // Assignment operators (rule‑of‑five – defaulted move semantics are fine)
         TensorMatDual& operator=(const TensorMatDual& other) {
@@ -1274,4 +1275,4 @@ class TensorMatDual {
         }
     
     };
-    
+}

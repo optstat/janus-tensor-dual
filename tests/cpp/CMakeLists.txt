@@ -7,7 +7,19 @@ set(SOURCE_FILE1 tensordual_test.cpp)
 set(SOURCE_FILE2 tensordualcuda_test.cu)
 set(SOURCE_FILE3 tensordualcuda_sparse_test.cu)
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
-add_executable(dualtest ${SOURCE_FILE1})
+add_executable(dualtest tensordual_test.cpp)
+
+target_include_directories(dualtest PRIVATE
+        ${TORCH_INCLUDE_DIRS}         # <libtorch>/include and …/include/torch/csrc/api/include
+        ${CMAKE_SOURCE_DIR}/src/cpp)
+
+target_link_libraries(dualtest PRIVATE
+        ${TORCH_LIBRARIES}            # libtorch_cpu.so / libtorch_cuda.so + deps
+        ${GTEST_LIBRARIES})
+
+# If you need the headers of your own library:
+target_include_directories(dualtest PRIVATE ${CMAKE_SOURCE_DIR}/src/cpp)
+
 add_executable(dualtest_cuda ${SOURCE_FILE2})
 add_executable(dualtest_cuda_sparse ${SOURCE_FILE3})
 
@@ -33,6 +45,8 @@ else()
 endif()
 
 # Include directories
+# Torch already gives you the two folders in TORCH_INCLUDE_DIRS
+
 target_include_directories(dualtest
     PRIVATE
         ${TORCH_INCLUDE_DIRS}

@@ -1,12 +1,14 @@
 #pragma once
 #include <torch/torch.h>
-#include <torch/index.h>
+
 
 #include <type_traits> // For std::is_scalar
 #include <vector>
 #include <sstream>  // For std::ostringstream
 #include <iomanip>   // for std::setprecision
 #include <stdexcept>
+#include <variant>   // ← brings c10::get_if / holds_alternative
+#include <c10/core/SymInt.h>   // for c10::SymInt::expect_int() etc.
 
 namespace janus {
 
@@ -85,7 +87,8 @@ public:
         torch::zeros({N, D},  opts));  // d  (N,D)
     }
 
-    
+    TensorMatDual eye() const;
+
     // ─────────── Element-wise operators (runtime-D safe) ────────────────
     friend TensorDual operator+(const TensorDual& a,
                                 const TensorDual& b){
@@ -95,49 +98,12 @@ public:
         return { a.r + b.r,  a.d + b.d };
     }
 
-    //  r : (N)        or (1,N)
-    //  d : (N,D)      or (1,N,D)      ← share leading state axis
-    //  D is derived once and stored in D_
-    TensorDual(const torch::Tensor& r_,
-        const torch::Tensor& d_)
-    {
-        // ── shape checks ───────────────────────────────────────────────
-        TORCH_CHECK( (r_.dim() == 1) ||
-                (r_.dim() == 2 && r_.size(0) == 1),
-        "r must be 1-D (N) or 2-D (1,N); got ", r_.sizes());
-
-        TORCH_CHECK( (d_.dim() == 2 && r_.dim() == 1) ||      // r:(N)  d:(N,D)
-                (d_.dim() == 3 && r_.dim() == 2 && d_.size(0) == 1),
-        "d must be 2-D (N,D) or 3-D (1,N,D); got ", d_.sizes());
-
-        TORCH_CHECK( r_.sizes().back() == d_.sizes()[d_.dim() - 2],
-        "Mismatch state axis: N(r)=", r_.sizes().back(),
-        " vs N(d)=", d_.sizes()[d_.dim() - 2]);
-
-        // ── dtype / device parity ──────────────────────────────────────
-        TORCH_CHECK(r_.dtype()  == d_.dtype()  &&
-                r_.device() == d_.device(),
-        "dtype / device mismatch");
-
-        // ── canonicalise to (N) / (N,D) ────────────────────────────────
-        r = (r_.dim() == 2) ? r_.squeeze(0) : r_;            // (N)
-        d = (d_.dim() == 3) ? d_.squeeze(0) : d_;            // (N,D)
-
-        D_ = d.size(1);                                      // dual length
-        TORCH_CHECK(D_ > 0, "Dual axis D must be positive");
-
-        /* ★ optional: guarantee contiguous layout
-        r = r.contiguous();
-        d = d.contiguous();                                */
-    }
 
 
     // Cheap, reference-counted copy
     TensorDual(const TensorDual&)            = default;
     TensorDual& operator=(const TensorDual&) = default;
 
-    TensorDual(TensorDual&&) noexcept            = default;
-    TensorDual& operator=(TensorDual&&) noexcept = default;
 
 
     
@@ -293,21 +259,27 @@ public:
         const auto N = xs[0].r.size(0);
         const auto D = xs[0].d.size(1);
         const auto opts_r = xs[0].r.options();        // dtype & device to re-use
+        const auto ref_dev  = xs[0].r.device();
+        const auto ref_dtype= xs[0].r.dtype();
 
-        // shape compatibility check
+        /* shape / dtype / device parity check */
         for (const auto& t : xs) {
-            TORCH_CHECK(t.r.options() == opts_r,
-                        "TensorDual::cat: dtype/device mismatch");
-            if (dim==0) {            // concat along state axis
-                TORCH_CHECK(t.d.size(1)==D,
-                "TensorDual::cat dim=0: dual axis (D) must match, expected ",
-                D, " got ", t.d.size(1));
-            } else {                 // concat along dual axis
-                TORCH_CHECK(t.r.size(0)==N,
-                "TensorDual::cat dim=1: state axis (N) must match, expected ",
-                N, " got ", t.r.size(0));
+            TORCH_CHECK(t.r.device() == ref_dev && t.r.dtype() == ref_dtype,
+                        "TensorDual::cat: dtype / device mismatch; expected ",
+                        ref_dtype, " on ", ref_dev, " but got ",
+                        t.r.dtype(), " on ", t.r.device());
+
+            if (dim == 0) {                                // concat along state axis
+                TORCH_CHECK(t.d.size(1) == D,
+                            "TensorDual::cat dim=0: dual axis (D) mismatch, expected ",
+                            D, " got ", t.d.size(1));
+            } else {                                       // concat along dual axis
+                TORCH_CHECK(t.r.size(0) == N,
+                            "TensorDual::cat dim=1: state axis (N) mismatch, expected ",
+                            N, " got ", t.r.size(0));
             }
         }
+
 
         // collect tensors
         std::vector<torch::Tensor> r_parts, d_parts;
@@ -348,8 +320,10 @@ public:
         TORCH_CHECK(a.D_ == b.D_,
                     "TensorDual::einsum: dual-axis length mismatch (",
                     a.D_, " vs ", b.D_, ')');
-        TORCH_CHECK(a.r.options() == b.r.options(),                           // ★
+        TORCH_CHECK(a.r.dtype()  == b.r.dtype()  &&
+                    a.r.device() == b.r.device(),
                     "TensorDual::einsum: dtype/device mismatch between operands");
+        
     
         // ── primal result ────────────────────────────────────────────────
         auto r_out = torch::einsum(arg, {a.r, b.r});
@@ -394,8 +368,6 @@ public:
                     "TensorDual::einsum(tensor,dual): arg must contain ',' and '->', got ", arg);
         TORCH_CHECK(arg.find('z') == std::string::npos,
                     "TensorDual::einsum(tensor,dual): letter 'z' is reserved for dual axis");
-        TORCH_CHECK(first.options() == second.r.options(),
-                    "TensorDual::einsum(tensor,dual): dtype/device mismatch");
 
         // ── primal result ────────────────────────────────────────────────
         auto r_out = torch::einsum(arg, {first, second.r});
@@ -467,8 +439,6 @@ public:
         for (size_t i=0;i<ts.size();++i) {
             TORCH_CHECK(ts[i].D_ == D,
                         "dual-axis length mismatch at tensor ", i);
-            TORCH_CHECK(ts[i].r.options() == opts,
-                        "dtype/device mismatch at tensor ", i);
         }
     
         // Split positions of commas once
@@ -528,9 +498,6 @@ public:
                     "`where`: condition tensor must be boolean, got ",
                     cond.dtype());
 
-        TORCH_CHECK(cond.device() == x.r.device() &&
-                    x.r.options() == y.r.options(),                // dtype & dev of x,y
-                    "`where`: device / dtype mismatch among operands");
 
         // Real part – PyTorch broadcasts cond to (N) automatically
         auto xr = torch::where(cond, x.r, y.r);
@@ -618,8 +585,6 @@ public:
         TORCH_CHECK(r.sizes() == other.r.sizes(),
                     "TensorDual::operator+: state-axis length mismatch (",
                     r.sizes(), " vs ", other.r.sizes(), ')');
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator+: dtype / device mismatch");
 
         return TensorDual(r + other.r,   // (N)
                         d + other.d);  // (N,D)
@@ -667,30 +632,11 @@ public:
                     "TensorDual::operator-: state-axis length mismatch (",
                     r.sizes(), " vs ", other.r.sizes(), ')');
 
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator-: dtype/device mismatch");
 
         return TensorDual(r - other.r,          // (N)
                         d - other.d);         // (N,D)
     }
 
-    /// Element-wise subtraction of two TensorDuals.
-    [[nodiscard]] inline TensorDual operator-(const TensorDual& other) const noexcept
-    {
-        TORCH_CHECK(D_ == other.D_,
-                    "TensorDual::operator-: dual-axis length mismatch (",
-                    D_, " vs ", other.D_, ')');
-
-        TORCH_CHECK(r.sizes() == other.r.sizes(),
-                    "TensorDual::operator-: state-axis length mismatch (",
-                    r.sizes(), " vs ", other.r.sizes(), ')');
-
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator-: dtype/device mismatch");
-
-        return TensorDual(r - other.r,          // (N)
-                        d - other.d);         // (N,D)
-    }
 
     /// Subtract a scalar from the real part; dual part unchanged.
     [[nodiscard]] inline TensorDual operator-(double scalar) const noexcept
@@ -722,8 +668,6 @@ public:
         TORCH_CHECK(r.sizes() == other.r.sizes(),
                     "TensorDual::operator*: state-axis length mismatch (",
                     r.sizes(), " vs ", other.r.sizes(), ')');
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator*: dtype/device mismatch");
 
         // real part
         auto real = r * other.r;                                  // (N)
@@ -784,8 +728,6 @@ public:
         TORCH_CHECK(r.sizes()   == other.r.sizes(),
                     "TensorDual::operator<=: shape mismatch (", r.sizes(),
                     " vs ", other.r.sizes(), ')');
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator<=: dtype/device mismatch");
 
         return r <= other.r;        // (N) bool
     }
@@ -798,8 +740,6 @@ public:
         TORCH_CHECK(r.sizes()   == other.r.sizes(),
                     "TensorDual::operator==: shape mismatch (", r.sizes(),
                     " vs ", other.r.sizes(), ')');
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator==: dtype/device mismatch");
 
         return r == other.r;           // bool tensor shape (N)
     }
@@ -845,8 +785,6 @@ public:
         TORCH_CHECK(r.sizes()   == other.r.sizes(),
                     "TensorDual::operator>: shape mismatch (", r.sizes(),
                     " vs ", other.r.sizes(), ')');
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator>: dtype/device mismatch");
 
         return r > other.r;           // bool tensor, shape (N)
     }
@@ -883,16 +821,6 @@ public:
         return r > scalar;           // bool tensor, shape (N)
     }
 
-    /// Element-wise “greater-than” comparison between the real part of a
-    /// TensorDual and a scalar.  Dual part is ignored.
-    ///
-    /// Returns a boolean tensor of shape (N).
-    template <typename Scalar,
-            typename = std::enable_if_t<std::is_arithmetic_v<Scalar>>>
-    [[nodiscard]] inline torch::Tensor operator>(Scalar scalar) const noexcept
-    {
-        return r > scalar;           // bool tensor, shape (N)
-    }
 
 
     /// Element-wise “less-than” comparison between the real part of a
@@ -934,8 +862,6 @@ public:
         TORCH_CHECK(r.sizes()   == other.r.sizes(),
                     "TensorDual::operator>=: shape mismatch (", r.sizes(),
                     " vs ", other.r.sizes(), ')');
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator>=: dtype/device mismatch");
 
         return r >= other.r;          // bool tensor, shape (N)
     }
@@ -1007,8 +933,6 @@ public:
         TORCH_CHECK(r.sizes()   == other.r.sizes(),
                     "TensorDual::operator!= : shape mismatch (", r.sizes(),
                     " vs ", other.r.sizes(), ')');
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator!= : dtype/device mismatch");
 
         return r != other.r;     // bool tensor (N)
     }
@@ -1056,8 +980,6 @@ public:
         TORCH_CHECK(r.sizes() == other.r.sizes(),
                     "TensorDual::operator/: state-axis length mismatch (",
                     r.sizes(), " vs ", other.r.sizes(), ')');
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::operator/: dtype/device mismatch");
 
         // ── safeguard denominator (avoid divide-by-zero) ────────────────
         auto safe_r2 = torch::sign(other.r) * other.r.abs().clamp_min(1e-12); // (N)
@@ -1793,49 +1715,7 @@ public:
         return TensorDual(std::move(r_out), std::move(d_out));   // shapes (1) / (1,D)
     }
 
-    /// Extract a single state element by row index.
-    /// Shapes of the result stay valid for the class invariant:
-    ///   r_out : (1)
-    ///   d_out : (1, D)
-    [[nodiscard]] inline TensorDual index_row(int64_t i) const
-    {
-        TORCH_CHECK(i >= 0 && i < r.size(0),
-                    "TensorDual::index_row: index ", i, " out of range [0,", r.size(0)-1, ']');
 
-        /* pick the same row from r and d ----------------------------------- */
-        auto r_out = r.index_select(/*dim=*/0, torch::tensor({i}, r.options().dtype(torch::kLong)));
-        auto d_out = d.index_select(/*dim=*/0, torch::tensor({i}, d.options().dtype(torch::kLong)));
-
-        return TensorDual(std::move(r_out), std::move(d_out));   // shapes (1) / (1,D)
-    }
-
-    /// Apply a `TensorIndex` on the state axis (axis 0) only.
-    /// Keeps the dual axis **D** intact and re-inserts a length-1 state
-    /// axis when a single element is selected.
-    ///
-    /// Supported `index` kinds:
-    ///   • integer  i             → row i
-    ///   • slice    Slice(a,b,s)  → rows a..b step s
-    ///   • mask     tensor<bool>  → boolean row filter
-    [[nodiscard]] inline TensorDual index(const torch::indexing::TensorIndex& index) const
-    {
-        using namespace torch::indexing;
-
-        // 1. Apply the index on axis 0 of r and d
-        auto r_sel = r.index({index});        // (K) or scalar
-        auto d_sel = d.index({index});        // (K,D) or (D)
-
-        // 2. If a *single* row was chosen, re-insert the state axis
-        if (r_sel.dim() == 0) {               // scalar  → ()
-            r_sel = r_sel.unsqueeze(0);       // (1)
-        }
-        if (d_sel.dim() == 1) {               // (D)     → missing state axis
-            d_sel = d_sel.unsqueeze(0);       // (1,D)
-        }
-
-        // 3. Return the new TensorDual (constructor re-validates invariant)
-        return TensorDual(std::move(r_sel), std::move(d_sel));
-    }
 
     /// In-place masked assignment (row mask on state axis).
     /// `mask` shape : (N) bool
@@ -1851,8 +1731,6 @@ public:
         TORCH_CHECK(mask.dim() == 1 && mask.size(0) == r.size(0),
         "index_put_: mask must be 1-D and length N=", r.size(0));
 
-        TORCH_CHECK(value.r.options() == r.options(),
-        "index_put_: dtype/device mismatch in value");
         TORCH_CHECK(value.D_ == d.size(1),
         "index_put_: dual-axis length mismatch (", value.D_,
         " vs ", d.size(1), ')');
@@ -1865,66 +1743,65 @@ public:
         d.index_put_({mask_d}, value.d.index({mask_d}));
     }
 
-    /// In-place assignment with a single `TensorIndex` applied **on the state
-    /// axis 0**.  
-    /// `value` must share dtype/device and have the same dual-axis length D.
-    ///
-    /// Supported selectors (`mask`):
-    ///   • integer          → write one row  
-    ///   • slice / range    → write several rows  
-    ///   • boolean 1-D mask → write where mask == true
-    inline void index_put_(const torch::indexing::TensorIndex& mask,
-        const TensorDual&                   value)
-    {
-        using namespace torch::indexing;
+        /// In-place assignment with a single `TensorIndex` applied **on the state
+        /// axis 0**.  
+        /// `value` must share dtype/device and have the same dual-axis length D.
+        ///
+        /// Supported selectors (`mask`):
+        ///   • integer          → write one row  
+        ///   • slice / range    → write several rows  
+        ///   • boolean 1-D mask → write where mask == true
+        inline void index_put_(const torch::indexing::TensorIndex& mask,
+            const TensorDual&                   value)
+        {
+            using torch::indexing::Ellipsis;
+            using torch::indexing::Slice;
 
-        /* ── basic compatibility checks ───────────────────────────────── */
-        TORCH_CHECK(value.r.options() == r.options(),
-        "index_put_: dtype / device mismatch");
-        TORCH_CHECK(value.D_ == d.size(1),
-        "index_put_: dual-axis length mismatch (", value.D_,
-        " vs ", d.size(1), ')');
+            torch::Tensor row_mask; // bool mask (N)
 
-        /* ── build an explicit row mask from the selector ─────────────── */
-        torch::Tensor row_mask;            // bool (N)
-
-        if (const auto* pInt = std::get_if<int64_t>(&mask)) {
-            /* single row index */
-            int64_t i = *pInt;
-            if (i < 0) i += r.size(0);         // handle negative indices
+            /* 1. scalar index -------------------------------------------------- */
+            if (mask.is_integer()) {
+                /* SymInt  →  concrete int64_t                          */
+                int64_t i = mask.integer().expect_int();   // <-- here
+            
+                if (i < 0) i += r.size(0);
                 TORCH_CHECK(i >= 0 && i < r.size(0),
-                            "index_put_: index ", i, " out of range 0..", r.size(0)-1);
-            row_mask = torch::zeros({r.size(0)}, torch::TensorOptions()
-                    .dtype(torch::kBool).device(r.device()));
-            row_mask[i] = true;
-        }
-        else if (std::holds_alternative<Slice>(mask) ||
-            std::holds_alternative<Ellipsis>(mask)) {
-            /* convert slice/ellipsis to bool mask */
-            auto sel = r.index({mask});                    // (K)
-            row_mask = torch::zeros_like(r, torch::kBool); // (N)
-            row_mask.index_put_({mask}, true);
-        }
-        else if (const auto* pTensor = std::get_if<torch::Tensor>(&mask)) {
-            /* boolean mask passed directly */
-            row_mask = *pTensor;
-            TORCH_CHECK(row_mask.dtype()  == torch::kBool &&
-            row_mask.device() == r.device() &&
-            row_mask.sizes()  == r.sizes(),
-            "index_put_: boolean mask must be kBool, same device, "
-            "and shape (N)");
-        }
-        else {
-            TORCH_CHECK(false, "index_put_: unsupported TensorIndex type");
-        }
+                            "index_put_: index ", i, " out of range");
+            
+                row_mask = torch::zeros(r.sizes(),
+                                        torch::TensorOptions()
+                                            .dtype(torch::kBool)
+                                            .device(r.device()));
+                row_mask[i] = true;
+            }
+            /* 2. slice / ellipsis --------------------------------------------- */
+            else if (mask.is_slice() || mask.is_ellipsis())
+            {
+                row_mask = torch::zeros(r.sizes(),
+                                        torch::TensorOptions()
+                                            .dtype(torch::kBool)
+                                            .device(r.device()));
+                row_mask.index_put_({mask}, true); // TensorIndex works here
+            }
+            /* 3. boolean tensor mask ------------------------------------------ */
+            else if (mask.is_tensor()) {                     // ← boolean-mask case
+                row_mask = mask.tensor();                    // returns const Tensor&
+                TORCH_CHECK(row_mask.dtype()  == torch::kBool &&
+                            row_mask.device() == r.device()   &&
+                            row_mask.sizes()  == r.sizes(),
+                            "index_put_: boolean mask must be kBool, same device, and shape (N)");
+            }            
+            else
+            {
+                TORCH_CHECK(false, "index_put_: unsupported TensorIndex type");
+            }
 
-        /* ── apply the mask to real and dual tensors ──────────────────── */
-        r.index_put_({row_mask}, value.r.index({row_mask}));
+            /* write selected rows --------------------------------------------- */
+            r.index_put_({row_mask}, value.r.index({row_mask}));
 
-        /* expand mask for (N,D) tensor */
-        auto row_mask_d = row_mask.unsqueeze(-1).expand({-1, d.size(1)});
-        d.index_put_({row_mask_d}, value.d.index({row_mask_d}));
-    }
+            auto row_mask_d = row_mask.unsqueeze(-1).expand({-1, d.size(1)}); // (N,D)
+            d.index_put_({row_mask_d}, value.d.index({row_mask_d}));
+        }
 
     /// Masked in-place assignment with a **boolean row mask** and a scalar.
     ///
@@ -2000,8 +1877,7 @@ public:
         using torch::indexing::TensorIndex;
 
         /* ── basic parity checks ───────────────────────────────────────── */
-        TORCH_CHECK(value.r.options() == r.options(),
-                    "index_put_: dtype / device mismatch");
+
         TORCH_CHECK(value.D_ == d.size(1),
                     "index_put_: dual-axis length mismatch (",
                     value.D_, " vs ", d.size(1), ')');
@@ -2065,8 +1941,6 @@ public:
     [[nodiscard]] inline TensorDual max(const TensorDual& other) const noexcept
     {
         /* ── compatibility checks ─────────────────────────────────────── */
-        TORCH_CHECK(r.options() == other.r.options(),
-                    "TensorDual::max: dtype / device mismatch");
         TORCH_CHECK(r.sizes()   == other.r.sizes(),
                     "TensorDual::max: state-axis length mismatch");
         TORCH_CHECK(d.sizes()   == other.d.sizes(),

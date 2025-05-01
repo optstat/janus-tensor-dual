@@ -1,9 +1,9 @@
 #pragma once
 #include <torch/torch.h>
-#include <torch/index.h>
 #include <type_traits> // For std::is_scalar
 #include <vector>
 
+namespace janus {
 /**
  * @brief TensorHyperDual stores first‑ and second‑order sensitivities w.r.t. a size‑N state vector.
  *
@@ -111,9 +111,9 @@ class TensorHyperDual {
     
         /** In‑place conjugation – cheaper when temporaries matter. */
         void conj_() {
-            r.conj_();
-            d.conj_();
-            h.conj_();
+            r.conj();
+            d.conj();
+            h.conj();
         }
     
     private:
@@ -569,18 +569,6 @@ public:
         return r > scalar;          // broadcasts scalar → [N]
     }
 
-    /**
-     * @brief Compare the real part with a scalar:  *this > scalar
-     *
-     * Works for any arithmetic type (int, float, double, …).
-     * Relies on PyTorch’s automatic scalar broadcasting.
-     */
-    template <typename Scalar,
-            typename = std::enable_if_t<std::is_arithmetic<Scalar>::value>>
-    torch::Tensor operator>(Scalar scalar) const
-    {
-        return r > scalar;     // bool tensor [N]  (scalar → broadcast)
-    }
 
     /**
      * @brief Element-wise ‘less than’ comparison of two TensorHyperDual objects
@@ -1260,6 +1248,13 @@ public:
                             torch::zeros_like(h));
     }
 
+    static TensorHyperDual zeros_like(const TensorHyperDual& tensor)
+    {
+        return TensorHyperDual(torch::zeros_like(tensor.r),
+                            torch::zeros_like(tensor.d),
+                            torch::zeros_like(tensor.h));
+    }
+
 
     /**
      * @brief Element-wise sign of a TensorHyperDual.
@@ -1625,3 +1620,4 @@ public:
         return TensorHyperDual(result_r, result_d, result_h);
     }
 };
+}

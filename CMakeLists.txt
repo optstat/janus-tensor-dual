@@ -38,20 +38,20 @@ else()
 endif()
 
 # ExternalProject to download and extract LibTorch
-ExternalProject_Add(
-    libtorch_project
-    PREFIX ${CMAKE_BINARY_DIR}/libtorch_download
-    URL ${LIBTORCH_DOWNLOAD_URL}
-    DOWNLOAD_COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/downloads &&
-                     ${CMAKE_COMMAND} -E echo "Downloading LibTorch to ${CMAKE_BINARY_DIR}/downloads/libtorch.zip..." &&
-                     curl -L -o ${CMAKE_BINARY_DIR}/downloads/libtorch.zip ${LIBTORCH_DOWNLOAD_URL}
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND ""
-    INSTALL_COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBTORCH_INSTALL_DIR} &&
-                   ${CMAKE_COMMAND} -E echo_append "Installing LibTorch..." &&
-                   unzip -q ${CMAKE_BINARY_DIR}/downloads/libtorch.zip -d ${LIBTORCH_INSTALL_DIR}
+#ExternalProject_Add(
+#    libtorch_project
+#    PREFIX ${CMAKE_BINARY_DIR}/libtorch_download
+#    URL ${LIBTORCH_DOWNLOAD_URL}
+#    DOWNLOAD_COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/downloads &&
+#                     ${CMAKE_COMMAND} -E echo "Downloading LibTorch to ${CMAKE_BINARY_DIR}/downloads/libtorch.zip..." &&
+#                     curl -L -o ${CMAKE_BINARY_DIR}/downloads/libtorch.zip ${LIBTORCH_DOWNLOAD_URL}
+#    CONFIGURE_COMMAND ""
+#    BUILD_COMMAND ""
+#    INSTALL_COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBTORCH_INSTALL_DIR} &&
+#                   ${CMAKE_COMMAND} -E echo_append "Installing LibTorch..." &&
+#                   unzip -q ${CMAKE_BINARY_DIR}/downloads/libtorch.zip -d ${LIBTORCH_INSTALL_DIR}
 
-)
+#)
 
 
 # Define the location of the test binary
