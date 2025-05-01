@@ -65,7 +65,7 @@ add_custom_target(
     COMMAND ${TEST_BINARY_CUDA}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running tests with ./bin/dualtest and ./bin/dualtest_cuda"
-    VERBATIM
+       VERBATIM
 )
 
 
