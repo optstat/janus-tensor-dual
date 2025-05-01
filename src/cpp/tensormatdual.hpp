@@ -15,7 +15,7 @@ namespace janus {
  * part as a 3‑D tensor of shape **[N, L, D]**, removing the leading batch dimension
  * that existed in earlier drafts so that it mirrors the layout used by `TensorDual`.
  */
-class TensorMatDual {
+class TensorMatDual : public torch::CustomClassHolder {
     public:
         // ──────────────────────────────────────────────────────────────────────────────
         // Data members

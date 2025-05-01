@@ -30,7 +30,7 @@ class TensorMatHyperDual;
  * vectorized operations.  This in turn allows for parallelization of the
  * operations on the dual part of the tensor especially when using GPUs.
  */
-class TensorDual {
+class TensorDual : public torch::CustomClassHolder   {
 public:
     // Members
     torch::Tensor r;
@@ -55,7 +55,7 @@ public:
 
         // Squeeze possible batch-1 axis
         r = (r_.dim()==2) ? r_.squeeze(0) : r_;
-        d = (d_.dim()==3) ? d_.squeeze(0) : d;
+        d = (d_.dim()==3) ? d_.squeeze(0) : d_;
 
         // Shape, dtype, device consistency
         TORCH_CHECK(r.size(0) == d.size(0),
@@ -258,7 +258,6 @@ public:
 
         const auto N = xs[0].r.size(0);
         const auto D = xs[0].d.size(1);
-        const auto opts_r = xs[0].r.options();        // dtype & device to re-use
         const auto ref_dev  = xs[0].r.device();
         const auto ref_dtype= xs[0].r.dtype();
 
@@ -435,7 +434,6 @@ public:
     
         // Shape / dtype / device parity
         const int64_t D = ts[0].D_;
-        const auto opts = ts[0].r.options();
         for (size_t i=0;i<ts.size();++i) {
             TORCH_CHECK(ts[i].D_ == D,
                         "dual-axis length mismatch at tensor ", i);

@@ -1,0 +1,12 @@
+# pyproject.toml
+[build-system]
+# These packages are installed into the build-isolation sandbox
+# *before* your setup.py runs.
+requires = [
+    "setuptools>=40.8",
+    "wheel",
+    "torch==2.5.1+cu121 ; sys_platform=='linux' and platform_machine=='x86_64'",
+]
+[tool.pip.options]
+extra-index-url = ["https://download.pytorch.org/whl/cu121"]
+build-backend = "setuptools.build_meta"

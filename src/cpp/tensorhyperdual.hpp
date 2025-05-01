@@ -17,7 +17,7 @@ namespace janus {
  *
  *  The class follows PyTorch’s memory‑management semantics and allows seamless CPU/GPU moves.
  */
-class TensorHyperDual {
+class TensorHyperDual : public torch::CustomClassHolder {
     public:
         /*──────────────────────────── Data members ─────────────────────────────*/
         torch::Tensor r; ///< primal values

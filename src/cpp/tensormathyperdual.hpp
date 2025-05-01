@@ -5,7 +5,7 @@
 #include <utility>
 #include <algorithm>
 namespace janus {
-class TensorMatHyperDual {
+class TensorMatHyperDual : public torch::CustomClassHolder {
     public:
         // ── data ────────────────────────────────────────────────
         torch::Tensor r;   ///< real       [N, L]
