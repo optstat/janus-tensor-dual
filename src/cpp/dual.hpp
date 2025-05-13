@@ -229,12 +229,6 @@ inline TensorDual operator +(const double& c,
     return td + c;
 }
 
-[[nodiscard]]
-inline TensorDual operator *(const double& c,
-                             const TensorDual& td)
-{
-    return td*c;
-}
 
 
 // ─────────────────────────────────────────────────────────────
