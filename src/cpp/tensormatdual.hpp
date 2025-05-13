@@ -877,7 +877,7 @@ class TensorMatDual : public torch::CustomClassHolder {
             if (eq.find('z') != std::string::npos)
                 throw std::invalid_argument("einsum spec must not already contain the reserved axis 'z'.");
 
-            if (b.device() != A.r.device() || b.dtype() != A.r.dtype())
+            if (b.r.device() != A.r.device() || b.r.dtype() != A.r.dtype())
                 throw std::invalid_argument("dtype / device mismatch between operands.");
 
             // real contraction
