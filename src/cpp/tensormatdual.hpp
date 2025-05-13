@@ -874,6 +874,12 @@ class TensorMatDual : public torch::CustomClassHolder {
                                  const TensorMatDual &A,
                                  const TensorDual &b)
         {
+            if (eq.find('z') != std::string::npos)
+                throw std::invalid_argument("einsum spec must not already contain the reserved axis 'z'.");
+
+            if (b.device() != A.r.device() || b.dtype() != A.r.dtype())
+                throw std::invalid_argument("dtype / device mismatch between operands.");
+
             // real contraction
             torch::Tensor r_out = torch::einsum(eq, {A.r, b.r});
     
@@ -906,6 +912,12 @@ class TensorMatDual : public torch::CustomClassHolder {
                                  const TensorMatDual &A,
                                  const torch::Tensor &b)
         {
+            if (eq.find('z') != std::string::npos)
+                throw std::invalid_argument("einsum spec must not already contain the reserved axis 'z'.");
+
+            if (b.device() != A.r.device() || b.dtype() != A.r.dtype())
+                throw std::invalid_argument("dtype / device mismatch between operands.");
+
             // real contraction
             torch::Tensor r_out = torch::einsum(eq, {A.r, b});
     
@@ -936,6 +948,12 @@ class TensorMatDual : public torch::CustomClassHolder {
                                  const TensorMatDual &A
                                  )
         {
+            if (eq.find('z') != std::string::npos)
+                throw std::invalid_argument("einsum spec must not already contain the reserved axis 'z'.");
+
+            if (b.device() != A.r.device() || b.dtype() != A.r.dtype())
+                throw std::invalid_argument("dtype / device mismatch between operands.");
+
             // real contraction
             torch::Tensor r_out = torch::einsum(eq, {b, A.r});
     
@@ -994,36 +1012,6 @@ class TensorMatDual : public torch::CustomClassHolder {
             return TensorDual(std::move(r_out), std::move(d1 + d2));
         }
     
-        // ─────────────────────────────────────────────────────────────
-        // einsum( Tensor , TensorMatDual )  →  TensorMatDual
-        // Two-operand version; the dual lives only on the second argument.
-        static TensorMatDual einsum(const std::string &eq,
-                                    const torch::Tensor &A,
-                                    const TensorMatDual &B)
-        {
-            // basic checks
-            if (!A.defined() || !B.r.defined() || !B.d.defined())
-                throw std::invalid_argument("einsum: undefined tensors.");
-    
-            auto comma = eq.find(',');
-            auto arrow = eq.find("->");
-            if (comma == std::string::npos || arrow == std::string::npos)
-                throw std::invalid_argument("einsum string must contain ',' and '->'.");
-    
-            // split equation  "subA,subB->subO"
-            std::string subA = eq.substr(0, comma);
-            std::string subB = eq.substr(comma + 1, arrow - comma - 1);
-            std::string subO = eq.substr(arrow + 2);
-    
-            // ── real contraction ────────────────────────────────────
-            torch::Tensor r_out = torch::einsum(eq, {A, B.r});
-    
-            // ── dual contraction (only B has sensitivities) ────────
-            std::string eq_dual = subA + "," + subB + "z->" + subO + "z";
-            torch::Tensor d_out = torch::einsum(eq_dual, {A, B.d});
-    
-            return TensorMatDual(std::move(r_out), std::move(d_out));
-        }
     
         // ─────────────────────────────────────────────────────────────
         // einsum( TensorMatDual , TensorMatDual )  →  TensorMatDual
