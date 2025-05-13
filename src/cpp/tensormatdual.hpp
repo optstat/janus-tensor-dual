@@ -7,6 +7,7 @@
 #include <sstream>  // For std::ostringstream
 #include <iomanip>   // for std::setprecision
 #include <stdexcept>
+#include "tensordual.hpp"
 namespace janus {
 /**
  * @brief The TensorMatDual class tracks first‑order sensitivities of a matrix.
@@ -896,37 +897,66 @@ class TensorMatDual : public torch::CustomClassHolder {
     
             return TensorDual(std::move(r_out), std::move(d1 + d2));
         }
-    
+
+
         // ─────────────────────────────────────────────────────────────
-        // einsum( TensorMatDual , Tensor )  →  TensorMatDual
-        // • Two-argument einsum only.
-        // • ‘z’ marks the dual axis.
-        //
-        static TensorMatDual einsum(const std::string &eq,
-                                    const TensorMatDual &A,
-                                    const torch::Tensor &B)
+        // Limited-arity einsum:  (TensorMatDual , TensorDual) → TensorDual
+        // Supports two operands only; ‘z’ is the reserved dual axis label.
+        static TensorDual einsum(const std::string &eq,
+                                 const TensorMatDual &A,
+                                 const torch::Tensor &b)
         {
-            // sanity-check the equation
+            // real contraction
+            torch::Tensor r_out = torch::einsum(eq, {A.r, b});
+    
+            // split equation  "subA,subB->subOut"
             auto comma = eq.find(',');
             auto arrow = eq.find("->");
             if (comma == std::string::npos || arrow == std::string::npos)
                 throw std::invalid_argument("einsum string must contain ',' and '->'.");
     
-            // ── real contraction ────────────────────────────────────
-            torch::Tensor r_out = torch::einsum(eq, {A.r, B});
-    
-            // ── build derivative equation  subA + 'z', subB  -> subO + 'z' ──
             std::string subA = eq.substr(0, comma);
             std::string subB = eq.substr(comma + 1, arrow - comma - 1);
             std::string subO = eq.substr(arrow + 2);
     
-            std::string eq_d = subA + "z," + subB + "->" + subO + "z";
+            // derivative wrt A :  A.d carries extra 'z'
+            std::string eq_dA = subA + "z," + subB + "->" + subO + "z";
+            torch::Tensor d1 = torch::einsum(eq_dA, {A.d, b});
     
-            // ── dual contraction ────────────────────────────────────
-            torch::Tensor d_out = torch::einsum(eq_d, {A.d, B});
     
-            return TensorMatDual(std::move(r_out), std::move(d_out));
+            return TensorDual(std::move(r_out), std::move(d1));
         }
+
+
+        // ─────────────────────────────────────────────────────────────
+        // Limited-arity einsum:  (TensorMatDual , TensorDual) → TensorDual
+        // Supports two operands only; ‘z’ is the reserved dual axis label.
+        static TensorDual einsum(const std::string &eq,
+                                 const torch::Tensor &b,
+                                 const TensorMatDual &A
+                                 )
+        {
+            // real contraction
+            torch::Tensor r_out = torch::einsum(eq, {b, A.r});
+    
+            // split equation  "subA,subB->subOut"
+            auto comma = eq.find(',');
+            auto arrow = eq.find("->");
+            if (comma == std::string::npos || arrow == std::string::npos)
+                throw std::invalid_argument("einsum string must contain ',' and '->'.");
+    
+            std::string subB = eq.substr(0, comma);
+            std::string subA = eq.substr(comma + 1, arrow - comma - 1);
+            std::string subO = eq.substr(arrow + 2);
+    
+            // derivative wrt A :  A.d carries extra 'z'
+            std::string eq_dA = subB+","+subA + "z->" + subO + "z";
+            torch::Tensor d1 = torch::einsum(eq_dA, {b, A.d});
+    
+    
+            return TensorDual(std::move(r_out), std::move(d1));
+        }
+
     
         // ─────────────────────────────────────────────────────────────
         // einsum( TensorDual , TensorMatDual )  →  TensorDual

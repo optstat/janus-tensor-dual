@@ -2,14 +2,9 @@
 #include <torch/extension.h>
 #include "tensordual.hpp"
 #include <pybind11/pybind11.h>
-
+#include "bindings_fwd.hpp" // forward declarations for the bindings
 using janus::TensorDual;
-using TDPtr = c10::intrusive_ptr<TensorDual>;
-void add_tensor_dual_bindings(pybind11::module_&);       // already there
-void add_tensor_hyperdual_bindings(pybind11::module_&);  // your big class_
-void add_tensor_hyperdual_alias(pybind11::module_&);     
-void add_tensor_matdual_bindings(py::module_&);   
-void add_tensor_mathyperdual_bindings(py::module_&); // your big class_
+using TDPtr = c10::intrusive_ptr<janus::TensorDual>;
 TORCH_LIBRARY(janus, m)
 {
     m.class_<TensorDual>("TensorDual")
@@ -75,12 +70,17 @@ TORCH_LIBRARY(janus, m)
                     });
 }
 
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
+namespace janus_bind
 {
-    add_tensor_dual_bindings(m);
-    add_tensor_hyperdual_bindings(m);   // registers the class
-    add_tensor_hyperdual_alias(m);      // gives janus.TensorHyperDual alias
-    add_tensor_matdual_bindings(m);
-    add_tensor_mathyperdual_bindings(m); // registers the class
-}
+    void add_tensor_dual_bindings(pybind11::module_& m)
+    {
+    }
+    void add_tensor_dual_alias(pybind11::module_& m)
+    {
+        namespace py = pybind11;
+        py::object torch_classes =
+            py::module_::import("torch").attr("classes");
+        m.attr("TensorDual") =
+            torch_classes.attr("janus").attr("TensorDual");
+    }
+} // namespace janus_bind

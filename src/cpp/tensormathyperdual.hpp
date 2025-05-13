@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <utility>
 #include <algorithm>
+#include "tensordual.hpp"
+#include "tensorhyperdual.hpp" // for TensorHyperDual
 namespace janus {
 class TensorMatHyperDual : public torch::CustomClassHolder {
     public:
@@ -515,7 +517,7 @@ class TensorMatHyperDual : public torch::CustomClassHolder {
                 throw std::invalid_argument("cat(): t2 is undefined.");
     
             const auto N = t1.r.size(0);
-            const auto L = t1.r.size(1);
+            //const auto L = t1.r.size(1);
             const auto D = t1.d.size(2);
     
             torch::Tensor t2_mat;

@@ -1087,4 +1087,35 @@ inline TensorMatDual ger(const TensorDual& x,
     return TensorMatDual(std::move(r), std::move(d));
 }
 
+// mat-mul  (dual × dual) ➜ dual matrix
+inline TensorMatDual matmul(const TensorMatDual& A,
+                            const TensorMatDual& B)
+{
+    return TensorMatDual::einsum("ik,kj->ij", A, B);
+}
+
+// mat-vec  (dual × plain) ➜ dual vector
+inline TensorDual matmul(const TensorMatDual& A,
+                         const torch::Tensor& x)
+{
+    return TensorMatDual::einsum("ij,j->i", A, x);
+}
+
+// vec-mat  (plain × dual) ➜ dual vector
+inline TensorDual matmul(const torch::Tensor& v,
+                         const TensorMatDual& B)
+{
+    return TensorMatDual::einsum("i,ij->j", v, B);
+}
+
+inline TensorMatDual transpose(const TensorMatDual& A)
+{
+    return TensorMatDual(
+        A.r.transpose(0,1),          // [L,N]
+        A.d.permute({1,0,2})         // [L,N,D]
+    );
+}
+// sweetener so you can write  A.T()
+inline TensorMatDual T(const TensorMatDual& A){ return transpose(A); }
+
 }

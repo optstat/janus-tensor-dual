@@ -2,13 +2,13 @@
 #include <torch/extension.h>
 #include "tensordual.hpp"         // needs TensorDual for the promotion-ctor
 #include "tensorhyperdual.hpp"    // the header you pasted
-
+#include "bindings_fwd.hpp"    // forward declarations for the bindings
 namespace py   = pybind11;
 using   TDHPtr = c10::intrusive_ptr<janus::TensorHyperDual>;
 using   TDPtr  = c10::intrusive_ptr<janus::TensorDual>;
 
 /*──────────────────────── 1.  Torch custom-class registry ────────────────*/
-TORCH_LIBRARY(janus, m)
+TORCH_LIBRARY_FRAGMENT(janus, m)
 {
     // Register as torch.classes.janus.TensorHyperDual
     m.class_<janus::TensorHyperDual>("TensorHyperDual")
@@ -71,7 +71,12 @@ TORCH_LIBRARY(janus, m)
                 std::ostringstream ss; ss << *self; return ss.str();
             });
 }
-
+namespace janus_bind
+{
+    // Register the TensorHyperDual class in the janus namespace
+    void add_tensor_hyperdual_bindings(pybind11::module_& m){
+        //For future python bindings
+    }
 void add_tensor_hyperdual_alias(pybind11::module_& m)
 {
     namespace py = pybind11;
@@ -79,4 +84,5 @@ void add_tensor_hyperdual_alias(pybind11::module_& m)
         py::module_::import("torch").attr("classes");
     m.attr("TensorHyperDual") =
         torch_classes.attr("janus").attr("TensorHyperDual");
+}
 }
