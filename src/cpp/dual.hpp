@@ -222,6 +222,12 @@ inline TensorDual operator*(const torch::Tensor& tensor,
     return TensorDual(std::move(real_out), std::move(dual_out));
 }
 
+[[nodiscard]]
+inline TensorDual operator +(const double& c,
+                             const TensorDual& td)
+{
+    return td + c;
+}
 
 
 
