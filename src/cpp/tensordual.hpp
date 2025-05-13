@@ -579,19 +579,6 @@ public:
     }
 
 
-    /// Element-wise addition of two TensorDuals
-    [[nodiscard]] inline TensorDual operator+(const TensorDual& other) const noexcept
-    {
-        TORCH_CHECK(D_ == other.D_,
-                    "TensorDual::operator+: dual-axis length mismatch (",
-                    D_, " vs ", other.D_, ')');
-        TORCH_CHECK(r.sizes() == other.r.sizes(),
-                    "TensorDual::operator+: state-axis length mismatch (",
-                    r.sizes(), " vs ", other.r.sizes(), ')');
-
-        return TensorDual(r + other.r,   // (N)
-                        d + other.d);  // (N,D)
-    }
 
     /// Add a plain tensor to the real part; dual part is untouched.
     ///
