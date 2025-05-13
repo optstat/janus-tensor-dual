@@ -73,6 +73,11 @@ class TensorMatDual : public torch::CustomClassHolder {
             this->device_ = other.device_;
         }
     
+        // perfect-forwarding ctor: works for lvalue *and* rvalue tensors
+        template<typename TR, typename TD>
+        TensorMatDual(TR&& real, TD&& dual)
+            : r(std::forward<TR>(real)), d(std::forward<TD>(dual)) {}
+
         
         // ──────────────────────────────────────────────────────────────────────────────
         // Assignment operators (rule‑of‑five – defaulted move semantics are fine)

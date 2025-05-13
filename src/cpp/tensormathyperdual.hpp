@@ -36,7 +36,12 @@ class TensorMatHyperDual : public torch::CustomClassHolder {
                 r.size(1) != d.size(1) || r.size(1) != h.size(1))
                 throw std::invalid_argument("First two dims (N,L) must match across r, d, h.");
         }
-    
+
+        // perfect-forwarding ctor: works for lvalue *and* rvalue tensors
+        template<typename TR, typename TD, typename TH>
+        TensorMatHyperDual(TR&& real, TD&& dual, TH&& hyper)
+            : r(std::forward<TR>(real)), d(std::forward<TD>(dual)), h(std::forward<TH>(hyper)) {}
+
         // ── convenience accessors ───────────────────────────────
         inline int64_t rows() const { return r.size(0); }      // N
         inline int64_t cols() const { return r.size(1); }      // L

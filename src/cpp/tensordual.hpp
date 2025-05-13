@@ -70,6 +70,11 @@ public:
                     "dual axis length D must be positive");
     }
 
+    // perfect-forwarding ctor: works for lvalue *and* rvalue tensors
+    template<typename TR, typename TD>
+    TensorDual(TR&& real, TD&& dual)
+            : r(std::forward<TR>(real)), d(std::forward<TD>(dual)) {}
+    
 
     // move ctor/assign  – shallow moves are fine
     TensorDual(TensorDual&&) noexcept            = default;

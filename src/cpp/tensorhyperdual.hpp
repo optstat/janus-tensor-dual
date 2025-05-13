@@ -56,6 +56,12 @@ class TensorHyperDual : public torch::CustomClassHolder {
             dtype_  = torch::typeMetaToScalarType(r.dtype());
             device_ = r.device();
         }
+        // perfect-forwarding ctor: works for lvalue *and* rvalue tensors
+        template<typename TR, typename TD, typename THD>
+        TensorHyperDual(TR&& real, TD&& dual, THD&& hyper)
+                            : r(std::forward<TR>(real)),
+                              d(std::forward<TD>(dual)),
+                              h(std::forward<THD>(hyper)){}
     
         /*──────────────────────────── Factory helpers ──────────────────────────*/
         static TensorHyperDual zeros(int N, int D,
@@ -86,6 +92,7 @@ class TensorHyperDual : public torch::CustomClassHolder {
             validateTensors(r, d, h);               // sanity check
         }    
 
+        
         /*──────────────────────────── Device / dtype moves ─────────────────────*/
         /** Move *in‑place* to a new device. */
         void to(torch::Device new_device) {
